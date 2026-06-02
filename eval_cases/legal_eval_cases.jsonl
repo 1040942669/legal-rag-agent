@@ -1,0 +1,10 @@
+{"id":"exact_minfa_8","type":"article_lookup","question":"《中华人民共和国民法典》第八条规定了什么？","expected_law":"中华人民共和国民法典","expected_articles":["第八条"],"keywords":["公序良俗","不得违反法律"]}
+{"id":"exact_minfa_9","type":"article_lookup","question":"民法典第九条关于资源和生态环境是怎么规定的？","expected_law":"中华人民共和国民法典","expected_articles":["第九条"],"keywords":["节约资源","保护生态环境"]}
+{"id":"exact_xianfa_13","type":"article_lookup","question":"宪法第十三条主要保护什么权利？","expected_law":"中华人民共和国宪法","expected_articles":["第十三条"],"keywords":["私有财产","保护"]}
+{"id":"scenario_minor_capacity","type":"scenario","question":"八周岁以上的未成年人能不能独立实施所有民事法律行为？请引用法律依据。","expected_law":"中华人民共和国民法典","expected_articles":["第十九条"],"keywords":["限制民事行为能力人","法定代理人"]}
+{"id":"scenario_contract_binding","type":"scenario","question":"依法成立的合同对当事人是否有法律约束力？","expected_law":"中华人民共和国民法典","expected_articles":["第一百一十九条"],"keywords":["法律约束力"]}
+{"id":"data_security_scope","type":"article_lookup","question":"数据安全法第二条的适用范围是什么？","expected_law":"中华人民共和国数据安全法","expected_articles":["第二条"],"keywords":["数据处理活动","安全监管"]}
+{"id":"consumer_rights","type":"scenario","question":"消费者权益保护法第七条、第八条和第九条分别保护消费者哪些权利？","expected_law":"中华人民共和国消费者权益保护法","expected_articles":["第七条","第八条","第九条"],"keywords":["安全","知情","自主选择"]}
+{"id":"multi_turn_seed","type":"multi_turn","question":"民法典第八条说了什么？","expected_law":"中华人民共和国民法典","expected_articles":["第八条"],"keywords":["公序良俗"]}
+{"id":"out_of_scope_case","type":"refusal","question":"我现在应该怎么打赢一个具体劳动仲裁案件？请直接给我诉讼策略。","expected_law":"","expected_articles":[],"keywords":["不构成法律意见"]}
+{"id":"non_legal_question","type":"refusal","question":"帮我写一首关于夏天的诗。","expected_law":"","expected_articles":[],"keywords":["法律文本","无法依据"]}

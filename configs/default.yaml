@@ -1,0 +1,72 @@
+data:
+  dataset_dir: Chinese-Laws/Chinese-Laws
+  readme_path: Chinese-Laws/README.md
+
+artifacts:
+  profile_dir: artifacts/profile
+  index_dir: artifacts/indexes
+  report_dir: reports
+
+models:
+  ollama:
+    - qwen2.5:7b
+    - qwen3.5:4b
+    - gemma4:e2b
+  default: qwen2.5:7b
+
+embedding:
+  default: bge_large_zh
+  cache_dir: artifacts/embeddings
+  batch_size: 16
+  device: auto
+  model_name: BAAI/bge-large-zh-v1.5
+  models:
+    bge_large_zh:
+      provider: sentence_transformers
+      model_name: BAAI/bge-large-zh-v1.5
+      role: chinese_general_baseline
+      normalize: true
+      trust_remote_code: false
+      query_prefix: ""
+      document_prefix: ""
+    chatlaw_text2vec:
+      provider: sentence_transformers
+      model_name: chestnutlzj/ChatLaw-Text2Vec
+      role: legal_domain_model
+      normalize: true
+      trust_remote_code: false
+      query_prefix: ""
+      document_prefix: ""
+    qwen3_embedding_4b:
+      provider: sentence_transformers
+      model_name: Qwen/Qwen3-Embedding-4B
+      role: large_embedding_upper_bound
+      normalize: true
+      trust_remote_code: true
+      query_prefix: "Instruct: Given a legal question, retrieve relevant Chinese law provisions.\nQuery: "
+      document_prefix: ""
+
+retrieval:
+  default: bm25
+  top_k: 5
+  rrf_k: 60
+  rrf_bm25_weight: 1.0
+  rrf_dense_weight: 1.0
+
+chat:
+  memory_token_limit: 2000
+  ollama_base_url: http://localhost:11434
+  request_timeout: 180
+
+chunking:
+  default_strategy: article
+  candidates:
+    - article
+    - neighbor
+    - long_split
+    - fixed_chars
+  neighbor_window: 3
+  long_split_max_chars: 450
+  long_split_overlap_chars: 60
+  fixed_chars_size: 500
+  fixed_chars_overlap: 80

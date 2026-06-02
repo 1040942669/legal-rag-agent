@@ -1,0 +1,121 @@
+# 现行中国法律聊天助手 RAG
+
+这是一个基于 LlamaIndex 设计的中国现行法律文本聊天助手项目。项目重点不是先拍脑袋决定 chunk 大小，而是先观察数据结构，再把 chunk 策略作为实验变量进行比较。
+
+数据来源为 `Chinese-Laws`，README 标注数据截止到 2025-01-01，文本格式为一行一条法律条文。
+
+## 功能
+
+- `profile-data`: 读取 README 和全量法律文本，生成数据画像报告。
+- `build-index`: 在已有数据画像的前提下，按指定 chunk 策略生成索引材料。
+- `chat`: 启动命令行法律聊天助手，支持短期记忆、追问改写、引用来源。
+- `evaluate`: 运行固定测试集，输出 retrieval、answer、latency 等指标。
+
+## 模型
+
+默认使用本地 Ollama 模型:
+
+- `qwen2.5:7b`
+- `qwen3.5:4b`
+- `gemma4:e2b`
+
+如果未安装 LlamaIndex，`profile-data`、`build-index`、BM25 检索和 retrieval-only 评估仍可运行。安装依赖后，dense、hybrid 和 LlamaIndex adapter 可用于更完整实验。
+
+## 快速开始
+
+```powershell
+uv sync
+```
+
+先生成数据画像:
+
+```powershell
+python -m legal_rag.cli profile-data
+```
+
+再构建条文级 baseline 索引:
+
+```powershell
+python -m legal_rag.cli build-index --chunk-strategy article
+```
+
+运行 retrieval-only 评估:
+
+```powershell
+python -m legal_rag.cli evaluate --chunk-strategy article --retriever bm25
+```
+
+构建 embedding cache:
+
+```powershell
+python -m legal_rag.cli build-embeddings --chunk-strategy article --embedding bge_large_zh
+python -m legal_rag.cli build-embeddings --chunk-strategy article --embedding chatlaw_text2vec
+python -m legal_rag.cli build-embeddings --chunk-strategy article --embedding qwen3_embedding_4b
+```
+
+运行 RRF 融合检索:
+
+```powershell
+python -m legal_rag.cli evaluate --chunk-strategy article --retriever rrf --embedding bge_large_zh --prefix eval_article_rrf_bge_large
+```
+
+启动聊天:
+
+```powershell
+python -m legal_rag.cli chat --chunk-strategy article --retriever bm25 --model qwen2.5:7b
+```
+
+如果只想看检索结果，不调用 Ollama:
+
+```powershell
+python -m legal_rag.cli chat --chunk-strategy article --retriever bm25 --no-generate
+```
+
+## 实验建议
+
+1. 先看 `reports/data_profile.md`，确认条文长度、解析率和异常样例。
+2. 分别构建候选 chunk:
+
+```powershell
+python -m legal_rag.cli build-index --chunk-strategy article
+python -m legal_rag.cli build-index --chunk-strategy neighbor
+python -m legal_rag.cli build-index --chunk-strategy long_split
+python -m legal_rag.cli build-index --chunk-strategy fixed_chars
+```
+
+3. 跑检索实验:
+
+```powershell
+python -m legal_rag.cli evaluate --chunk-strategy article --retriever bm25 --prefix eval_article_bm25
+python -m legal_rag.cli evaluate --chunk-strategy neighbor --retriever bm25 --prefix eval_neighbor_bm25
+```
+
+4. 依赖装好后跑 dense 和 hybrid:
+4. 依赖装好后跑 dense 和 RRF:
+
+```powershell
+python -m legal_rag.cli build-embeddings --chunk-strategy article --embedding bge_large_zh
+python -m legal_rag.cli evaluate --chunk-strategy article --retriever dense --embedding bge_large_zh --prefix eval_article_dense_bge_large
+python -m legal_rag.cli evaluate --chunk-strategy article --retriever rrf --embedding bge_large_zh --prefix eval_article_rrf_bge_large
+```
+
+5. Ollama 服务正常后比较三个模型:
+
+```powershell
+python -m legal_rag.cli evaluate --chunk-strategy article --retriever bm25 --generate --models all --prefix eval_article_bm25_models
+```
+
+## 设计取舍
+
+- 不删除原始数据，所有筛选和标准化都发生在读取阶段。
+- 条文级 chunk 是 baseline，不是无条件最终方案。
+- 固定大小 chunk 只作为课程要求和对照实验，避免覆盖数据本身的条文边界。
+- 具体案件策略和个性化法律意见默认拒答。
+- 回答必须包含来源编号，并带有免责声明。
+
+## 输出位置
+
+- 数据画像 JSON: `artifacts/profile/data_profile.json`
+- 数据画像报告: `reports/data_profile.md`
+- 索引 chunk: `artifacts/indexes/<strategy>/chunks.jsonl`
+- 评估 CSV 和报告: `reports/`
