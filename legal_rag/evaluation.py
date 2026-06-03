@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import json
 import time
+from collections import defaultdict
 from pathlib import Path
 
 from .chat import LegalChatAssistant
@@ -67,6 +68,7 @@ def evaluate(
                 hit_at_3=hit_at_k(results, case, 3),
                 hit_at_5=hit_at_k(results, case, 5),
                 mrr=mean_reciprocal_rank(results, case),
+                target_coverage=target_coverage(results, case, top_k),
                 keyword_coverage=keyword_coverage(answer, case.keywords),
                 citation_hit=citation_hit(results, case),
                 latency_ms=latency_ms,
@@ -95,6 +97,19 @@ def citation_hit(results: list[SearchResult], case: EvalCase) -> int:
     if not case.expected_law and not case.expected_articles:
         return 0
     return int(any(result_matches(result, case) for result in results))
+
+
+def target_coverage(results: list[SearchResult], case: EvalCase, k: int = 5) -> float:
+    if not case.expected_articles:
+        return 0.0
+    found = set()
+    for result in results[:k]:
+        if case.expected_law and case.expected_law not in result.chunk.law_names:
+            continue
+        for article in case.expected_articles:
+            if article in result.chunk.article_numbers:
+                found.add(article)
+    return round(len(found) / len(case.expected_articles), 4)
 
 
 def result_matches(result: SearchResult, case: EvalCase) -> bool:
@@ -136,6 +151,7 @@ def render_eval_report(records: list[EvalRecord]) -> str:
     avg_hit3 = sum(record.hit_at_3 for record in records) / len(records)
     avg_hit5 = sum(record.hit_at_5 for record in records) / len(records)
     avg_mrr = sum(record.mrr for record in records) / len(records)
+    avg_target_coverage = sum(record.target_coverage for record in records) / len(records)
     avg_latency = sum(record.latency_ms for record in records) / len(records)
     avg_keyword = sum(record.keyword_coverage for record in records) / len(records)
     first = records[0]
@@ -153,11 +169,27 @@ def render_eval_report(records: list[EvalRecord]) -> str:
         f"- Hit@3: {avg_hit3:.3f}",
         f"- Hit@5: {avg_hit5:.3f}",
         f"- MRR: {avg_mrr:.3f}",
+        f"- 目标条文覆盖率: {avg_target_coverage:.3f}",
         f"- 关键词覆盖率: {avg_keyword:.3f}",
         f"- 平均延迟: {avg_latency:.1f} ms",
         "",
-        "## 失败样例",
+        "## 分组指标",
     ]
+    for case_type, group in grouped_records(records).items():
+        group_hit3 = sum(record.hit_at_3 for record in group) / len(group)
+        group_hit5 = sum(record.hit_at_5 for record in group) / len(group)
+        group_mrr = sum(record.mrr for record in group) / len(group)
+        group_target = sum(record.target_coverage for record in group) / len(group)
+        group_latency = sum(record.latency_ms for record in group) / len(group)
+        lines.append(
+            f"- `{case_type}` n={len(group)} Hit@3={group_hit3:.3f} "
+            f"Hit@5={group_hit5:.3f} MRR={group_mrr:.3f} "
+            f"TargetCoverage={group_target:.3f} latency={group_latency:.1f}ms"
+        )
+    lines.extend([
+        "",
+        "## 失败样例",
+    ])
     failures = [
         record
         for record in records
@@ -174,3 +206,10 @@ def render_eval_report(records: list[EvalRecord]) -> str:
             lines.append(f"- `{record.case_id}` {record.error}")
     lines.append("")
     return "\n".join(lines)
+
+
+def grouped_records(records: list[EvalRecord]) -> dict[str, list[EvalRecord]]:
+    groups: dict[str, list[EvalRecord]] = defaultdict(list)
+    for record in records:
+        groups[record.case_type].append(record)
+    return dict(sorted(groups.items()))

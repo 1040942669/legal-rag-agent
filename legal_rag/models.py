@@ -56,6 +56,7 @@ class EvalRecord:
     hit_at_3: int
     hit_at_5: int
     mrr: float
+    target_coverage: float
     keyword_coverage: float
     citation_hit: int
     latency_ms: int
