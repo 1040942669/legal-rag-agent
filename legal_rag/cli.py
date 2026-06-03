@@ -10,6 +10,7 @@ from .chunking import load_chunks
 from .config import load_config, resolve_path
 from .data import profile_dataset, write_profile_outputs
 from .embeddings import build_embedding_cache, embedding_cache_dir, resolve_embedding_model
+from .env import load_dotenv
 from .evaluation import evaluate, load_eval_cases, write_eval_outputs
 from .indexing import build_index, resolve_chunks_path
 from .llamaindex_backend import LlamaIndexRetriever
@@ -17,6 +18,7 @@ from .retrieval import build_retriever
 
 
 def main(argv: list[str] | None = None) -> int:
+    load_dotenv()
     parser = build_parser()
     args = parser.parse_args(argv)
     if not hasattr(args, "handler"):

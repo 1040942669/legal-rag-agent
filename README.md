@@ -27,6 +27,18 @@
 uv sync
 ```
 
+如果使用 SiliconFlow API，在项目根目录创建 `.env`:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+然后编辑 `.env`:
+
+```text
+SILICONFLOW_API_KEY=你的 SiliconFlow API Key
+```
+
 先生成数据画像:
 
 ```powershell
@@ -52,10 +64,9 @@ python -m legal_rag.cli build-embeddings --chunk-strategy article --embedding bg
 python -m legal_rag.cli build-embeddings --chunk-strategy article --embedding chatlaw_text2vec
 ```
 
-`qwen3_embedding_4b` 默认通过 SiliconFlow API 构建向量，先设置环境变量:
+`qwen3_embedding_4b` 默认通过 SiliconFlow API 构建向量，API Key 会自动从项目根目录 `.env` 读取:
 
 ```powershell
-$env:SILICONFLOW_API_KEY="你的 SiliconFlow API Key"
 python -m legal_rag.cli build-embeddings --chunk-strategy article --embedding qwen3_embedding_4b --batch-size 8
 ```
 

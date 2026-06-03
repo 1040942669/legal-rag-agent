@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .chunking import load_chunks
+from .env import load_dotenv
 from .models import Chunk
 
 
@@ -75,10 +76,11 @@ class SiliconFlowEmbeddingEncoder:
             raise RuntimeError("SiliconFlow embedding requires openai. Run `uv sync` first.") from exc
 
         api_key_env = model_config.api_key_env or "SILICONFLOW_API_KEY"
+        load_dotenv()
         api_key = os.environ.get(api_key_env)
         if not api_key:
             raise RuntimeError(
-                f"Missing SiliconFlow API key. Set environment variable `{api_key_env}` first."
+                f"Missing SiliconFlow API key. Set `{api_key_env}` in your environment or project .env file."
             )
         self.model_config = model_config
         self.client = OpenAI(

@@ -1,4 +1,7 @@
 .venv/
+.env
+.env.*
+!.env.example
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -8,6 +11,7 @@ artifacts/indexes/
 artifacts/embeddings/
 artifacts/profile/
 artifacts/test_tmp/
+artifacts/*.env
 reports/*.csv
 reports/*.json
 reports/eval_*.md

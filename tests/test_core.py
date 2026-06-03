@@ -5,6 +5,7 @@ from legal_rag.chunking import build_chunks
 from legal_rag.config import load_config
 from legal_rag.data import parse_law_file, profile_dataset
 from legal_rag.embeddings import resolve_embedding_model
+from legal_rag.env import clean_env_value
 from legal_rag.models import SearchResult
 from legal_rag.retrieval import BM25Retriever, RRFHybridRetriever
 
@@ -80,6 +81,11 @@ class CoreTest(unittest.TestCase):
         self.assertEqual(model.provider, "siliconflow")
         self.assertEqual(model.api_key_env, "SILICONFLOW_API_KEY")
         self.assertIn("Qwen3-Embedding-4B", model.model_name)
+
+    def test_clean_env_value_strips_matching_quotes(self) -> None:
+        self.assertEqual(clean_env_value('"abc"'), "abc")
+        self.assertEqual(clean_env_value("'abc'"), "abc")
+        self.assertEqual(clean_env_value("abc"), "abc")
 
 
 if __name__ == "__main__":
