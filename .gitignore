@@ -17,3 +17,4 @@ Reference-ARCHITECTURE_DECISION_LOG.md
 llm_agent_interview_reference.md
 /Chinese-Laws/.git/
 /Chinese-Laws/Chinese-Laws.zip
+*.egg-info/

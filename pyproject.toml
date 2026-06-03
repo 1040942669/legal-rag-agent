@@ -26,3 +26,7 @@ package = true
 dev = [
     "pytest>=8.0.0",
 ]
+
+[tool.setuptools.packages.find]
+include = ["legal_rag*"]
+exclude = ["configs*", "reports*", "artifacts*", "eval_cases*", "tests*"]
