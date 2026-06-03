@@ -38,11 +38,15 @@ embedding:
       query_prefix: ""
       document_prefix: ""
     qwen3_embedding_4b:
-      provider: sentence_transformers
+      provider: siliconflow
       model_name: Qwen/Qwen3-Embedding-4B
       role: large_embedding_upper_bound
       normalize: true
-      trust_remote_code: true
+      trust_remote_code: false
+      api_base_url: https://api.siliconflow.cn/v1
+      api_key_env: SILICONFLOW_API_KEY
+      dimensions:
+      max_retries: 3
       query_prefix: "Instruct: Given a legal question, retrieve relevant Chinese law provisions.\nQuery: "
       document_prefix: ""
 

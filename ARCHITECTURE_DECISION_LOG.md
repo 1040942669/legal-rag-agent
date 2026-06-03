@@ -170,3 +170,47 @@ BAAI/bge-reranker-large: 效果上限
 - reranker 增加的平均延迟；
 - 失败样例是否从“没召回”变成“召回但排序低”。
 
+## 04. Qwen3-Embedding-4B 使用 SiliconFlow API 而不是本地加载
+
+### 问题 / 触发点
+
+`Qwen3-Embedding-4B` 被选为大模型 embedding 上限组，但本地加载 4B 模型会占用较多显存/内存，和课程项目的快速实验目标冲突。
+
+### 最初想法
+
+像 BGE 和 ChatLaw 一样，用 `sentence-transformers` 在本地或租用 GPU 服务器构建向量。
+
+### 后来发现
+
+用户可使用 SiliconFlow，并且该平台支持 OpenAI-compatible embeddings API。对 14597 条法条构建向量时，API 调用能避免本地环境和显存配置问题，也更接近真实工程中的“按需调用外部模型服务”。
+
+### 为什么原方案不够
+
+本地加载 4B embedding 模型会把实验重点从“检索效果比较”转移到“环境和显存调试”。如果为了跑一个上限组而阻塞整个实验矩阵，工程收益不高。
+
+### 最终决策
+
+保留三组 embedding 的实验含义，但调整部署方式:
+
+```text
+bge_large_zh: 本地 sentence-transformers
+chatlaw_text2vec: 本地 sentence-transformers
+qwen3_embedding_4b: SiliconFlow API
+```
+
+API Key 不写入配置文件，只从环境变量 `SILICONFLOW_API_KEY` 读取。
+
+### 面试讲法
+
+```text
+我保留 Qwen3-Embedding-4B 作为大模型上限组，但没有强行本地部署。因为这个组的目的不是证明我能调显卡，而是比较大模型 embedding 在法律 RAG 检索中的边际收益。为了控制实验成本和环境风险，我用 SiliconFlow 的 OpenAI-compatible embeddings API 构建向量缓存，并把 API 结果和本地 BGE/ChatLaw 在同一套 Hit@5、MRR、延迟指标下比较。
+```
+
+### 后续验证指标
+
+- API 向量构建总耗时；
+- 每批次请求稳定性和失败重试次数；
+- 向量维度和缓存大小；
+- RRF 后 Hit@5 / MRR；
+- 与本地 BGE/ChatLaw 的延迟和质量差异；
+- API 成本是否值得。

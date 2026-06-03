@@ -8,7 +8,7 @@ from typing import Protocol
 
 from .embeddings import (
     EmbeddingModelConfig,
-    SentenceTransformerEncoder,
+    build_encoder,
     load_embedding_cache,
     validate_cache_matches_chunks,
 )
@@ -111,7 +111,7 @@ class CachedDenseRetriever:
         self.model_config = model_config
         self.cache = load_embedding_cache(cache_dir)
         validate_cache_matches_chunks(self.cache, chunks)
-        self.encoder = SentenceTransformerEncoder(model_config, device=device)
+        self.encoder = build_encoder(model_config, device=device)
 
     def retrieve(self, query: str, top_k: int = 5) -> list[SearchResult]:
         query_embedding = self.encoder.encode_query(query)

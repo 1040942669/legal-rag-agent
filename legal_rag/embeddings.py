@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -18,6 +19,10 @@ class EmbeddingModelConfig:
     role: str
     normalize: bool = True
     trust_remote_code: bool = False
+    api_base_url: str = ""
+    api_key_env: str = ""
+    dimensions: int | None = None
+    max_retries: int = 3
     query_prefix: str = ""
     document_prefix: str = ""
 
@@ -62,6 +67,51 @@ class SentenceTransformerEncoder:
         )[0]
 
 
+class SiliconFlowEmbeddingEncoder:
+    def __init__(self, model_config: EmbeddingModelConfig) -> None:
+        try:
+            from openai import OpenAI  # type: ignore
+        except ModuleNotFoundError as exc:
+            raise RuntimeError("SiliconFlow embedding requires openai. Run `uv sync` first.") from exc
+
+        api_key_env = model_config.api_key_env or "SILICONFLOW_API_KEY"
+        api_key = os.environ.get(api_key_env)
+        if not api_key:
+            raise RuntimeError(
+                f"Missing SiliconFlow API key. Set environment variable `{api_key_env}` first."
+            )
+        self.model_config = model_config
+        self.client = OpenAI(
+            api_key=api_key,
+            base_url=model_config.api_base_url or "https://api.siliconflow.cn/v1",
+            max_retries=model_config.max_retries,
+        )
+
+    def encode_documents(self, texts: list[str], *, batch_size: int) -> list[list[float]]:
+        vectors: list[list[float]] = []
+        for start in range(0, len(texts), batch_size):
+            batch = texts[start : start + batch_size]
+            response = self._create_embeddings(
+                [self.model_config.document_prefix + text for text in batch]
+            )
+            vectors.extend([item.embedding for item in response.data])
+            print(f"Embedded {min(start + len(batch), len(texts))}/{len(texts)}", flush=True)
+        return vectors
+
+    def encode_query(self, text: str) -> list[float]:
+        response = self._create_embeddings([self.model_config.query_prefix + text])
+        return list(response.data[0].embedding)
+
+    def _create_embeddings(self, texts: list[str]):
+        kwargs: dict[str, Any] = {
+            "model": self.model_config.model_name,
+            "input": texts,
+        }
+        if self.model_config.dimensions:
+            kwargs["dimensions"] = self.model_config.dimensions
+        return self.client.embeddings.create(**kwargs)
+
+
 def resolve_embedding_model(config: dict, embedding_key: str | None = None) -> EmbeddingModelConfig:
     embedding_config = config.get("embedding", {})
     key = embedding_key or embedding_config.get("default") or "bge_large_zh"
@@ -77,6 +127,10 @@ def resolve_embedding_model(config: dict, embedding_key: str | None = None) -> E
         role=item.get("role", ""),
         normalize=bool(item.get("normalize", True)),
         trust_remote_code=bool(item.get("trust_remote_code", False)),
+        api_base_url=item.get("api_base_url", ""),
+        api_key_env=item.get("api_key_env", ""),
+        dimensions=item.get("dimensions"),
+        max_retries=int(item.get("max_retries", 3)),
         query_prefix=item.get("query_prefix", ""),
         document_prefix=item.get("document_prefix", ""),
     )
@@ -91,11 +145,8 @@ def build_embedding_cache(
     batch_size: int = 16,
     device: str = "auto",
 ) -> dict[str, Any]:
-    if model_config.provider != "sentence_transformers":
-        raise ValueError(f"Unsupported embedding provider for local cache build: {model_config.provider}")
-
     chunks = load_chunks(chunks_path)
-    encoder = SentenceTransformerEncoder(model_config, device=device)
+    encoder = build_encoder(model_config, device=device)
     started = time.perf_counter()
     vectors = encoder.encode_documents([chunk.text for chunk in chunks], batch_size=batch_size)
 
@@ -117,6 +168,7 @@ def build_embedding_cache(
     metadata = {
         "embedding_key": model_config.key,
         "provider": model_config.provider,
+        "api_base_url": model_config.api_base_url,
         "model_name": model_config.model_name,
         "role": model_config.role,
         "chunk_strategy": chunk_strategy,
@@ -130,6 +182,14 @@ def build_embedding_cache(
     }
     metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
     return metadata
+
+
+def build_encoder(model_config: EmbeddingModelConfig, *, device: str = "auto"):
+    if model_config.provider == "sentence_transformers":
+        return SentenceTransformerEncoder(model_config, device=device)
+    if model_config.provider == "siliconflow":
+        return SiliconFlowEmbeddingEncoder(model_config)
+    raise ValueError(f"Unsupported embedding provider: {model_config.provider}")
 
 
 def load_embedding_cache(cache_dir: str | Path) -> EmbeddingCache:
@@ -155,4 +215,3 @@ def validate_cache_matches_chunks(cache: EmbeddingCache, chunks: list[Chunk]) ->
         raise ValueError(
             "Embedding cache does not match the loaded chunks. Rebuild embeddings for this chunk strategy."
         )
-

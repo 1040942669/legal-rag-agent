@@ -2,7 +2,9 @@ import unittest
 from pathlib import Path
 
 from legal_rag.chunking import build_chunks
+from legal_rag.config import load_config
 from legal_rag.data import parse_law_file, profile_dataset
+from legal_rag.embeddings import resolve_embedding_model
 from legal_rag.models import SearchResult
 from legal_rag.retrieval import BM25Retriever, RRFHybridRetriever
 
@@ -71,6 +73,13 @@ class CoreTest(unittest.TestCase):
 
         self.assertEqual(results[0].retriever, "rrf")
         self.assertIn(results[0].chunk, [chunks[0], chunks[1]])
+
+    def test_qwen3_embedding_uses_siliconflow_provider(self) -> None:
+        config = load_config()
+        model = resolve_embedding_model(config, "qwen3_embedding_4b")
+        self.assertEqual(model.provider, "siliconflow")
+        self.assertEqual(model.api_key_env, "SILICONFLOW_API_KEY")
+        self.assertIn("Qwen3-Embedding-4B", model.model_name)
 
 
 if __name__ == "__main__":

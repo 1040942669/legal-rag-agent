@@ -50,7 +50,13 @@ python -m legal_rag.cli evaluate --chunk-strategy article --retriever bm25
 ```powershell
 python -m legal_rag.cli build-embeddings --chunk-strategy article --embedding bge_large_zh
 python -m legal_rag.cli build-embeddings --chunk-strategy article --embedding chatlaw_text2vec
-python -m legal_rag.cli build-embeddings --chunk-strategy article --embedding qwen3_embedding_4b
+```
+
+`qwen3_embedding_4b` 默认通过 SiliconFlow API 构建向量，先设置环境变量:
+
+```powershell
+$env:SILICONFLOW_API_KEY="你的 SiliconFlow API Key"
+python -m legal_rag.cli build-embeddings --chunk-strategy article --embedding qwen3_embedding_4b --batch-size 8
 ```
 
 运行 RRF 融合检索:
@@ -90,11 +96,11 @@ python -m legal_rag.cli evaluate --chunk-strategy article --retriever bm25 --pre
 python -m legal_rag.cli evaluate --chunk-strategy neighbor --retriever bm25 --prefix eval_neighbor_bm25
 ```
 
-4. 依赖装好后跑 dense 和 hybrid:
 4. 依赖装好后跑 dense 和 RRF:
 
 ```powershell
 python -m legal_rag.cli build-embeddings --chunk-strategy article --embedding bge_large_zh
+python -m legal_rag.cli build-embeddings --chunk-strategy article --embedding chatlaw_text2vec
 python -m legal_rag.cli evaluate --chunk-strategy article --retriever dense --embedding bge_large_zh --prefix eval_article_dense_bge_large
 python -m legal_rag.cli evaluate --chunk-strategy article --retriever rrf --embedding bge_large_zh --prefix eval_article_rrf_bge_large
 ```
