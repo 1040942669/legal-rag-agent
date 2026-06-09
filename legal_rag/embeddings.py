@@ -9,6 +9,7 @@ from typing import Any
 
 from .chunking import load_chunks
 from .env import load_dotenv
+from .manifest import new_run_id, summarize_path, write_artifact_manifest
 from .models import Chunk
 
 
@@ -146,6 +147,7 @@ def build_embedding_cache(
     model_config: EmbeddingModelConfig,
     batch_size: int = 16,
     device: str = "auto",
+    run_id: str | None = None,
 ) -> dict[str, Any]:
     chunks = load_chunks(chunks_path)
     encoder = build_encoder(model_config, device=device)
@@ -163,11 +165,14 @@ def build_embedding_cache(
     vectors_path = cache_dir / "vectors.npy"
     chunk_ids_path = cache_dir / "chunk_ids.json"
     metadata_path = cache_dir / "metadata.json"
+    manifest_path = cache_dir / "manifest.json"
+    artifact_run_id = run_id or new_run_id(f"embeddings_{chunk_strategy}_{model_config.key}")
 
     np.save(vectors_path, matrix)
     chunk_ids = [chunk.chunk_id for chunk in chunks]
     chunk_ids_path.write_text(json.dumps(chunk_ids, ensure_ascii=False, indent=2), encoding="utf-8")
     metadata = {
+        "run_id": artifact_run_id,
         "embedding_key": model_config.key,
         "provider": model_config.provider,
         "api_base_url": model_config.api_base_url,
@@ -180,9 +185,36 @@ def build_embedding_cache(
         "chunk_ids_path": str(chunk_ids_path),
         "chunks_path": str(chunks_path),
         "normalize": model_config.normalize,
+        "manifest_path": str(manifest_path),
         "build_seconds": round(time.perf_counter() - started, 3),
     }
     metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+    manifest = write_artifact_manifest(
+        manifest_path,
+        artifact_type="embedding_cache",
+        run_id=artifact_run_id,
+        inputs={
+            "chunks_path": summarize_path(chunks_path),
+        },
+        config={
+            "embedding_key": model_config.key,
+            "provider": model_config.provider,
+            "model_name": model_config.model_name,
+            "normalize": model_config.normalize,
+            "batch_size": batch_size,
+            "device": device,
+        },
+        outputs={
+            "vectors_path": str(vectors_path.resolve()),
+            "chunk_ids_path": str(chunk_ids_path.resolve()),
+            "metadata_path": str(metadata_path.resolve()),
+        },
+        metrics={
+            "chunk_count": len(chunks),
+            "dimension": metadata["dimension"],
+            "build_seconds": metadata["build_seconds"],
+        },
+    )
     return metadata
 
 

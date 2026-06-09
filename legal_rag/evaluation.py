@@ -4,7 +4,9 @@ import csv
 import json
 import time
 from collections import defaultdict
+from dataclasses import fields
 from pathlib import Path
+from typing import Any
 
 from .chat import LegalChatAssistant
 from .models import EvalCase, EvalRecord, SearchResult
@@ -129,23 +131,29 @@ def keyword_coverage(answer: str, keywords: list[str]) -> float:
     return round(matched / len(keywords), 4)
 
 
-def write_eval_outputs(records: list[EvalRecord], output_dir: str | Path, prefix: str) -> tuple[Path, Path]:
+def write_eval_outputs(
+    records: list[EvalRecord],
+    output_dir: str | Path,
+    prefix: str,
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> tuple[Path, Path]:
     out_dir = Path(output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     csv_path = out_dir / f"{prefix}.csv"
     report_path = out_dir / f"{prefix}.md"
 
     with csv_path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=list(EvalRecord.__dataclass_fields__.keys()))
+        writer = csv.DictWriter(handle, fieldnames=[field.name for field in fields(EvalRecord)])
         writer.writeheader()
         for record in records:
             writer.writerow(record.__dict__)
 
-    report_path.write_text(render_eval_report(records), encoding="utf-8")
+    report_path.write_text(render_eval_report(records, metadata=metadata), encoding="utf-8")
     return csv_path, report_path
 
 
-def render_eval_report(records: list[EvalRecord]) -> str:
+def render_eval_report(records: list[EvalRecord], *, metadata: dict[str, Any] | None = None) -> str:
     if not records:
         return "# 评估报告\n\n没有评估记录。\n"
     avg_hit3 = sum(record.hit_at_3 for record in records) / len(records)
@@ -164,6 +172,11 @@ def render_eval_report(records: list[EvalRecord]) -> str:
         f"- 检索器: `{first.retriever}`",
         f"- Chunk 策略: `{first.chunk_strategy}`",
         f"- 样例数: {len(records)}",
+    ]
+    if metadata:
+        for label, value in report_metadata_items(metadata):
+            lines.append(f"- {label}: {value}")
+    lines.extend([
         "",
         "## 汇总指标",
         f"- Hit@3: {avg_hit3:.3f}",
@@ -174,7 +187,7 @@ def render_eval_report(records: list[EvalRecord]) -> str:
         f"- 平均延迟: {avg_latency:.1f} ms",
         "",
         "## 分组指标",
-    ]
+    ])
     for case_type, group in grouped_records(records).items():
         group_hit3 = sum(record.hit_at_3 for record in group) / len(group)
         group_hit5 = sum(record.hit_at_5 for record in group) / len(group)
@@ -206,6 +219,30 @@ def render_eval_report(records: list[EvalRecord]) -> str:
             lines.append(f"- `{record.case_id}` {record.error}")
     lines.append("")
     return "\n".join(lines)
+
+
+def report_metadata_items(metadata: dict[str, Any]) -> list[tuple[str, str]]:
+    ordered_keys = [
+        ("run_id", "Run ID"),
+        ("config_path", "配置文件"),
+        ("case_path", "评测集"),
+        ("top_k", "Top K"),
+        ("chunk_count", "Chunk 数"),
+        ("index_manifest_path", "Index manifest"),
+        ("embedding_key", "Embedding key"),
+        ("embedding_cache_dir", "Embedding cache"),
+    ]
+    items: list[tuple[str, str]] = []
+    for key, label in ordered_keys:
+        value = metadata.get(key)
+        if value in {None, ""}:
+            continue
+        if isinstance(value, (int, float)):
+            rendered = str(value)
+        else:
+            rendered = f"`{value}`"
+        items.append((label, rendered))
+    return items
 
 
 def grouped_records(records: list[EvalRecord]) -> dict[str, list[EvalRecord]]:
