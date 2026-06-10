@@ -214,3 +214,57 @@ API Key 不写入配置文件，只从环境变量 `SILICONFLOW_API_KEY` 读取�
 - RRF 后 Hit@5 / MRR；
 - 与本地 BGE/ChatLaw 的延迟和质量差异；
 - API 成本是否值得。
+
+## 05. Phase 1 先做失败归因，再继续加 Adaptive RAG
+
+### 问题 / 触发点
+
+Phase 0 已经能重建 baseline，但检索失败时只能看到 Hit@5 失败，无法解释失败来自解析、chunk 边界、query 表达、召回不足、排序不足还是 metadata 缺口。
+
+### 最初想法
+
+直接进入 LLM query understanding，让模型把用户问题改写成更适合检索的 query。
+
+### 后来发现
+
+如果没有失败归因和 trace，LLM normalizer 即使命中率提升，也很难判断收益来自 query 改写、候选法律提示、多 query 覆盖，还是偶然排序变化。法律 RAG 需要可复盘的证据链，而不是只看单次回答是否看起来正确。
+
+### 为什么原方案不够
+
+过早加入 Adaptive RAG 会扩大调试面:
+
+```text
+用户 query -> LLM normalizer -> planner -> retrieval -> merge -> answer
+```
+
+如果检索失败，无法快速定位是 normalizer 改坏了 query，还是原始 BM25/chunk/metadata 本来就有问题。
+
+### 最终决策
+
+Phase 1 先补齐确定性诊断能力:
+
+```text
+sliding neighbor chunk
+chunk diagnostics
+rule-based query analyzer
+configurable BM25 boost
+BM25/RRF ranking trace
+failure labeler
+retrieval trace JSONL
+```
+
+默认检索链路仍保持保守，`article + BM25` 不因为 Phase 1 自动变成 adaptive。复杂 query 的 LLM normalizer 放到 Phase 2。
+
+### 面试讲法
+
+```text
+我没有在 baseline 后马上加 LLM query rewrite，而是先做失败归因。因为法律 RAG 的关键不是让链路更复杂，而是能解释为什么没召回正确法条。我给 BM25/RRF 加了 ranking trace，给 evaluation 加了 wrong_law、wrong_article、metadata_gap、low_rank 等 failure label，并让 build-index 输出 chunk diagnostics。这样后续再加 adaptive query understanding 时，可以用同一套 trace 判断它到底解决了哪个失败类型。
+```
+
+### 后续验证指标
+
+- failure label 分布；
+- `wrong_law` 和 `wrong_article` 的前 N 失败样例；
+- RRF trace 中 BM25/dense 子排名是否互补；
+- sliding neighbor 是否改善多条文和相邻条文 case；
+- trace JSONL 是否足以复现单个失败 case。

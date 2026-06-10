@@ -33,6 +33,8 @@ Retrieval:
 - Citation hit: top-k 中是否有可引用的目标条文。
 - Group metrics: 按 case type 分组统计。
 - Latency: 单次检索平均耗时。
+- Failure label: 对未命中样例标注 `wrong_law`、`wrong_article`、`metadata_gap`、`low_rank`、`miss` 或 `not_applicable`。
+- Ranking trace: BM25 记录 metadata boost，RRF 记录 BM25/dense 子排名、子分数和 fused score。
 
 Answer:
 
@@ -68,6 +70,33 @@ chatlaw_text2vec
 qwen3_embedding_4b
 ```
 
+## Phase 1 诊断产物
+
+`build-index` 会为每个 chunk 策略输出:
+
+```text
+artifacts/indexes/<strategy>/diagnostics.json
+artifacts/indexes/<strategy>/diagnostics.md
+```
+
+诊断内容包括 chunk 数、长度分布、每 chunk 条文数、article span、top laws 和异常样例。它用于判断失败来自条文解析、chunk 边界、metadata 缺失还是检索排序，而不是直接替代检索指标。
+
+`evaluate` 可选输出检索 trace:
+
+```powershell
+python -m legal_rag.cli evaluate --chunk-strategy article --retriever bm25 --trace-path reports/eval_article_bm25_trace.jsonl
+```
+
+每条 JSONL 记录包含 query analyzer、retrieval results、ranking trace、failure label 和 run metadata，可用于回放失败样例。
+
+## Phase 1 验收命令
+
+```powershell
+python -B -m pytest
+python -m legal_rag.cli build-index --chunk-strategy neighbor --neighbor-window 3 --neighbor-stride 1
+python -m legal_rag.cli evaluate --chunk-strategy article --retriever bm25 --trace-path reports/eval_article_bm25_trace.jsonl
+```
+
 ## 解释原则
 
 - 不只看总平均分，要看分组指标。
@@ -75,4 +104,4 @@ qwen3_embedding_4b
 - 如果 `multi_article` 弱，说明可能需要 `neighbor` chunk 或扩大 top-k。
 - 如果 `cross_law` 弱，说明查询改写或 hybrid retrieval 需要改。
 - 如果 Qwen3 提升不明显但成本显著增加，默认方案仍选 `bge_large_zh + BM25 + RRF`。
-
+- 如果 failure label 集中在 `wrong_law`，优先检查法律名提示和 hybrid retrieval；如果集中在 `wrong_article`，优先检查条号解析、metadata boost 和 chunk 边界；如果集中在 `low_rank`，再考虑 reranker。

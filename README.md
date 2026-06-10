@@ -7,9 +7,19 @@
 ## 功能
 
 - `profile-data`: 读取 README 和全量法律文本，生成数据画像报告。
-- `build-index`: 在已有数据画像的前提下，按指定 chunk 策略生成索引材料。
+- `build-index`: 在已有数据画像的前提下，按指定 chunk 策略生成索引材料，并输出 chunk 诊断报告。
 - `chat`: 启动命令行法律聊天助手，支持短期记忆、追问改写、引用来源。
-- `evaluate`: 运行固定测试集，输出 retrieval、answer、latency 等指标。
+- `evaluate`: 运行固定测试集，输出 retrieval、answer、latency、失败归因和可选 trace 等指标。
+- `baseline`: 一键重建 `article + BM25 + retrieval-only` 可复现基线。
+
+Phase 1 已补齐检索可靠性和失败归因能力:
+
+- `neighbor` chunk 支持 `neighbor_stride`，可做滑动相邻条文窗口。
+- `build-index` 会在 `artifacts/indexes/<strategy>/` 下写出 `diagnostics.json` 和 `diagnostics.md`。
+- BM25 的 `k1`、`b`、法律名 boost、条号 boost 已配置化。
+- BM25/RRF 检索结果会记录 ranking trace，RRF 可解释 BM25 与 dense 的子排名。
+- `evaluate` 报告会统计 `wrong_law`、`wrong_article`、`metadata_gap`、`miss` 等 failure label。
+- `evaluate` 和 `chat` 支持 `--trace-path` 输出 JSONL 检索 trace。
 
 ## 模型
 
@@ -57,6 +67,12 @@ python -m legal_rag.cli build-index --chunk-strategy article
 python -m legal_rag.cli evaluate --chunk-strategy article --retriever bm25
 ```
 
+一键重建 baseline:
+
+```powershell
+python -m legal_rag.cli baseline
+```
+
 构建 embedding cache:
 
 ```powershell
@@ -100,11 +116,23 @@ python -m legal_rag.cli build-index --chunk-strategy long_split
 python -m legal_rag.cli build-index --chunk-strategy fixed_chars
 ```
 
+如果要测试滑动相邻条文窗口:
+
+```powershell
+python -m legal_rag.cli build-index --chunk-strategy neighbor --neighbor-window 3 --neighbor-stride 1
+```
+
 3. 跑检索实验:
 
 ```powershell
 python -m legal_rag.cli evaluate --chunk-strategy article --retriever bm25 --prefix eval_article_bm25
 python -m legal_rag.cli evaluate --chunk-strategy neighbor --retriever bm25 --prefix eval_neighbor_bm25
+```
+
+需要复盘单个 case 的检索链路时，打开 JSONL trace:
+
+```powershell
+python -m legal_rag.cli evaluate --chunk-strategy article --retriever bm25 --trace-path reports/eval_article_bm25_trace.jsonl
 ```
 
 4. 依赖装好后跑 dense 和 RRF:
@@ -135,4 +163,6 @@ python -m legal_rag.cli evaluate --chunk-strategy article --retriever bm25 --gen
 - 数据画像 JSON: `artifacts/profile/data_profile.json`
 - 数据画像报告: `reports/data_profile.md`
 - 索引 chunk: `artifacts/indexes/<strategy>/chunks.jsonl`
+- Chunk 诊断: `artifacts/indexes/<strategy>/diagnostics.json` 和 `diagnostics.md`
 - 评估 CSV 和报告: `reports/`
+- 检索 trace JSONL: 由 `--trace-path` 指定
