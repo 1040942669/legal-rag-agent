@@ -9,8 +9,11 @@ from pathlib import Path
 from typing import Any
 
 from .chat import LegalChatAssistant
+from .failure_analysis import label_retrieval_failure
 from .models import EvalCase, EvalRecord, SearchResult
+from .query import analyze_query
 from .retrieval import Retriever, format_sources
+from .tracing import JsonlTraceWriter, build_retrieval_trace_record
 
 
 def load_eval_cases(path: str | Path) -> list[EvalCase]:
@@ -42,9 +45,12 @@ def evaluate(
     generate: bool = False,
     top_k: int = 5,
     assistant: LegalChatAssistant | None = None,
+    trace_writer: JsonlTraceWriter | None = None,
+    trace_metadata: dict[str, Any] | None = None,
 ) -> list[EvalRecord]:
     records: list[EvalRecord] = []
     for case in cases:
+        analysis = analyze_query(case.question)
         started = time.perf_counter()
         answer = ""
         error = ""
@@ -60,6 +66,21 @@ def evaluate(
             results = []
             error = str(exc)
         latency_ms = int((time.perf_counter() - started) * 1000)
+        failure = label_retrieval_failure(results, case, top_k=top_k)
+        if trace_writer:
+            trace_writer.write(
+                build_retrieval_trace_record(
+                    case_id=case.case_id,
+                    query=case.question,
+                    retriever=getattr(retriever, "name", "unknown"),
+                    top_k=top_k,
+                    results=results,
+                    latency_ms=latency_ms,
+                    analyzer=analysis.to_dict(),
+                    failure=failure.to_dict(),
+                    metadata=trace_metadata,
+                )
+            )
         records.append(
             EvalRecord(
                 case_id=case.case_id,
@@ -77,6 +98,8 @@ def evaluate(
                 answer=answer[:1200],
                 sources=format_sources(results),
                 error=error,
+                failure_label=failure.label,
+                failure_reason=failure.reason,
             )
         )
     return records
@@ -199,6 +222,16 @@ def render_eval_report(records: list[EvalRecord], *, metadata: dict[str, Any] | 
             f"Hit@5={group_hit5:.3f} MRR={group_mrr:.3f} "
             f"TargetCoverage={group_target:.3f} latency={group_latency:.1f}ms"
         )
+    failure_counts = defaultdict(int)
+    for record in records:
+        if record.failure_label:
+            failure_counts[record.failure_label] += 1
+    lines.extend([
+        "",
+        "## 失败归因",
+    ])
+    for label, count in sorted(failure_counts.items()):
+        lines.append(f"- `{label}`: {count}")
     lines.extend([
         "",
         "## 失败样例",
@@ -206,12 +239,17 @@ def render_eval_report(records: list[EvalRecord], *, metadata: dict[str, Any] | 
     failures = [
         record
         for record in records
-        if record.case_type != "refusal" and record.hit_at_5 == 0 and not record.error
+        if record.case_type != "refusal"
+        and record.failure_label not in {"", "hit", "not_applicable"}
+        and not record.error
     ]
     if not failures:
         lines.append("- 未发现 Hit@5 失败样例。")
     for record in failures[:10]:
-        lines.append(f"- `{record.case_id}` sources: {record.sources.splitlines()[:2]}")
+        lines.append(
+            f"- `{record.case_id}` `{record.failure_label}` {record.failure_reason} "
+            f"sources: {record.sources.splitlines()[:2]}"
+        )
     errors = [record for record in records if record.error]
     if errors:
         lines.extend(["", "## 运行错误"])
@@ -228,7 +266,13 @@ def report_metadata_items(metadata: dict[str, Any]) -> list[tuple[str, str]]:
         ("case_path", "评测集"),
         ("top_k", "Top K"),
         ("chunk_count", "Chunk 数"),
+        ("bm25_k1", "BM25 k1"),
+        ("bm25_b", "BM25 b"),
+        ("bm25_law_boost", "BM25 law boost"),
+        ("bm25_article_boost", "BM25 article boost"),
         ("index_manifest_path", "Index manifest"),
+        ("diagnostics_path", "Chunk diagnostics"),
+        ("trace_path", "Trace JSONL"),
         ("embedding_key", "Embedding key"),
         ("embedding_cache_dir", "Embedding cache"),
     ]

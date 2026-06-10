@@ -34,6 +34,7 @@ class SearchResult:
     score: float
     rank: int
     retriever: str
+    trace: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -63,3 +64,5 @@ class EvalRecord:
     answer: str
     sources: str
     error: str = ""
+    failure_label: str = ""
+    failure_reason: str = ""

@@ -6,13 +6,17 @@ from uuid import uuid4
 from legal_rag.chunking import build_chunks
 from legal_rag.config import load_config
 from legal_rag.data import parse_law_file, profile_dataset
+from legal_rag.diagnostics import build_chunk_diagnostics
 from legal_rag.embeddings import resolve_embedding_model
 from legal_rag.env import clean_env_value
 from legal_rag.evaluation import render_eval_report
+from legal_rag.failure_analysis import label_retrieval_failure
 from legal_rag.indexing import build_index
 from legal_rag.manifest import write_artifact_manifest
-from legal_rag.models import EvalRecord, SearchResult
-from legal_rag.retrieval import BM25Retriever, RRFHybridRetriever
+from legal_rag.models import EvalCase, EvalRecord, SearchResult
+from legal_rag.query import analyze_query
+from legal_rag.retrieval import BM25Retriever, RRFHybridRetriever, format_sources
+from legal_rag.tracing import JsonlTraceWriter, build_retrieval_trace_record
 
 
 class CoreTest(unittest.TestCase):
@@ -59,6 +63,51 @@ class CoreTest(unittest.TestCase):
         self.assertTrue(results)
         self.assertIn("第九条", results[0].chunk.article_numbers)
 
+    def test_neighbor_chunks_support_sliding_stride(self) -> None:
+        data_dir = self.make_dataset()
+        articles = parse_law_file(data_dir / "中华人民共和国民法典.txt")
+        chunks = build_chunks(
+            articles,
+            "neighbor",
+            neighbor_window=2,
+            neighbor_stride=1,
+        )
+
+        self.assertEqual(len(chunks), 3)
+        self.assertEqual(chunks[0].article_numbers, ["第八条", "第九条"])
+        self.assertEqual(chunks[1].article_numbers, ["第九条", "第十九条"])
+        self.assertEqual(chunks[0].metadata["neighbor_stride"], 1)
+
+    def test_chunk_diagnostics_summarizes_lengths_and_anomalies(self) -> None:
+        data_dir = self.make_dataset()
+        articles = parse_law_file(data_dir / "中华人民共和国民法典.txt")
+        chunks = build_chunks(articles, "neighbor", neighbor_window=2, neighbor_stride=1)
+        diagnostics = build_chunk_diagnostics(chunks, strategy="neighbor")
+
+        self.assertEqual(diagnostics["strategy"], "neighbor")
+        self.assertEqual(diagnostics["chunk_count"], 3)
+        self.assertIn("char_length", diagnostics)
+        self.assertIn("article_span_length", diagnostics)
+
+    def test_query_analyzer_extracts_law_article_and_risk_flags(self) -> None:
+        analysis = analyze_query("《中华人民共和国民法典》第一百一十九条规定了什么？我很急！")
+
+        self.assertIn("中华人民共和国民法典", analysis.law_names)
+        self.assertIn("第一百一十九条", analysis.article_numbers)
+        self.assertIn("emotional", analysis.risk_flags)
+        self.assertIn("article_lookup", analysis.case_type_hints)
+
+    def test_bm25_boost_parameters_are_configurable(self) -> None:
+        data_dir = self.make_dataset()
+        articles = parse_law_file(data_dir / "中华人民共和国民法典.txt")
+        chunks = build_chunks(articles, "article")
+        retriever = BM25Retriever(chunks, law_boost=0.0, article_boost=7.0)
+        results = retriever.retrieve("民法典 第九条", top_k=3)
+
+        self.assertTrue(results)
+        self.assertEqual(results[0].trace["bm25_article_boost"], 7.0)
+        self.assertIn("metadata_boost", results[0].trace)
+
     def test_rrf_fuses_bm25_and_dense_rankings(self) -> None:
         data_dir = self.make_dataset()
         articles = []
@@ -84,6 +133,68 @@ class CoreTest(unittest.TestCase):
 
         self.assertEqual(results[0].retriever, "rrf")
         self.assertIn(results[0].chunk, [chunks[0], chunks[1]])
+        self.assertIn("fused_score", results[0].trace)
+        self.assertTrue(
+            "bm25_rank" in results[0].trace or "dense_rank" in results[0].trace
+        )
+        self.assertIn("trace=", format_sources(results))
+
+    def test_failure_labeler_marks_wrong_law_and_hit(self) -> None:
+        data_dir = self.make_dataset()
+        articles = []
+        for path in data_dir.glob("*.txt"):
+            articles.extend(parse_law_file(path))
+        chunks = build_chunks(articles, "article")
+        results = [SearchResult(chunk=chunks[0], score=1.0, rank=1, retriever="bm25")]
+
+        hit_case = EvalCase(
+            case_id="hit",
+            question="",
+            case_type="article_lookup",
+            expected_law=chunks[0].law_names[0],
+            expected_articles=[chunks[0].article_numbers[0]],
+            keywords=[],
+        )
+        wrong_law_case = EvalCase(
+            case_id="wrong-law",
+            question="",
+            case_type="article_lookup",
+            expected_law="不存在的法律",
+            expected_articles=["第一条"],
+            keywords=[],
+        )
+
+        self.assertEqual(label_retrieval_failure(results, hit_case).label, "hit")
+        self.assertEqual(label_retrieval_failure(results, wrong_law_case).label, "wrong_law")
+
+    def test_trace_writer_records_retrieval_schema(self) -> None:
+        data_dir = self.make_dataset()
+        articles = parse_law_file(data_dir / "中华人民共和国民法典.txt")
+        chunks = build_chunks(articles, "article")
+        result = SearchResult(
+            chunk=chunks[0],
+            score=1.0,
+            rank=1,
+            retriever="bm25",
+            trace={"metadata_boost": 80.0},
+        )
+        trace_path = self.make_workspace_temp() / "trace.jsonl"
+        writer = JsonlTraceWriter(trace_path, run_id="run_trace_test")
+        writer.write(
+            build_retrieval_trace_record(
+                query="民法典第八条",
+                retriever="bm25",
+                top_k=1,
+                results=[result],
+                latency_ms=3,
+                analyzer=analyze_query("民法典第八条").to_dict(),
+            )
+        )
+        record = json.loads(trace_path.read_text(encoding="utf-8").strip())
+
+        self.assertEqual(record["run_id"], "run_trace_test")
+        self.assertEqual(record["results"][0]["chunk_id"], chunks[0].chunk_id)
+        self.assertEqual(record["results"][0]["ranking_trace"]["metadata_boost"], 80.0)
 
     def test_qwen3_embedding_uses_siliconflow_provider(self) -> None:
         config = load_config()
@@ -134,6 +245,7 @@ class CoreTest(unittest.TestCase):
         self.assertEqual(metadata["run_id"], "run_index_test")
         self.assertEqual(manifest["run_id"], "run_index_test")
         self.assertEqual(manifest["metrics"]["chunk_count"], metadata["chunk_count"])
+        self.assertTrue(Path(metadata["diagnostics_path"]).exists())
 
     def test_eval_report_includes_run_metadata(self) -> None:
         record = EvalRecord(
@@ -166,6 +278,7 @@ class CoreTest(unittest.TestCase):
         self.assertIn("run_eval_test", report)
         self.assertIn("legal_eval_cases_v2.jsonl", report)
         self.assertIn("Chunk 数: 4", report)
+        self.assertIn("失败归因", report)
 
 
 if __name__ == "__main__":

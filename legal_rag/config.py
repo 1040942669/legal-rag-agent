@@ -62,6 +62,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "retrieval": {
         "default": "bm25",
         "top_k": 5,
+        "bm25_k1": 1.5,
+        "bm25_b": 0.75,
+        "bm25_law_boost": 40.0,
+        "bm25_article_boost": 80.0,
         "rrf_k": 60,
         "rrf_bm25_weight": 1.0,
         "rrf_dense_weight": 1.0,
@@ -75,6 +79,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "default_strategy": "article",
         "candidates": ["article", "neighbor", "long_split", "fixed_chars"],
         "neighbor_window": 3,
+        "neighbor_stride": None,
         "long_split_max_chars": 450,
         "long_split_overlap_chars": 60,
         "fixed_chars_size": 500,

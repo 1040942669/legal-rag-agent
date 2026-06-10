@@ -13,6 +13,7 @@ def build_chunks(
     strategy: str,
     *,
     neighbor_window: int = 3,
+    neighbor_stride: int | None = None,
     long_split_max_chars: int = 450,
     long_split_overlap_chars: int = 60,
     fixed_chars_size: int = 500,
@@ -21,7 +22,7 @@ def build_chunks(
     if strategy == "article":
         return article_chunks(articles)
     if strategy == "neighbor":
-        return neighbor_chunks(articles, window=neighbor_window)
+        return neighbor_chunks(articles, window=neighbor_window, stride=neighbor_stride)
     if strategy == "long_split":
         return long_split_chunks(
             articles,
@@ -37,9 +38,17 @@ def article_chunks(articles: list[LawArticle]) -> list[Chunk]:
     return [chunk_from_articles([article], "article") for article in articles]
 
 
-def neighbor_chunks(articles: list[LawArticle], window: int = 3) -> list[Chunk]:
+def neighbor_chunks(
+    articles: list[LawArticle],
+    window: int = 3,
+    stride: int | None = None,
+) -> list[Chunk]:
     if window <= 0:
         raise ValueError("neighbor window must be positive")
+    if stride is None:
+        stride = window
+    if stride <= 0:
+        raise ValueError("neighbor stride must be positive")
 
     grouped: dict[str, list[LawArticle]] = {}
     for article in articles:
@@ -48,8 +57,22 @@ def neighbor_chunks(articles: list[LawArticle], window: int = 3) -> list[Chunk]:
     chunks: list[Chunk] = []
     for source_file in sorted(grouped):
         items = sorted(grouped[source_file], key=lambda item: item.line_no)
-        for start in range(0, len(items), window):
-            chunks.append(chunk_from_articles(items[start : start + window], "neighbor"))
+        for start in range(0, len(items), stride):
+            window_items = items[start : start + window]
+            if not window_items:
+                continue
+            chunks.append(
+                chunk_from_articles(
+                    window_items,
+                    "neighbor",
+                    extra_metadata={
+                        "neighbor_window": window,
+                        "neighbor_stride": stride,
+                        "window_start": start,
+                        "window_end": start + len(window_items) - 1,
+                    },
+                )
+            )
     return chunks
 
 
@@ -161,10 +184,22 @@ def find_related_articles(articles: list[LawArticle], chunk_text: str) -> list[L
     return related[:10]
 
 
-def chunk_from_articles(articles: list[LawArticle], strategy: str) -> Chunk:
+def chunk_from_articles(
+    articles: list[LawArticle],
+    strategy: str,
+    *,
+    extra_metadata: dict | None = None,
+) -> Chunk:
     if not articles:
         raise ValueError("Cannot create a chunk from zero articles")
     text = "\n".join(article.raw_text for article in articles)
+    metadata = {
+        "article_ids": [article.article_id for article in articles],
+        "article_count": len(articles),
+        "char_length": len(text),
+    }
+    if extra_metadata:
+        metadata.update(extra_metadata)
     return Chunk(
         chunk_id=stable_id(strategy, *(article.article_id for article in articles)),
         text=text,
@@ -173,11 +208,7 @@ def chunk_from_articles(articles: list[LawArticle], strategy: str) -> Chunk:
         source_files=unique(article.source_file for article in articles),
         line_nos=[article.line_no for article in articles],
         strategy=strategy,
-        metadata={
-            "article_ids": [article.article_id for article in articles],
-            "article_count": len(articles),
-            "char_length": len(text),
-        },
+        metadata=metadata,
     )
 
 
@@ -234,4 +265,3 @@ def chunk_to_dict(chunk: Chunk) -> dict:
         "strategy": chunk.strategy,
         "metadata": chunk.metadata,
     }
-

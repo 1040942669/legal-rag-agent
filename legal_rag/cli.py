@@ -3,7 +3,9 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from pathlib import Path
+from typing import Any
 
 from .chat import LegalChatAssistant, render_sources
 from .chunking import load_chunks
@@ -15,7 +17,9 @@ from .evaluation import evaluate, load_eval_cases, write_eval_outputs
 from .indexing import build_index, resolve_chunks_path
 from .llamaindex_backend import LlamaIndexRetriever
 from .manifest import new_run_id
+from .query import analyze_query
 from .retrieval import build_retriever
+from .tracing import JsonlTraceWriter, build_retrieval_trace_record
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -56,6 +60,8 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["article", "neighbor", "long_split", "fixed_chars"],
         default=None,
     )
+    build.add_argument("--neighbor-window", type=int, default=None)
+    build.add_argument("--neighbor-stride", type=int, default=None)
     build.set_defaults(handler=handle_build_index)
 
     baseline = subparsers.add_parser(
@@ -92,6 +98,7 @@ def build_parser() -> argparse.ArgumentParser:
     chat.add_argument("--embedding-cache-dir", default=None)
     chat.add_argument("--model", default=None)
     chat.add_argument("--top-k", type=int, default=None)
+    chat.add_argument("--trace-path", default=None)
     chat.add_argument("--no-generate", action="store_true", help="Return retrieval results only.")
     chat.set_defaults(handler=handle_chat)
 
@@ -107,6 +114,7 @@ def build_parser() -> argparse.ArgumentParser:
     eval_parser.add_argument("--top-k", type=int, default=None)
     eval_parser.add_argument("--generate", action="store_true")
     eval_parser.add_argument("--prefix", default=None)
+    eval_parser.add_argument("--trace-path", default=None)
     eval_parser.set_defaults(handler=handle_evaluate)
 
     return parser
@@ -135,13 +143,14 @@ def handle_build_index(args: argparse.Namespace) -> int:
     )
     index_root = resolve_path(args.index_root or config["artifacts"]["index_dir"])
     strategy = args.chunk_strategy or config["chunking"]["default_strategy"]
+    chunking_config = chunking_config_from_args(config, args)
 
     metadata = build_index(
         dataset_dir=data_dir,
         profile_path=profile_path,
         output_root=index_root,
         strategy=strategy,
-        chunking_config=config["chunking"],
+        chunking_config=chunking_config,
         run_id=new_run_id(f"index_{strategy}"),
     )
     print(json.dumps(metadata, ensure_ascii=False, indent=2))
@@ -202,6 +211,8 @@ def handle_baseline(args: argparse.Namespace) -> int:
             "top_k": top_k,
             "chunk_count": len(chunks),
             "index_manifest_path": index_metadata.get("manifest_path", ""),
+            "diagnostics_path": index_metadata.get("diagnostics_path", ""),
+            **retrieval_metadata(config),
         },
     )
     print(f"Run ID: {run_id}")
@@ -238,6 +249,7 @@ def handle_build_embeddings(args: argparse.Namespace) -> int:
 
 def handle_chat(args: argparse.Namespace) -> int:
     config = load_config(args.config)
+    run_id = new_run_id("chat")
     strategy = args.chunk_strategy or config["chunking"]["default_strategy"]
     index_dir = resolve_index_dir(args.index_dir, config, strategy)
     chunks = load_chunks(resolve_chunks_path(index_dir))
@@ -260,6 +272,9 @@ def handle_chat(args: argparse.Namespace) -> int:
         ollama_base_url=config["chat"]["ollama_base_url"],
         request_timeout=int(config["chat"]["request_timeout"]),
     )
+    trace_writer = None
+    if args.trace_path:
+        trace_writer = JsonlTraceWriter(resolve_path(args.trace_path), run_id=run_id)
 
     print("Legal RAG chat started. Type `exit` to quit.")
     while True:
@@ -271,7 +286,26 @@ def handle_chat(args: argparse.Namespace) -> int:
             break
         if not question:
             continue
+        analysis = analyze_query(question)
+        started = time.perf_counter()
         answer, results = assistant.answer(question, generate=not args.no_generate)
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        if trace_writer:
+            trace_writer.write(
+                build_retrieval_trace_record(
+                    query=question,
+                    retriever=getattr(retriever, "name", retriever_kind),
+                    top_k=top_k,
+                    results=results,
+                    latency_ms=latency_ms,
+                    analyzer=analysis.to_dict(),
+                    metadata={
+                        "chunk_strategy": strategy,
+                        "generate": not args.no_generate,
+                        "model": args.model or config["models"]["default"],
+                    },
+                )
+            )
         print("\n助手:")
         print(answer)
         print("\n来源:")
@@ -281,6 +315,7 @@ def handle_chat(args: argparse.Namespace) -> int:
 
 def handle_evaluate(args: argparse.Namespace) -> int:
     config = load_config(args.config)
+    run_id = new_run_id("eval")
     strategy = args.chunk_strategy or config["chunking"]["default_strategy"]
     index_dir = resolve_index_dir(args.index_dir, config, strategy)
     chunks_path = resolve_chunks_path(index_dir)
@@ -290,6 +325,23 @@ def handle_evaluate(args: argparse.Namespace) -> int:
     case_path = resolve_path(args.cases)
     cases = load_eval_cases(case_path)
     report_dir = resolve_path(config["artifacts"]["report_dir"])
+    trace_path = resolve_path(args.trace_path) if args.trace_path else None
+    trace_writer = JsonlTraceWriter(trace_path, run_id=run_id) if trace_path else None
+    metadata = build_eval_metadata(
+        args=args,
+        config=config,
+        run_id=run_id,
+        case_path=case_path,
+        index_dir=index_dir,
+        chunks_path=chunks_path,
+        chunks=chunks,
+        retriever_kind=retriever_kind,
+        strategy=strategy,
+        top_k=top_k,
+        embedding_key=args.embedding,
+        embedding_cache_dir=args.embedding_cache_dir,
+        trace_path=trace_path,
+    )
 
     models = resolve_models(args, config)
     all_records = []
@@ -321,6 +373,8 @@ def handle_evaluate(args: argparse.Namespace) -> int:
             generate=args.generate,
             top_k=top_k,
             assistant=assistant,
+            trace_writer=trace_writer,
+            trace_metadata=metadata,
         )
         all_records.extend(records)
 
@@ -329,23 +383,12 @@ def handle_evaluate(args: argparse.Namespace) -> int:
         all_records,
         report_dir,
         prefix,
-        metadata=build_eval_metadata(
-            args=args,
-            config=config,
-            run_id=new_run_id(f"eval_{strategy}_{retriever_kind}"),
-            case_path=case_path,
-            index_dir=index_dir,
-            chunks_path=chunks_path,
-            chunks=chunks,
-            retriever_kind=retriever_kind,
-            strategy=strategy,
-            top_k=top_k,
-            embedding_key=args.embedding,
-            embedding_cache_dir=args.embedding_cache_dir,
-        ),
+        metadata=metadata,
     )
     print(f"Wrote evaluation CSV: {csv_path}")
     print(f"Wrote evaluation report: {report_path}")
+    if trace_path:
+        print(f"Wrote retrieval trace JSONL: {trace_path}")
     return 0
 
 
@@ -385,6 +428,10 @@ def create_retriever(
         rrf_k=int(config["retrieval"].get("rrf_k", 60)),
         rrf_bm25_weight=float(config["retrieval"].get("rrf_bm25_weight", 1.0)),
         rrf_dense_weight=float(config["retrieval"].get("rrf_dense_weight", 1.0)),
+        bm25_k1=float(config["retrieval"].get("bm25_k1", 1.5)),
+        bm25_b=float(config["retrieval"].get("bm25_b", 0.75)),
+        bm25_law_boost=float(config["retrieval"].get("bm25_law_boost", 40.0)),
+        bm25_article_boost=float(config["retrieval"].get("bm25_article_boost", 80.0)),
     )
 
 
@@ -418,6 +465,7 @@ def build_eval_metadata(
     top_k: int,
     embedding_key: str | None,
     embedding_cache_dir: str | None,
+    trace_path: Path | None = None,
 ) -> dict:
     metadata = {
         "run_id": run_id,
@@ -428,10 +476,16 @@ def build_eval_metadata(
         "chunks_path": str(chunks_path),
         "retriever": retriever_kind,
         "chunk_strategy": strategy,
+        **retrieval_metadata(config),
     }
     manifest_path = index_dir / "manifest.json"
     if manifest_path.exists():
         metadata["index_manifest_path"] = str(manifest_path.resolve())
+    diagnostics_path = index_dir / "diagnostics.json"
+    if diagnostics_path.exists():
+        metadata["diagnostics_path"] = str(diagnostics_path.resolve())
+    if trace_path:
+        metadata["trace_path"] = str(trace_path)
     if retriever_kind in {"dense", "rrf", "hybrid"}:
         model_config = resolve_embedding_model(config, embedding_key)
         metadata["embedding_key"] = model_config.key
@@ -442,6 +496,25 @@ def build_eval_metadata(
         except FileNotFoundError:
             metadata["embedding_cache_dir"] = embedding_cache_dir or ""
     return metadata
+
+
+def chunking_config_from_args(config: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    chunking_config = dict(config["chunking"])
+    if getattr(args, "neighbor_window", None) is not None:
+        chunking_config["neighbor_window"] = args.neighbor_window
+    if getattr(args, "neighbor_stride", None) is not None:
+        chunking_config["neighbor_stride"] = args.neighbor_stride
+    return chunking_config
+
+
+def retrieval_metadata(config: dict[str, Any]) -> dict[str, Any]:
+    retrieval = config.get("retrieval", {})
+    return {
+        "bm25_k1": float(retrieval.get("bm25_k1", 1.5)),
+        "bm25_b": float(retrieval.get("bm25_b", 0.75)),
+        "bm25_law_boost": float(retrieval.get("bm25_law_boost", 40.0)),
+        "bm25_article_boost": float(retrieval.get("bm25_article_boost", 80.0)),
+    }
 
 
 def resolve_embedding_cache_dir(

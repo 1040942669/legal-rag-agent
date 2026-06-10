@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .chunking import build_chunks, save_chunks
 from .data import load_articles
+from .diagnostics import build_chunk_diagnostics, write_chunk_diagnostics
 from .manifest import new_run_id, summarize_path, write_artifact_manifest
 
 
@@ -30,6 +31,7 @@ def build_index(
         articles,
         strategy,
         neighbor_window=int(chunking_config.get("neighbor_window", 3)),
+        neighbor_stride=optional_int(chunking_config.get("neighbor_stride")),
         long_split_max_chars=int(chunking_config.get("long_split_max_chars", 450)),
         long_split_overlap_chars=int(chunking_config.get("long_split_overlap_chars", 60)),
         fixed_chars_size=int(chunking_config.get("fixed_chars_size", 500)),
@@ -40,6 +42,8 @@ def build_index(
     chunks_path = save_chunks(chunks, index_dir / "chunks.jsonl")
     metadata_path = index_dir / "metadata.json"
     manifest_path = index_dir / "manifest.json"
+    diagnostics = build_chunk_diagnostics(chunks, strategy=strategy)
+    diagnostics_json_path, diagnostics_md_path = write_chunk_diagnostics(diagnostics, index_dir)
     artifact_run_id = run_id or new_run_id(f"index_{strategy}")
     metadata = {
         "run_id": artifact_run_id,
@@ -48,6 +52,8 @@ def build_index(
         "chunk_count": len(chunks),
         "chunks_path": str(chunks_path),
         "manifest_path": str(manifest_path),
+        "diagnostics_path": str(diagnostics_json_path),
+        "diagnostics_report_path": str(diagnostics_md_path),
         "build_seconds": round(time.perf_counter() - started, 3),
     }
     metadata_path.write_text(
@@ -69,11 +75,15 @@ def build_index(
         outputs={
             "chunks_path": str(chunks_path.resolve()),
             "metadata_path": str(metadata_path.resolve()),
+            "diagnostics_path": str(diagnostics_json_path.resolve()),
+            "diagnostics_report_path": str(diagnostics_md_path.resolve()),
         },
         metrics={
             "article_count": len(articles),
             "chunk_count": len(chunks),
             "build_seconds": metadata["build_seconds"],
+            "chunk_char_length": diagnostics.get("char_length", {}),
+            "chunk_article_count_per_chunk": diagnostics.get("article_count_per_chunk", {}),
         },
     )
     return metadata
@@ -87,3 +97,9 @@ def resolve_chunks_path(index_dir: str | Path) -> Path:
     if not chunks_path.exists():
         raise FileNotFoundError(f"Index chunks not found: {chunks_path}")
     return chunks_path
+
+
+def optional_int(value) -> int | None:
+    if value in {None, ""}:
+        return None
+    return int(value)

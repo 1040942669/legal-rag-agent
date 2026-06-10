@@ -25,10 +25,20 @@ class Retriever(Protocol):
 class BM25Retriever:
     name = "bm25"
 
-    def __init__(self, chunks: list[Chunk], *, k1: float = 1.5, b: float = 0.75) -> None:
+    def __init__(
+        self,
+        chunks: list[Chunk],
+        *,
+        k1: float = 1.5,
+        b: float = 0.75,
+        law_boost: float = 40.0,
+        article_boost: float = 80.0,
+    ) -> None:
         self.chunks = chunks
         self.k1 = k1
         self.b = b
+        self.law_boost = law_boost
+        self.article_boost = article_boost
         self.doc_tokens = [tokenize(chunk.text) for chunk in chunks]
         self.doc_lengths = [len(tokens) for tokens in self.doc_tokens]
         self.avgdl = sum(self.doc_lengths) / max(len(self.doc_lengths), 1)
@@ -42,9 +52,9 @@ class BM25Retriever:
         query_terms = tokenize(query)
         law_hints = extract_law_hints(query)
         article_hints = extract_article_terms(query)
-        scores: list[tuple[int, float]] = []
+        scores: list[tuple[int, float, dict]] = []
         for index, freqs in enumerate(self.term_freqs):
-            score = 0.0
+            bm25_score = 0.0
             doc_len = self.doc_lengths[index] or 1
             for term in query_terms:
                 tf = freqs.get(term, 0)
@@ -54,15 +64,43 @@ class BM25Retriever:
                 idf = math.log((self.total_docs - df + 0.5) / (df + 0.5) + 1)
                 numerator = tf * (self.k1 + 1)
                 denominator = tf + self.k1 * (1 - self.b + self.b * doc_len / max(self.avgdl, 1))
-                score += idf * numerator / denominator
-            score += metadata_boost(self.chunks[index], law_hints, article_hints)
+                bm25_score += idf * numerator / denominator
+            boost = metadata_boost(
+                self.chunks[index],
+                law_hints,
+                article_hints,
+                law_boost=self.law_boost,
+                article_boost=self.article_boost,
+            )
+            score = bm25_score + boost
             if score > 0:
-                scores.append((index, score))
+                scores.append(
+                    (
+                        index,
+                        score,
+                        {
+                            "bm25_score": bm25_score,
+                            "metadata_boost": boost,
+                            "law_hints": law_hints,
+                            "article_hints": article_hints,
+                            "bm25_k1": self.k1,
+                            "bm25_b": self.b,
+                            "bm25_law_boost": self.law_boost,
+                            "bm25_article_boost": self.article_boost,
+                        },
+                    )
+                )
 
         scores.sort(key=lambda item: item[1], reverse=True)
         return [
-            SearchResult(chunk=self.chunks[index], score=score, rank=rank, retriever=self.name)
-            for rank, (index, score) in enumerate(scores[:top_k], start=1)
+            SearchResult(
+                chunk=self.chunks[index],
+                score=score,
+                rank=rank,
+                retriever=self.name,
+                trace=trace,
+            )
+            for rank, (index, score, trace) in enumerate(scores[:top_k], start=1)
         ]
 
 
@@ -151,17 +189,34 @@ class RRFHybridRetriever:
         dense_results = self.dense.retrieve(query, top_k=max(top_k * 3, 10))
         fused_scores: dict[str, float] = defaultdict(float)
         chunk_by_id: dict[str, Chunk] = {}
+        trace_by_id: dict[str, dict] = defaultdict(dict)
 
         for result in bm25_results:
-            fused_scores[result.chunk.chunk_id] += self.bm25_weight * reciprocal_rank(
-                result.rank, k=self.rrf_k
+            contribution = self.bm25_weight * reciprocal_rank(result.rank, k=self.rrf_k)
+            chunk_id = result.chunk.chunk_id
+            fused_scores[chunk_id] += contribution
+            chunk_by_id[chunk_id] = result.chunk
+            trace_by_id[chunk_id].update(
+                {
+                    "bm25_rank": result.rank,
+                    "bm25_score": result.score,
+                    "bm25_rrf_score": contribution,
+                    "bm25_trace": result.trace,
+                }
             )
-            chunk_by_id[result.chunk.chunk_id] = result.chunk
         for result in dense_results:
-            fused_scores[result.chunk.chunk_id] += self.dense_weight * reciprocal_rank(
-                result.rank, k=self.rrf_k
+            contribution = self.dense_weight * reciprocal_rank(result.rank, k=self.rrf_k)
+            chunk_id = result.chunk.chunk_id
+            fused_scores[chunk_id] += contribution
+            chunk_by_id[chunk_id] = result.chunk
+            trace_by_id[chunk_id].update(
+                {
+                    "dense_rank": result.rank,
+                    "dense_score": result.score,
+                    "dense_rrf_score": contribution,
+                    "dense_trace": result.trace,
+                }
             )
-            chunk_by_id[result.chunk.chunk_id] = result.chunk
 
         ranked = sorted(fused_scores.items(), key=lambda item: item[1], reverse=True)[:top_k]
         return [
@@ -170,6 +225,13 @@ class RRFHybridRetriever:
                 score=score,
                 rank=rank,
                 retriever=self.name,
+                trace={
+                    **trace_by_id[chunk_id],
+                    "fused_score": score,
+                    "rrf_k": self.rrf_k,
+                    "bm25_weight": self.bm25_weight,
+                    "dense_weight": self.dense_weight,
+                },
             )
             for rank, (chunk_id, score) in enumerate(ranked, start=1)
         ]
@@ -186,9 +248,19 @@ def build_retriever(
     rrf_k: int = 60,
     rrf_bm25_weight: float = 1.0,
     rrf_dense_weight: float = 1.0,
+    bm25_k1: float = 1.5,
+    bm25_b: float = 0.75,
+    bm25_law_boost: float = 40.0,
+    bm25_article_boost: float = 80.0,
 ) -> Retriever:
     if kind == "bm25":
-        return BM25Retriever(chunks)
+        return BM25Retriever(
+            chunks,
+            k1=bm25_k1,
+            b=bm25_b,
+            law_boost=bm25_law_boost,
+            article_boost=bm25_article_boost,
+        )
     if kind == "dense":
         if embedding_cache_dir and embedding_model_config:
             return CachedDenseRetriever(
@@ -199,7 +271,13 @@ def build_retriever(
             )
         return DenseRetriever(chunks, model_name=embedding_model)
     if kind in {"rrf", "hybrid"}:
-        bm25 = BM25Retriever(chunks)
+        bm25 = BM25Retriever(
+            chunks,
+            k1=bm25_k1,
+            b=bm25_b,
+            law_boost=bm25_law_boost,
+            article_boost=bm25_article_boost,
+        )
         if embedding_cache_dir and embedding_model_config:
             dense = CachedDenseRetriever(
                 chunks,
@@ -257,12 +335,19 @@ def extract_law_hints(text: str) -> list[str]:
     return list(dict.fromkeys(hints))
 
 
-def metadata_boost(chunk: Chunk, law_hints: list[str], article_hints: list[str]) -> float:
+def metadata_boost(
+    chunk: Chunk,
+    law_hints: list[str],
+    article_hints: list[str],
+    *,
+    law_boost: float = 40.0,
+    article_boost: float = 80.0,
+) -> float:
     boost = 0.0
     if law_hints and any(hint in law for hint in law_hints for law in chunk.law_names):
-        boost += 40.0
+        boost += law_boost
     if article_hints and any(article == hint for hint in article_hints for article in chunk.article_numbers):
-        boost += 80.0
+        boost += article_boost
     return boost
 
 
@@ -273,7 +358,24 @@ def format_sources(results: list[SearchResult]) -> str:
         law = "、".join(chunk.law_names) or "未知法律"
         articles = "、".join(chunk.article_numbers) or "未知条文"
         source_file = chunk.source_files[0] if chunk.source_files else ""
+        trace_summary = format_trace_summary(result.trace)
         lines.append(
             f"[S{result.rank}] {law} {articles} score={result.score:.4f} source={source_file}"
+            f"{trace_summary}"
         )
     return "\n".join(lines)
+
+
+def format_trace_summary(trace: dict) -> str:
+    if not trace:
+        return ""
+    parts = []
+    if "bm25_rank" in trace:
+        parts.append(f"bm25#{trace['bm25_rank']}")
+    if "dense_rank" in trace:
+        parts.append(f"dense#{trace['dense_rank']}")
+    if "fused_score" in trace:
+        parts.append(f"fused={float(trace['fused_score']):.4f}")
+    if not parts and "metadata_boost" in trace:
+        parts.append(f"boost={float(trace['metadata_boost']):.2f}")
+    return " trace=" + " ".join(parts) if parts else ""
