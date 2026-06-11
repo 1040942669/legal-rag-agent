@@ -260,6 +260,10 @@ class CoreTest(unittest.TestCase):
             target_coverage=1.0,
             keyword_coverage=1.0,
             citation_hit=1,
+            sufficiency_pass=1,
+            citation_valid=1,
+            verifier_pass=1,
+            refusal_correctness=1,
             latency_ms=1,
             answer="answer",
             sources="[S1] source",
@@ -279,6 +283,7 @@ class CoreTest(unittest.TestCase):
         self.assertIn("legal_eval_cases_v2.jsonl", report)
         self.assertIn("Chunk 数: 4", report)
         self.assertIn("失败归因", report)
+        self.assertIn("Evidence sufficiency pass", report)
 
 
 if __name__ == "__main__":

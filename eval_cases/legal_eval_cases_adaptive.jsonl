@@ -1,0 +1,4 @@
+{"id":"adaptive_multi_consumer_portrait","type":"adaptive_multi_intent","question":"商家不退押金，另外还把我的姓名和照片拿去宣传，气死了！这些分别该查什么依据？","expected_law":"中华人民共和国民法典","expected_articles":["第一百一十条"],"keywords":["押金","姓名权","肖像权"]}
+{"id":"adaptive_vague_minor_contract","type":"adaptive_vague","question":"这个小孩自己签复杂买卖合同到底有没有效力依据？","expected_law":"中华人民共和国民法典","expected_articles":["第十九条"],"keywords":["未成年人","民事行为能力"]}
+{"id":"adaptive_contradictory_platform_info","type":"adaptive_contradictory","question":"平台说我同意了收集个人信息，但是我又说没看到明确提示，这种矛盾应该查哪些个人信息规则？","expected_law":"中华人民共和国网络安全法","expected_articles":["第四十一条"],"keywords":["个人信息","同意","明示"]}
+{"id":"adaptive_many_laws_emotional","type":"adaptive_many_law_hints","question":"《中华人民共和国民法典》《中华人民共和国消费者权益保护法》《中华人民共和国电子商务法》《中华人民共和国广告法》这些都可能有关，网购押金不退还虚假宣传，我很急，应该先检索哪些问题？","expected_law":"中华人民共和国电子商务法","expected_articles":["第二十一条"],"keywords":["押金","虚假宣传","广告"]}

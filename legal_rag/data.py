@@ -11,10 +11,79 @@ from typing import Iterable
 from .models import LawArticle
 
 
-ARTICLE_WITH_LAW_RE = re.compile(
-    r"^《(?P<law>[^》]+)》(?P<article>第[^条]{1,30}条)规定[，,](?P<body>.*)$"
+ARTICLE_NUM_CHARS = r"零一二三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟\d"
+ARTICLE_NUMBER = rf"第[{ARTICLE_NUM_CHARS}]+\s*条"
+ARTICLE_WITH_LAW_MARKER_RE = re.compile(
+    rf"《(?P<law>[^》]+)》(?P<article>{ARTICLE_NUMBER})规定[，,]"
 )
-ARTICLE_WITHOUT_LAW_RE = re.compile(r"^(?P<article>第[^条]{1,30}条)\s*(?P<body>.+)$")
+ARTICLE_WITHOUT_LAW_MARKER_RE = re.compile(rf"(?P<article>{ARTICLE_NUMBER})\s*")
+
+
+def normalize_article_number(raw: str) -> str:
+    return re.sub(r"\s+(?=条)", "", raw.strip())
+
+
+def split_line_into_articles(line: str, law_from_file: str) -> tuple[str | None, list[tuple[str, str, str, str, str]]]:
+    with_law_matches = list(ARTICLE_WITH_LAW_MARKER_RE.finditer(line))
+    if with_law_matches:
+        leading = line[: with_law_matches[0].start()]
+        return (
+            leading if leading.strip() else "",
+            _build_with_law_segments(line, with_law_matches),
+        )
+
+    without_law_matches = list(ARTICLE_WITHOUT_LAW_MARKER_RE.finditer(line))
+    if without_law_matches:
+        leading = line[: without_law_matches[0].start()]
+        return (
+            leading if leading.strip() else "",
+            _build_without_law_segments(line, without_law_matches, law_from_file),
+        )
+
+    return None, []
+
+
+def _build_with_law_segments(
+    line: str,
+    matches: list[re.Match[str]],
+) -> list[tuple[str, str, str, str, str]]:
+    segments: list[tuple[str, str, str, str, str]] = []
+    for index, match in enumerate(matches):
+        segment_end = matches[index + 1].start() if index + 1 < len(matches) else len(line)
+        segment_text = line[match.start() : segment_end].strip()
+        body = line[match.end() : segment_end].strip()
+        segments.append(
+            (
+                match.group("law").strip(),
+                normalize_article_number(match.group("article")),
+                body,
+                segment_text,
+                "with_law",
+            )
+        )
+    return segments
+
+
+def _build_without_law_segments(
+    line: str,
+    matches: list[re.Match[str]],
+    law_from_file: str,
+) -> list[tuple[str, str, str, str, str]]:
+    segments: list[tuple[str, str, str, str, str]] = []
+    for index, match in enumerate(matches):
+        segment_end = matches[index + 1].start() if index + 1 < len(matches) else len(line)
+        segment_text = line[match.start() : segment_end].strip()
+        body = line[match.end() : segment_end].strip()
+        segments.append(
+            (
+                law_from_file,
+                normalize_article_number(match.group("article")),
+                body,
+                segment_text,
+                "from_filename",
+            )
+        )
+    return segments
 
 
 def discover_law_files(dataset_dir: str | Path) -> list[Path]:
@@ -34,37 +103,81 @@ def parse_law_file(path: str | Path) -> list[LawArticle]:
         if not line:
             continue
 
-        law_name = law_from_file
-        article_number = ""
-        body = line
-        parse_status = "unmatched"
+        leading_text, segments = split_line_into_articles(line, law_from_file)
+        if segments:
+            if leading_text:
+                if articles:
+                    last_article = articles[-1]
+                    new_body = last_article.body + f"\n{leading_text.strip()}"
+                    new_raw_text = last_article.raw_text + f"\n{leading_text.strip()}"
+                    articles[-1] = LawArticle(
+                        article_id=last_article.article_id,
+                        law_name=last_article.law_name,
+                        article_number=last_article.article_number,
+                        body=new_body,
+                        raw_text=new_raw_text,
+                        source_file=last_article.source_file,
+                        line_no=last_article.line_no,
+                        parse_status=last_article.parse_status,
+                    )
+                else:
+                    article_id = stable_id(str(file_path), str(line_no), leading_text.strip())
+                    articles.append(
+                        LawArticle(
+                            article_id=article_id,
+                            law_name=law_from_file,
+                            article_number="",
+                            body=leading_text.strip(),
+                            raw_text=leading_text.strip(),
+                            source_file=str(file_path),
+                            line_no=line_no,
+                            parse_status="unmatched",
+                        )
+                    )
 
-        with_law = ARTICLE_WITH_LAW_RE.match(line)
-        if with_law:
-            law_name = with_law.group("law").strip()
-            article_number = with_law.group("article").strip()
-            body = with_law.group("body").strip()
-            parse_status = "with_law"
+            for segment_index, (law_name, article_number, body, segment_text, parse_status) in enumerate(segments):
+                article_id = stable_id(str(file_path), str(line_no), str(segment_index), segment_text)
+                articles.append(
+                    LawArticle(
+                        article_id=article_id,
+                        law_name=law_name,
+                        article_number=article_number,
+                        body=body,
+                        raw_text=segment_text,
+                        source_file=str(file_path),
+                        line_no=line_no,
+                        parse_status=parse_status,
+                    )
+                )
         else:
-            without_law = ARTICLE_WITHOUT_LAW_RE.match(line)
-            if without_law:
-                article_number = without_law.group("article").strip()
-                body = without_law.group("body").strip()
-                parse_status = "from_filename"
-
-        article_id = stable_id(str(file_path), str(line_no), line)
-        articles.append(
-            LawArticle(
-                article_id=article_id,
-                law_name=law_name,
-                article_number=article_number,
-                body=body,
-                raw_text=line,
-                source_file=str(file_path),
-                line_no=line_no,
-                parse_status=parse_status,
-            )
-        )
+            if articles:
+                last_article = articles[-1]
+                new_body = last_article.body + f"\n{line}"
+                new_raw_text = last_article.raw_text + f"\n{line}"
+                articles[-1] = LawArticle(
+                    article_id=last_article.article_id,
+                    law_name=last_article.law_name,
+                    article_number=last_article.article_number,
+                    body=new_body,
+                    raw_text=new_raw_text,
+                    source_file=last_article.source_file,
+                    line_no=last_article.line_no,
+                    parse_status=last_article.parse_status,
+                )
+            else:
+                article_id = stable_id(str(file_path), str(line_no), line)
+                articles.append(
+                    LawArticle(
+                        article_id=article_id,
+                        law_name=law_from_file,
+                        article_number="",
+                        body=line,
+                        raw_text=line,
+                        source_file=str(file_path),
+                        line_no=line_no,
+                        parse_status="unmatched",
+                    )
+                )
 
     return articles
 

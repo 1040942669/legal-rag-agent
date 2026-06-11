@@ -268,3 +268,89 @@ retrieval trace JSONL
 - RRF trace 中 BM25/dense 子排名是否互补；
 - sliding neighbor 是否改善多条文和相邻条文 case；
 - trace JSONL 是否足以复现单个失败 case。
+
+## 06. Phase 2 采用受控 Adaptive RAG，而不是自由 Agent Loop
+
+### 问题 / 触发点
+
+真实用户不会总是输入“某法第几条规定了什么”这种清晰问题。很多输入会混合情绪、多个意图、候选法律、矛盾事实或很长的场景描述。如果直接把整段原文交给 BM25，关键词会被稀释，跨法律问题也容易只召回一部分证据。
+
+### 最初想法
+
+引入 LLM query understanding，让模型把用户问题改写成更适合检索的 query，并自动决定后续检索动作。
+
+### 后来发现
+
+法律场景下自由 agent loop 风险太高: 模型可能无限补检索、扩展到用户没有问的法律问题，或者把个案策略包装成检索结论。Phase 1 已经有 analyzer、failure label 和 retrieval trace，因此 Phase 2 更适合做 bounded planning，而不是开放工具调用。
+
+### 为什么原方案不够
+
+如果 normalizer 没有 JSON contract，评测结果会漂移；如果 planner 没有限制，multi-query retrieval 会引入噪声；如果 merge trace 不记录来源 query，后续 answer verifier 无法判断证据链是否可靠。
+
+### 最终决策
+
+Phase 2 加入受控 adaptive lane:
+
+```text
+Query Analyzer -> trigger check -> NormalizedQuery JSON -> RetrievalPlan -> multi-query retrieval -> dedupe merge -> trace
+```
+
+默认 direct retrieval 不变。只有 `--adaptive` 且 analyzer 判断为 `vague`、`contradictory`、`emotional`、`too_long`、`multi_intent`、`many_law_hints` 或 `low_confidence` 时，才触发 adaptive。`--adaptive` 默认使用 deterministic fallback normalizer；只有 `--adaptive-use-llm` 才调用 Ollama 严格 JSON normalizer，异常时回退到规则结果。
+
+### 面试讲法
+
+```text
+我没有把法律 RAG 升级成自由 Agent，而是做了受控 Adaptive RAG。清晰短查询继续走单 query 检索；复杂输入才触发 normalizer。LLM 只允许输出固定 JSON contract，planner 最多生成有限个 RetrievalPlan，merge 按 chunk_id 去重并保留 source_query 和 plan_id。这样既能处理多意图和模糊问题，又能用 trace 复盘每条证据来自哪里。
+```
+
+### 后续验证指标
+
+- adaptive cases 上 direct vs adaptive 的 Hit@5 / MRR；
+- adaptive 触发率和误触发率；
+- normalizer fallback 次数和错误类型；
+- 每个 case 的 plan 数、去重前后 evidence 数；
+- multi-query 是否改善 `wrong_law`、`wrong_article` 或 `miss`；
+- Phase 3 sufficiency checker 是否能消费 merge trace。
+
+## 07. Phase 3 先做规则型证据校验，而不是 LLM Verifier
+
+### 问题 / 触发点
+
+Phase 2 已经能把复杂 query 拆成 bounded retrieval plans，但生成前仍缺少一道明确的证据门槛。检索结果为空、缺少目标法律/条文、引用编号不存在或用户请求个案策略时，系统不能把风险全部交给生成模型处理。
+
+### 最初想法
+
+加入一个 LLM verifier，让模型判断答案是否被证据支持，并在不足时自动补检索。
+
+### 后来发现
+
+LLM verifier 本身会引入漂移和成本，也可能把“看起来合理”的答案误判为通过。当前更需要的是稳定、可测试、可写入 trace 的底线能力: 引用编号是否存在、免责声明是否保留、是否命中高风险请求、证据是否覆盖显式法律和条号提示。
+
+### 为什么原方案不够
+
+如果直接上 LLM verifier，失败时很难区分是检索证据不足、回答引用错误，还是 verifier 判断漂移。法律 RAG 的 Phase 3 目标是把资料不足和越界风险显式化，而不是追求复杂 agent loop。
+
+### 最终决策
+
+Phase 3 采用规则型链路:
+
+```text
+Query Analyzer -> retrieval/adaptive merge -> EvidenceCheck -> at most one follow-up retrieval -> answer -> VerificationResult
+```
+
+`EvidenceCheck` 检查无结果、显式法律/条文缺失、低覆盖和 normalizer 标出的缺失事实；证据不足时最多补检索一轮。`VerificationResult` 检查 `[Sx]` 引用有效性、免责声明、高风险拒答和基础证据支撑。失败时统一降级到资料不足或边界拒答模板。
+
+### 面试讲法
+
+```text
+我没有直接做自由补检索或 LLM verifier，而是先把证据门槛做成规则型、可测、可追踪。系统会在生成前判断证据是否覆盖显式法律和条文提示，证据不足最多补检索一轮；生成后校验引用编号、免责声明和越界拒答。这样能稳定检测虚假引用、资料不足和个案策略请求，同时保留 trace 解释每次为什么降级。
+```
+
+### 后续验证指标
+
+- Evidence sufficiency pass；
+- Citation validity；
+- Verifier pass；
+- Refusal correctness；
+- follow-up retrieval 触发率和 `stop_reason` 分布；
+- 被降级样例中是否真的缺法律依据或引用无效。

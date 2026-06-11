@@ -11,6 +11,7 @@
 - `chat`: 启动命令行法律聊天助手，支持短期记忆、追问改写、引用来源。
 - `evaluate`: 运行固定测试集，输出 retrieval、answer、latency、失败归因和可选 trace 等指标。
 - `baseline`: 一键重建 `article + BM25 + retrieval-only` 可复现基线。
+- controlled adaptive retrieval: 对复杂输入可选启用 query normalizer、law router、multi-query planning 和 evidence merge。
 
 Phase 1 已补齐检索可靠性和失败归因能力:
 
@@ -20,6 +21,13 @@ Phase 1 已补齐检索可靠性和失败归因能力:
 - BM25/RRF 检索结果会记录 ranking trace，RRF 可解释 BM25 与 dense 的子排名。
 - `evaluate` 报告会统计 `wrong_law`、`wrong_article`、`metadata_gap`、`miss` 等 failure label。
 - `evaluate` 和 `chat` 支持 `--trace-path` 输出 JSONL 检索 trace。
+
+Phase 2 已加入受控 query understanding 和 multi-query planning:
+
+- 默认链路仍是 direct retrieval，baseline 不会自动调用 LLM。
+- `--adaptive` 只在模糊、多意图、矛盾、情绪化、过长、候选法律过多或低置信查询上触发 adaptive lane。
+- `--adaptive-use-llm` 才会调用 Ollama normalizer，并要求严格 JSON；失败时回退到规则 normalizer。
+- adaptive trace 会记录 normalizer、retrieval plans、merge 去重和每条证据的来源 query。
 
 ## 模型
 
@@ -67,6 +75,12 @@ python -m legal_rag.cli build-index --chunk-strategy article
 python -m legal_rag.cli evaluate --chunk-strategy article --retriever bm25
 ```
 
+运行 adaptive retrieval-only smoke:
+
+```powershell
+python -m legal_rag.cli evaluate --chunk-strategy article --retriever bm25 --cases eval_cases/legal_eval_cases_adaptive.jsonl --adaptive --trace-path reports/eval_article_bm25_adaptive_trace.jsonl --prefix eval_article_bm25_adaptive
+```
+
 一键重建 baseline:
 
 ```powershell
@@ -96,6 +110,18 @@ python -m legal_rag.cli evaluate --chunk-strategy article --retriever rrf --embe
 
 ```powershell
 python -m legal_rag.cli chat --chunk-strategy article --retriever bm25 --model qwen2.5:7b
+```
+
+启用受控 adaptive 聊天:
+
+```powershell
+python -m legal_rag.cli chat --chunk-strategy article --retriever bm25 --adaptive --trace-path reports/chat_adaptive_trace.jsonl
+```
+
+如果要让复杂输入调用 Ollama 做严格 JSON normalizer:
+
+```powershell
+python -m legal_rag.cli chat --chunk-strategy article --retriever bm25 --adaptive-use-llm --model qwen2.5:7b
 ```
 
 如果只想看检索结果，不调用 Ollama:
@@ -135,6 +161,13 @@ python -m legal_rag.cli evaluate --chunk-strategy neighbor --retriever bm25 --pr
 python -m legal_rag.cli evaluate --chunk-strategy article --retriever bm25 --trace-path reports/eval_article_bm25_trace.jsonl
 ```
 
+比较 direct retrieval 和 adaptive retrieval 时，先固定同一组 cases 和 retriever，再分别运行:
+
+```powershell
+python -m legal_rag.cli evaluate --chunk-strategy article --retriever bm25 --cases eval_cases/legal_eval_cases_adaptive.jsonl --prefix eval_adaptive_cases_direct
+python -m legal_rag.cli evaluate --chunk-strategy article --retriever bm25 --cases eval_cases/legal_eval_cases_adaptive.jsonl --adaptive --trace-path reports/eval_adaptive_cases_trace.jsonl --prefix eval_adaptive_cases_adaptive
+```
+
 4. 依赖装好后跑 dense 和 RRF:
 
 ```powershell
@@ -157,6 +190,7 @@ python -m legal_rag.cli evaluate --chunk-strategy article --retriever bm25 --gen
 - 固定大小 chunk 只作为课程要求和对照实验，避免覆盖数据本身的条文边界。
 - 具体案件策略和个性化法律意见默认拒答。
 - 回答必须包含来源编号，并带有免责声明。
+- Adaptive RAG 只做受控查询理解和有限检索计划，不做自由 agent loop 或无限补检索。
 
 ## 输出位置
 

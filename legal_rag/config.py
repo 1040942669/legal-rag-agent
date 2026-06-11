@@ -70,6 +70,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "rrf_bm25_weight": 1.0,
         "rrf_dense_weight": 1.0,
     },
+    "adaptive": {
+        "enabled": False,
+        "use_llm": False,
+        "max_queries": 3,
+        "per_plan_top_k": None,
+        "normalizer_retries": 0,
+    },
     "chat": {
         "memory_token_limit": 2000,
         "ollama_base_url": "http://localhost:11434",

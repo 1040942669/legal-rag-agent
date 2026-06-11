@@ -192,6 +192,7 @@ def chunk_from_articles(
 ) -> Chunk:
     if not articles:
         raise ValueError("Cannot create a chunk from zero articles")
+    #为什么要加上换行符？ 因为这样可以让每个文章的文本独立，不会出现相邻文章的文本混合在一起的情况。
     text = "\n".join(article.raw_text for article in articles)
     metadata = {
         "article_ids": [article.article_id for article in articles],

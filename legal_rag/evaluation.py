@@ -8,12 +8,16 @@ from dataclasses import fields
 from pathlib import Path
 from typing import Any
 
+from .adaptive import retrieve_adaptive
 from .chat import LegalChatAssistant
+from .evidence import check_evidence_sufficiency
 from .failure_analysis import label_retrieval_failure
 from .models import EvalCase, EvalRecord, SearchResult
 from .query import analyze_query
+from .query_understanding import CompletionClient
 from .retrieval import Retriever, format_sources
 from .tracing import JsonlTraceWriter, build_retrieval_trace_record
+from .verifier import verify_answer
 
 
 def load_eval_cases(path: str | Path) -> list[EvalCase]:
@@ -47,24 +51,67 @@ def evaluate(
     assistant: LegalChatAssistant | None = None,
     trace_writer: JsonlTraceWriter | None = None,
     trace_metadata: dict[str, Any] | None = None,
+    adaptive_enabled: bool = False,
+    adaptive_use_llm: bool = False,
+    adaptive_llm_client: CompletionClient | None = None,
+    adaptive_max_queries: int = 3,
+    adaptive_per_plan_top_k: int | None = None,
+    normalizer_retries: int = 0,
 ) -> list[EvalRecord]:
     records: list[EvalRecord] = []
     for case in cases:
         analysis = analyze_query(case.question)
+        adaptive_trace: dict[str, Any] = {"enabled": adaptive_enabled, "used": False}
         started = time.perf_counter()
         answer = ""
         error = ""
+        evidence_check = None
+        verification = None
         try:
             if generate:
                 if assistant is None:
                     raise RuntimeError("assistant is required when generate=True")
                 answer, results = assistant.answer(case.question, generate=True)
+                if assistant.last_adaptive_result:
+                    analysis = assistant.last_adaptive_result.analysis
+                    adaptive_trace = assistant.last_adaptive_result.to_trace()
+                    evidence_check = assistant.last_evidence_check
+                    verification = assistant.last_verification
             else:
-                results = retriever.retrieve(case.question, top_k=top_k)
+                adaptive_result = retrieve_adaptive(
+                    case.question,
+                    retriever,
+                    top_k=top_k,
+                    enabled=adaptive_enabled,
+                    use_llm=adaptive_use_llm,
+                    llm_client=adaptive_llm_client,
+                    max_queries=adaptive_max_queries,
+                    per_plan_top_k=adaptive_per_plan_top_k,
+                    normalizer_retries=normalizer_retries,
+                )
+                results = adaptive_result.results
+                analysis = adaptive_result.analysis
+                adaptive_trace = adaptive_result.to_trace() if adaptive_enabled else adaptive_trace
+                evidence_check = adaptive_result.evidence_check
                 answer = "\n".join(result.chunk.text for result in results)
+                verification = verify_answer(
+                    answer,
+                    results,
+                    evidence_check=evidence_check,
+                    risk_flags=analysis.risk_flags,
+                )
         except Exception as exc:  # Keep evaluation running across model failures.
             results = []
             error = str(exc)
+        if evidence_check is None:
+            evidence_check = check_evidence_sufficiency(case.question, results, analysis=analysis)
+        if verification is None:
+            verification = verify_answer(
+                answer,
+                results,
+                evidence_check=evidence_check,
+                risk_flags=analysis.risk_flags,
+            )
         latency_ms = int((time.perf_counter() - started) * 1000)
         failure = label_retrieval_failure(results, case, top_k=top_k)
         if trace_writer:
@@ -77,6 +124,9 @@ def evaluate(
                     results=results,
                     latency_ms=latency_ms,
                     analyzer=analysis.to_dict(),
+                    adaptive=adaptive_trace,
+                    evidence=evidence_check.to_dict(),
+                    verifier=verification.to_dict(),
                     failure=failure.to_dict(),
                     metadata=trace_metadata,
                 )
@@ -94,6 +144,10 @@ def evaluate(
                 target_coverage=target_coverage(results, case, top_k),
                 keyword_coverage=keyword_coverage(answer, case.keywords),
                 citation_hit=citation_hit(results, case),
+                sufficiency_pass=int(evidence_check.sufficient),
+                citation_valid=int(verification.citation_valid),
+                verifier_pass=int(verification.passed),
+                refusal_correctness=int(verification.refusal_correct),
                 latency_ms=latency_ms,
                 answer=answer[:1200],
                 sources=format_sources(results),
@@ -185,6 +239,10 @@ def render_eval_report(records: list[EvalRecord], *, metadata: dict[str, Any] | 
     avg_target_coverage = sum(record.target_coverage for record in records) / len(records)
     avg_latency = sum(record.latency_ms for record in records) / len(records)
     avg_keyword = sum(record.keyword_coverage for record in records) / len(records)
+    avg_sufficiency = sum(record.sufficiency_pass for record in records) / len(records)
+    avg_citation_valid = sum(record.citation_valid for record in records) / len(records)
+    avg_verifier = sum(record.verifier_pass for record in records) / len(records)
+    avg_refusal = sum(record.refusal_correctness for record in records) / len(records)
     first = records[0]
 
     lines = [
@@ -207,6 +265,10 @@ def render_eval_report(records: list[EvalRecord], *, metadata: dict[str, Any] | 
         f"- MRR: {avg_mrr:.3f}",
         f"- 目标条文覆盖率: {avg_target_coverage:.3f}",
         f"- 关键词覆盖率: {avg_keyword:.3f}",
+        f"- Evidence sufficiency pass: {avg_sufficiency:.3f}",
+        f"- Citation validity: {avg_citation_valid:.3f}",
+        f"- Verifier pass: {avg_verifier:.3f}",
+        f"- Refusal correctness: {avg_refusal:.3f}",
         f"- 平均延迟: {avg_latency:.1f} ms",
         "",
         "## 分组指标",
@@ -216,11 +278,14 @@ def render_eval_report(records: list[EvalRecord], *, metadata: dict[str, Any] | 
         group_hit5 = sum(record.hit_at_5 for record in group) / len(group)
         group_mrr = sum(record.mrr for record in group) / len(group)
         group_target = sum(record.target_coverage for record in group) / len(group)
+        group_sufficiency = sum(record.sufficiency_pass for record in group) / len(group)
+        group_verifier = sum(record.verifier_pass for record in group) / len(group)
         group_latency = sum(record.latency_ms for record in group) / len(group)
         lines.append(
             f"- `{case_type}` n={len(group)} Hit@3={group_hit3:.3f} "
             f"Hit@5={group_hit5:.3f} MRR={group_mrr:.3f} "
-            f"TargetCoverage={group_target:.3f} latency={group_latency:.1f}ms"
+            f"TargetCoverage={group_target:.3f} Sufficiency={group_sufficiency:.3f} "
+            f"Verifier={group_verifier:.3f} latency={group_latency:.1f}ms"
         )
     failure_counts = defaultdict(int)
     for record in records:
@@ -266,6 +331,11 @@ def report_metadata_items(metadata: dict[str, Any]) -> list[tuple[str, str]]:
         ("case_path", "评测集"),
         ("top_k", "Top K"),
         ("chunk_count", "Chunk 数"),
+        ("adaptive_enabled", "Adaptive enabled"),
+        ("adaptive_use_llm", "Adaptive LLM normalizer"),
+        ("adaptive_max_queries", "Adaptive max queries"),
+        ("adaptive_per_plan_top_k", "Adaptive per-plan top K"),
+        ("adaptive_normalizer_retries", "Adaptive normalizer retries"),
         ("bm25_k1", "BM25 k1"),
         ("bm25_b", "BM25 b"),
         ("bm25_law_boost", "BM25 law boost"),

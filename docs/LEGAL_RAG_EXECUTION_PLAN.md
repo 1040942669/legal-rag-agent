@@ -2,10 +2,12 @@
 
 ## 当前执行状态
 
-截至 Phase 1，本项目已经完成:
+截至 Phase 3，本项目已经完成:
 
 - Phase 0: baseline/reproducibility 基础，包括 baseline 命令、manifest、v2 eval 默认路径、run metadata 和最小回归测试入口。
 - Phase 1: retrieval reliability and failure attribution，包括 sliding neighbor chunk、chunk diagnostics、规则 Query Analyzer、BM25 参数配置化、RRF trace、failure labeler 和检索 trace JSONL。
+- Phase 2: controlled query understanding and multi-query planning，包括 `NormalizedQuery` JSON contract、触发式 adaptive lane、Ollama normalizer adapter with fallback、候选法律/关键词 suggester、bounded retrieval planner、multi-query evidence merge、adaptive trace 和 adaptive eval cases。
+- Phase 3: evidence sufficiency、bounded follow-up retrieval 和 answer verifier，包括生成前风险拒答、证据充分性检查、最多一轮补检索、低置信降级模板、引用/免责声明/verifier 校验、answer eval 指标扩展和 Phase 3 回归测试。
 
 Phase 1 验证命令:
 
@@ -15,7 +17,21 @@ python -m legal_rag.cli build-index --chunk-strategy neighbor --neighbor-window 
 python -m legal_rag.cli evaluate --chunk-strategy article --retriever bm25 --trace-path reports/eval_article_bm25_trace.jsonl
 ```
 
-下一阶段建议进入 Phase 2，但只做受控 query understanding，不启动自由 agent loop。
+Phase 2 验证命令:
+
+```powershell
+python -B -m pytest
+python -m legal_rag.cli evaluate --chunk-strategy article --retriever bm25 --cases eval_cases/legal_eval_cases_adaptive.jsonl --adaptive --trace-path reports/eval_article_bm25_adaptive_trace.jsonl --prefix eval_article_bm25_adaptive
+```
+
+下一阶段建议进入 Phase 4，重点做 reranker protocol、embedding cache health check、实验矩阵和成本/延迟观测。继续保持 Phase 3 的证据校验和受控补检索边界。
+
+Phase 3 验证命令:
+
+```powershell
+python -B -m pytest
+python -m legal_rag.cli evaluate --chunk-strategy article --retriever bm25 --cases eval_cases/legal_eval_cases_adaptive.jsonl --adaptive --trace-path reports/eval_article_bm25_phase3_trace.jsonl --prefix eval_article_bm25_phase3
+```
 
 ## 1. 项目目标
 
@@ -301,6 +317,6 @@ P4-04 -> P4-05 -> P4-06 -> P5-03 -> P5-04
 | Phase 0 | baseline 可复现，报告含 run metadata，v2 cases 可运行。 | `python -m legal_rag.cli evaluate --retriever bm25 --no-generate`，报告截图或路径。 |
 | Phase 1 | 失败样例有 label，RRF 有 trace，chunk 有诊断。 | eval report 的失败归因统计和 trace JSONL。 |
 | Phase 2 | 复杂输入触发 adaptive，清晰输入不触发；multi-query evidence 可追踪。 | adaptive cases direct vs adaptive 对比报告。 |
-| Phase 3 | 证据不足、虚假引用、越界请求能被降级或拒答。 | answer eval 指标和 verifier failure cases。 |
+| Phase 3 | 已完成。证据不足、虚假引用、越界请求能被降级或拒答，trace/report 包含 sufficiency/verifier 字段。 | `python -B -m pytest`；`evaluate --adaptive --trace-path ...` 检查 evidence/verifier JSONL。 |
 | Phase 4 | reranker/embedding/adaptive 的质量和成本对比完整。 | experiment matrix `summary.csv` 和默认策略报告。 |
 | Phase 5 | README、ADL、LawBench 报告能解释项目闭环。 | quickstart smoke、LawBench importer 小样例、最终验收清单。 |

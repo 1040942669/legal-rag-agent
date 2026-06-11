@@ -2,12 +2,22 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from .adaptive import AdaptiveRetrievalResult, retrieve_adaptive
+from .evidence import build_low_confidence_answer
 from .llm import OllamaClient
-from .models import SearchResult
+from .models import EvidenceCheck, SearchResult, VerificationResult
+from .query import analyze_query
 from .retrieval import Retriever, format_sources
+from .verifier import build_verifier_fallback_answer, verify_answer
 
 
 LEGAL_DISCLAIMER = "仅供课程学习和法律文本检索参考，不构成法律意见。"
+PRE_RETRIEVAL_REFUSAL_FLAGS = {
+    "case_strategy",
+    "illegal_help",
+    "medical_financial_advice",
+    "non_legal",
+}
 
 
 @dataclass
@@ -43,10 +53,23 @@ class LegalChatAssistant:
         memory_token_limit: int = 2000,
         ollama_base_url: str = "http://localhost:11434",
         request_timeout: int = 180,
+        adaptive_enabled: bool = False,
+        adaptive_use_llm: bool = False,
+        adaptive_max_queries: int = 3,
+        adaptive_per_plan_top_k: int | None = None,
+        normalizer_retries: int = 0,
     ) -> None:
         self.retriever = retriever
         self.model = model
         self.top_k = top_k
+        self.adaptive_enabled = adaptive_enabled
+        self.adaptive_use_llm = adaptive_use_llm
+        self.adaptive_max_queries = adaptive_max_queries
+        self.adaptive_per_plan_top_k = adaptive_per_plan_top_k
+        self.normalizer_retries = normalizer_retries
+        self.last_adaptive_result: AdaptiveRetrievalResult | None = None
+        self.last_evidence_check: EvidenceCheck | None = None
+        self.last_verification: VerificationResult | None = None
         self.memory = ConversationMemory(token_limit=memory_token_limit)
         self.llm = OllamaClient(
             model=model,
@@ -56,10 +79,47 @@ class LegalChatAssistant:
 
     def answer(self, question: str, *, generate: bool = True) -> tuple[str, list[SearchResult]]:
         standalone_question = self.condense_question(question)
-        results = self.retriever.retrieve(standalone_question, top_k=self.top_k)
+        pre_analysis = analyze_query(standalone_question)
+        self.last_adaptive_result = None
+        self.last_evidence_check = None
+        self.last_verification = None
+        if should_refuse_before_retrieval(pre_analysis.risk_flags):
+            answer = build_risk_refusal_answer(pre_analysis.risk_flags)
+            self.memory.add("user", question)
+            self.memory.add("assistant", answer)
+            return answer, []
+        adaptive_result = retrieve_adaptive(
+            standalone_question,
+            self.retriever,
+            top_k=self.top_k,
+            enabled=self.adaptive_enabled,
+            use_llm=self.adaptive_use_llm,
+            llm_client=self.llm if self.adaptive_use_llm else None,
+            max_queries=self.adaptive_max_queries,
+            per_plan_top_k=self.adaptive_per_plan_top_k,
+            normalizer_retries=self.normalizer_retries,
+        )
+        self.last_adaptive_result = adaptive_result
+        self.last_evidence_check = adaptive_result.evidence_check
+        results = adaptive_result.results
 
         if not results:
-            answer = f"我无法在现行法律文本数据集中找到可靠依据。{LEGAL_DISCLAIMER}"
+            answer = build_low_confidence_answer(adaptive_result.evidence_check)
+            answer = append_disclaimer(answer)
+            self.memory.add("user", question)
+            self.memory.add("assistant", answer)
+            return answer, results
+
+        if adaptive_result.evidence_check and not adaptive_result.evidence_check.sufficient:
+            answer = append_disclaimer(build_low_confidence_answer(adaptive_result.evidence_check))
+            verification = verify_answer(
+                answer,
+                results,
+                evidence_check=adaptive_result.evidence_check,
+                risk_flags=adaptive_result.analysis.risk_flags,
+                disclaimer=LEGAL_DISCLAIMER,
+            )
+            self.last_verification = verification
             self.memory.add("user", question)
             self.memory.add("assistant", answer)
             return answer, results
@@ -82,8 +142,23 @@ class LegalChatAssistant:
                     + f"\n\n运行错误: {exc}"
                 )
 
-        if LEGAL_DISCLAIMER not in answer:
-            answer = answer.rstrip() + "\n\n" + LEGAL_DISCLAIMER
+        answer = append_disclaimer(answer)
+        verification = verify_answer(
+            answer,
+            results,
+            evidence_check=adaptive_result.evidence_check,
+            risk_flags=adaptive_result.analysis.risk_flags,
+            disclaimer=LEGAL_DISCLAIMER,
+        )
+        self.last_verification = verification
+        if not verification.passed:
+            low_confidence = append_disclaimer(build_low_confidence_answer(adaptive_result.evidence_check))
+            answer = build_verifier_fallback_answer(
+                answer,
+                verification,
+                low_confidence_answer=low_confidence,
+            )
+            answer = append_disclaimer(answer)
         self.memory.add("user", question)
         self.memory.add("assistant", answer)
         return answer, results
@@ -147,10 +222,31 @@ def render_retrieval_only_answer(results: list[SearchResult]) -> str:
     return "检索到以下可能相关的法律依据：\n\n" + "\n\n".join(snippets)
 
 
+def should_refuse_before_retrieval(risk_flags: list[str]) -> bool:
+    return bool(set(risk_flags) & PRE_RETRIEVAL_REFUSAL_FLAGS)
+
+
+def build_risk_refusal_answer(risk_flags: list[str]) -> str:
+    if "illegal_help" in risk_flags:
+        reason = "这个问题涉及违法帮助或规避执法，我不能提供操作方案。"
+    elif "case_strategy" in risk_flags:
+        reason = "这个问题涉及具体案件策略、胜诉判断或个性化法律意见，我不能直接给出方案。"
+    elif "medical_financial_advice" in risk_flags:
+        reason = "这个问题涉及医疗、金融或投资等专业建议，不能作为法律文本检索回答处理。"
+    else:
+        reason = "这个问题不属于当前中国现行法律文本检索范围。"
+    return append_disclaimer(reason + "\n\n我可以帮助检索相关法律条文或解释公开法律文本。")
+
+
+def append_disclaimer(answer: str) -> str:
+    if LEGAL_DISCLAIMER in answer:
+        return answer
+    return answer.rstrip() + "\n\n" + LEGAL_DISCLAIMER
+
+
 def estimate_tokens(text: str) -> int:
     return max(1, len(text) // 2)
 
 
 def render_sources(results: list[SearchResult]) -> str:
     return format_sources(results)
-

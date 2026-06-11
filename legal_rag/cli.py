@@ -16,6 +16,7 @@ from .env import load_dotenv
 from .evaluation import evaluate, load_eval_cases, write_eval_outputs
 from .indexing import build_index, resolve_chunks_path
 from .llamaindex_backend import LlamaIndexRetriever
+from .llm import OllamaClient
 from .manifest import new_run_id
 from .query import analyze_query
 from .retrieval import build_retriever
@@ -100,6 +101,11 @@ def build_parser() -> argparse.ArgumentParser:
     chat.add_argument("--top-k", type=int, default=None)
     chat.add_argument("--trace-path", default=None)
     chat.add_argument("--no-generate", action="store_true", help="Return retrieval results only.")
+    chat.add_argument("--adaptive", action="store_true", help="Enable controlled adaptive retrieval for complex inputs.")
+    chat.add_argument("--adaptive-use-llm", action="store_true", help="Use Ollama for strict JSON query normalization.")
+    chat.add_argument("--adaptive-max-queries", type=int, default=None)
+    chat.add_argument("--adaptive-per-plan-top-k", type=int, default=None)
+    chat.add_argument("--normalizer-retries", type=int, default=None)
     chat.set_defaults(handler=handle_chat)
 
     eval_parser = subparsers.add_parser("evaluate", help="Run retrieval or generation evaluation.")
@@ -115,6 +121,11 @@ def build_parser() -> argparse.ArgumentParser:
     eval_parser.add_argument("--generate", action="store_true")
     eval_parser.add_argument("--prefix", default=None)
     eval_parser.add_argument("--trace-path", default=None)
+    eval_parser.add_argument("--adaptive", action="store_true", help="Enable controlled adaptive retrieval for complex inputs.")
+    eval_parser.add_argument("--adaptive-use-llm", action="store_true", help="Use Ollama for strict JSON query normalization.")
+    eval_parser.add_argument("--adaptive-max-queries", type=int, default=None)
+    eval_parser.add_argument("--adaptive-per-plan-top-k", type=int, default=None)
+    eval_parser.add_argument("--normalizer-retries", type=int, default=None)
     eval_parser.set_defaults(handler=handle_evaluate)
 
     return parser
@@ -255,6 +266,7 @@ def handle_chat(args: argparse.Namespace) -> int:
     chunks = load_chunks(resolve_chunks_path(index_dir))
     retriever_kind = args.retriever or config["retrieval"]["default"]
     top_k = args.top_k or int(config["retrieval"]["top_k"])
+    adaptive_options = adaptive_options_from_args(config, args)
     retriever = create_retriever(
         retriever_kind,
         chunks,
@@ -271,6 +283,11 @@ def handle_chat(args: argparse.Namespace) -> int:
         memory_token_limit=int(config["chat"]["memory_token_limit"]),
         ollama_base_url=config["chat"]["ollama_base_url"],
         request_timeout=int(config["chat"]["request_timeout"]),
+        adaptive_enabled=adaptive_options["enabled"],
+        adaptive_use_llm=adaptive_options["use_llm"],
+        adaptive_max_queries=adaptive_options["max_queries"],
+        adaptive_per_plan_top_k=adaptive_options["per_plan_top_k"],
+        normalizer_retries=adaptive_options["normalizer_retries"],
     )
     trace_writer = None
     if args.trace_path:
@@ -290,6 +307,10 @@ def handle_chat(args: argparse.Namespace) -> int:
         started = time.perf_counter()
         answer, results = assistant.answer(question, generate=not args.no_generate)
         latency_ms = int((time.perf_counter() - started) * 1000)
+        adaptive_trace = {"enabled": adaptive_options["enabled"], "used": False}
+        if assistant.last_adaptive_result:
+            analysis = assistant.last_adaptive_result.analysis
+            adaptive_trace = assistant.last_adaptive_result.to_trace()
         if trace_writer:
             trace_writer.write(
                 build_retrieval_trace_record(
@@ -299,10 +320,14 @@ def handle_chat(args: argparse.Namespace) -> int:
                     results=results,
                     latency_ms=latency_ms,
                     analyzer=analysis.to_dict(),
+                    adaptive=adaptive_trace,
+                    evidence=assistant.last_evidence_check.to_dict() if assistant.last_evidence_check else {},
+                    verifier=assistant.last_verification.to_dict() if assistant.last_verification else {},
                     metadata={
                         "chunk_strategy": strategy,
                         "generate": not args.no_generate,
                         "model": args.model or config["models"]["default"],
+                        "adaptive": adaptive_options,
                     },
                 )
             )
@@ -322,6 +347,7 @@ def handle_evaluate(args: argparse.Namespace) -> int:
     chunks = load_chunks(chunks_path)
     retriever_kind = args.retriever or config["retrieval"]["default"]
     top_k = args.top_k or int(config["retrieval"]["top_k"])
+    adaptive_options = adaptive_options_from_args(config, args)
     case_path = resolve_path(args.cases)
     cases = load_eval_cases(case_path)
     report_dir = resolve_path(config["artifacts"]["report_dir"])
@@ -341,6 +367,7 @@ def handle_evaluate(args: argparse.Namespace) -> int:
         embedding_key=args.embedding,
         embedding_cache_dir=args.embedding_cache_dir,
         trace_path=trace_path,
+        adaptive_options=adaptive_options,
     )
 
     models = resolve_models(args, config)
@@ -356,6 +383,7 @@ def handle_evaluate(args: argparse.Namespace) -> int:
             embedding_cache_dir_arg=args.embedding_cache_dir,
         )
         assistant = None
+        adaptive_llm_client = None
         if args.generate:
             assistant = LegalChatAssistant(
                 retriever,
@@ -363,6 +391,17 @@ def handle_evaluate(args: argparse.Namespace) -> int:
                 top_k=top_k,
                 memory_token_limit=int(config["chat"]["memory_token_limit"]),
                 ollama_base_url=config["chat"]["ollama_base_url"],
+                request_timeout=int(config["chat"]["request_timeout"]),
+                adaptive_enabled=adaptive_options["enabled"],
+                adaptive_use_llm=adaptive_options["use_llm"],
+                adaptive_max_queries=adaptive_options["max_queries"],
+                adaptive_per_plan_top_k=adaptive_options["per_plan_top_k"],
+                normalizer_retries=adaptive_options["normalizer_retries"],
+            )
+        elif adaptive_options["enabled"] and adaptive_options["use_llm"]:
+            adaptive_llm_client = OllamaClient(
+                model=args.model or config["models"]["default"],
+                base_url=config["chat"]["ollama_base_url"],
                 request_timeout=int(config["chat"]["request_timeout"]),
             )
         records = evaluate(
@@ -375,6 +414,12 @@ def handle_evaluate(args: argparse.Namespace) -> int:
             assistant=assistant,
             trace_writer=trace_writer,
             trace_metadata=metadata,
+            adaptive_enabled=adaptive_options["enabled"],
+            adaptive_use_llm=adaptive_options["use_llm"],
+            adaptive_llm_client=adaptive_llm_client,
+            adaptive_max_queries=adaptive_options["max_queries"],
+            adaptive_per_plan_top_k=adaptive_options["per_plan_top_k"],
+            normalizer_retries=adaptive_options["normalizer_retries"],
         )
         all_records.extend(records)
 
@@ -466,6 +511,7 @@ def build_eval_metadata(
     embedding_key: str | None,
     embedding_cache_dir: str | None,
     trace_path: Path | None = None,
+    adaptive_options: dict | None = None,
 ) -> dict:
     metadata = {
         "run_id": run_id,
@@ -476,6 +522,11 @@ def build_eval_metadata(
         "chunks_path": str(chunks_path),
         "retriever": retriever_kind,
         "chunk_strategy": strategy,
+        "adaptive_enabled": bool((adaptive_options or {}).get("enabled", False)),
+        "adaptive_use_llm": bool((adaptive_options or {}).get("use_llm", False)),
+        "adaptive_max_queries": (adaptive_options or {}).get("max_queries", 3),
+        "adaptive_per_plan_top_k": (adaptive_options or {}).get("per_plan_top_k"),
+        "adaptive_normalizer_retries": (adaptive_options or {}).get("normalizer_retries", 0),
         **retrieval_metadata(config),
     }
     manifest_path = index_dir / "manifest.json"
@@ -514,6 +565,30 @@ def retrieval_metadata(config: dict[str, Any]) -> dict[str, Any]:
         "bm25_b": float(retrieval.get("bm25_b", 0.75)),
         "bm25_law_boost": float(retrieval.get("bm25_law_boost", 40.0)),
         "bm25_article_boost": float(retrieval.get("bm25_article_boost", 80.0)),
+    }
+
+
+def adaptive_options_from_args(config: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+    adaptive_config = config.get("adaptive", {})
+    use_llm = bool(adaptive_config.get("use_llm", False) or getattr(args, "adaptive_use_llm", False))
+    enabled = bool(adaptive_config.get("enabled", False) or getattr(args, "adaptive", False) or use_llm)
+    max_queries = getattr(args, "adaptive_max_queries", None)
+    per_plan_top_k = getattr(args, "adaptive_per_plan_top_k", None)
+    normalizer_retries = getattr(args, "normalizer_retries", None)
+    return {
+        "enabled": enabled,
+        "use_llm": use_llm,
+        "max_queries": int(max_queries if max_queries is not None else adaptive_config.get("max_queries", 3)),
+        "per_plan_top_k": (
+            int(per_plan_top_k)
+            if per_plan_top_k is not None
+            else adaptive_config.get("per_plan_top_k")
+        ),
+        "normalizer_retries": int(
+            normalizer_retries
+            if normalizer_retries is not None
+            else adaptive_config.get("normalizer_retries", 0)
+        ),
     }
 
 

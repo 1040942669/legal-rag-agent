@@ -66,6 +66,20 @@ ILLEGAL_HELP_WORDS = [
     "规避执法",
     "怎么不被发现",
 ]
+NON_LEGAL_WORDS = [
+    "天气",
+    "菜谱",
+    "旅游攻略",
+    "写诗",
+    "翻译",
+]
+MEDICAL_FINANCIAL_WORDS = [
+    "诊断",
+    "用药",
+    "买哪只股票",
+    "投资建议",
+    "贷款方案",
+]
 VAGUE_WORDS = [
     "这个",
     "这种",
@@ -91,6 +105,16 @@ CONTRADICTION_WORDS = [
     "矛盾",
     "冲突",
 ]
+
+ADAPTIVE_TRIGGER_FLAGS = {
+    "vague",
+    "contradictory",
+    "emotional",
+    "too_long",
+    "multi_intent",
+    "many_law_hints",
+    "low_confidence",
+}
 
 
 @dataclass(frozen=True)
@@ -122,7 +146,7 @@ def analyze_query(query: str) -> QueryAnalysis:
     adaptive_reasons = [
         flag
         for flag in complexity_flags
-        if flag in {"vague", "contradictory", "emotional", "too_long", "multi_intent", "low_confidence"}
+        if flag in ADAPTIVE_TRIGGER_FLAGS
     ]
     if confidence < 0.45 and "low_confidence" not in adaptive_reasons:
         adaptive_reasons.append("low_confidence")
@@ -140,6 +164,10 @@ def analyze_query(query: str) -> QueryAnalysis:
         token_count=count_query_tokens(normalized),
         confidence=confidence,
     )
+
+
+def should_use_adaptive(analysis: QueryAnalysis) -> bool:
+    return any(reason in ADAPTIVE_TRIGGER_FLAGS for reason in analysis.adaptive_reasons)
 
 
 def extract_article_numbers(text: str) -> list[str]:
@@ -162,6 +190,10 @@ def detect_risk_flags(text: str) -> list[str]:
         flags.append("case_strategy")
     if any(word in text for word in ILLEGAL_HELP_WORDS):
         flags.append("illegal_help")
+    if any(word in text for word in NON_LEGAL_WORDS) and not extract_law_names(text):
+        flags.append("non_legal")
+    if any(word in text for word in MEDICAL_FINANCIAL_WORDS):
+        flags.append("medical_financial_advice")
     if "!" in text or "！" in text:
         flags.append("emotional")
     return unique(flags)
@@ -176,6 +208,8 @@ def detect_complexity_flags(
     flags: list[str] = []
     if len(text) > 160:
         flags.append("too_long")
+    if len(law_names) > 3:
+        flags.append("many_law_hints")
     if len(article_numbers) > 1 or any(word in text for word in MULTI_INTENT_WORDS):
         flags.append("multi_intent")
     if any(word in text for word in CONTRADICTION_WORDS):

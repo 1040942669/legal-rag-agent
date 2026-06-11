@@ -61,6 +61,13 @@ retrieval:
   rrf_bm25_weight: 1.0
   rrf_dense_weight: 1.0
 
+adaptive:
+  enabled: false
+  use_llm: false
+  max_queries: 3
+  per_plan_top_k:
+  normalizer_retries: 0
+
 chat:
   memory_token_limit: 2000
   ollama_base_url: http://localhost:11434
