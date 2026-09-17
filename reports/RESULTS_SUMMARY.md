@@ -116,6 +116,32 @@ Citation validity 0.925；Refusal correctness 1.000（30 条子集只含 3 条�
 4. **方法论注意**：judge 为 DeepSeek-V3，对 DeepSeek-V3 自身的打分存在 self-preference 偏置，
    该行结论需谨慎引用；verifier pass（规则校验，无偏）是更可靠的横向指标。
 
+## 7. Phase 4B 自动矩阵复跑（2026-09-18）
+
+Run ID: `experiment_matrix_20260917T182859Z_aeb3d324`。同一份 120-case v3 数据、article chunk、自研 BM25、top-k=5；108 条有 gold 样例进入 Hit/MRR，12 条 refusal 不混入检索均值。
+
+| 配置 | Hit@3 | Hit@5 | MRR | 目标覆盖率 | 平均延迟 | P50 | P95 | Build time | Build peak |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| direct | 0.639 | **0.704 [0.611, 0.787]** | **0.608** | **0.661** | 243.5 ms | 201.0 ms | 316.1 ms | 3.228 s | 364.9 MB |
+| rules adaptive | 0.620 | 0.667 [0.574, 0.759] | 0.578 | 0.624 | 437.5 ms | 288.0 ms | 1189.3 ms | 3.719 s | 364.9 MB |
+
+本次自动化结果的意义:
+
+1. direct 的 Hit@5/MRR 与 2026-06 手工结果一致，证明 matrix harness 没有改变指标语义。
+2. adaptive 的质量仍然更低，同时 P95 是 direct 的约 3.8 倍，继续默认关闭不仅是质量决策，也是尾延迟决策。
+3. 2026-09 平均延迟与 2026-06 不完全一致，说明跨日期、跨环境不应把毫秒值当成稳定常数；同一次 run 内的相对差异才可比较。
+4. runner 同时产出 CSV、JSON、Markdown，并保留每格状态、失败原因、内存、rerank/LLM 调用和 token 字段。生成文件默认不提交，复核后的结论进入本报告。
+
+### Cache v2 迁移结果
+
+真实旧 `bge_large_zh` cache 可读取且 chunk/vector 数一致，但缺少 `schema_version`、query/document prefix、`embed_with_metadata` 和 corpus/contract fingerprint。`cache-health` 将其判定为 invalid，避免 silent reuse。
+
+尝试在当前机器重建 19,050 个 1024 维向量时，CPU 速度约 7 秒/批、1,191 批，预计超过 2 小时，因此主动停止且未覆盖旧 cache。后续应在 GPU 或可接受长任务的环境重建，然后先通过 `cache-health` 再运行 dense/RRF 矩阵。
+
+### Reranker 证据边界
+
+`BAAI/bge-reranker-v2-m3` adapter、top-N trace 和 runtime stats 已完成并通过 fake scorer 回归测试，但约 2.29 GB 的真实模型尚未跑完整 v3 A/B。本报告不提供虚构的 reranker 分数；默认仍为 `none`。
+
 ## 复现命令
 
 ```powershell
@@ -125,6 +151,12 @@ python -m legal_rag.cli evaluate --chunk-strategy <article|neighbor|long_split|f
 python -m legal_rag.cli evaluate --chunk-strategy article --retriever <bm25|dense|rrf|llamaindex_bm25|llamaindex_dense> --embedding <key> --cases eval_cases/legal_eval_cases_v3.jsonl
 # adaptive A/B
 python -m legal_rag.cli evaluate --chunk-strategy article --retriever bm25 --cases eval_cases/legal_eval_cases_v3.jsonl --adaptive
+# Phase 4B 自动 direct/adaptive 矩阵
+python -m legal_rag.cli experiment-matrix --chunk-strategies article --retrievers bm25 --adaptive-modes direct,adaptive --rerankers none --cases eval_cases/legal_eval_cases_v3.jsonl
+# cache v2 契约检查
+python -m legal_rag.cli cache-health --chunk-strategy article --embedding bge_large_zh
+# 可选 reranker A/B（首次运行需下载/加载模型）
+python -m legal_rag.cli experiment-matrix --chunk-strategies article --retrievers bm25 --adaptive-modes direct --rerankers none,bge_v2_m3 --rerank-top-n 20 --cases eval_cases/legal_eval_cases_v3.jsonl
 # 多模型生成 + judge
 python -m legal_rag.cli evaluate --chunk-strategy article --retriever bm25 --cases eval_cases/legal_eval_cases_v3_gen_subset.jsonl --generate --models <m1,m2,...> --judge
 ```

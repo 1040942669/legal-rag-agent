@@ -103,6 +103,20 @@ DEFAULT_CONFIG: dict[str, Any] = {
         # 已废止法律的得分乘数。1.0 表示不降权；查询明确提到该法律时不降权。
         "deprecated_penalty": 0.5,
     },
+    "reranking": {
+        "default": "none",
+        "candidate_top_n": 20,
+        "models": {
+            "bge_v2_m3": {
+                "provider": "sentence_transformers_cross_encoder",
+                "model_name": "BAAI/bge-reranker-v2-m3",
+                "batch_size": 8,
+                "max_length": 512,
+                "device": "auto",
+                "include_metadata": True,
+            },
+        },
+    },
     "adaptive": {
         "enabled": False,
         "use_llm": False,
