@@ -1,12 +1,13 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from .adaptive import AdaptiveRetrievalResult, retrieve_adaptive
 from .evidence import build_low_confidence_answer
-from .llm import OllamaClient
+from .llm import build_completion_client
 from .models import EvidenceCheck, SearchResult, VerificationResult
-from .query import analyze_query
+from .query import analyze_query, extract_article_numbers, extract_law_names
 from .retrieval import Retriever, format_sources
 from .verifier import build_verifier_fallback_answer, verify_answer
 
@@ -38,6 +39,15 @@ class ConversationMemory:
                 return content
         return ""
 
+    def last_assistant_answer(self) -> str:
+        for role, content in reversed(self.messages):
+            if role == "assistant":
+                return content
+        return ""
+
+    def clear(self) -> None:
+        self.messages.clear()
+
     def _trim(self) -> None:
         while estimate_tokens(self.render()) > self.token_limit and self.messages:
             self.messages.pop(0)
@@ -58,6 +68,7 @@ class LegalChatAssistant:
         adaptive_max_queries: int = 3,
         adaptive_per_plan_top_k: int | None = None,
         normalizer_retries: int = 0,
+        condense_with_llm: bool = False,
     ) -> None:
         self.retriever = retriever
         self.model = model
@@ -67,15 +78,26 @@ class LegalChatAssistant:
         self.adaptive_max_queries = adaptive_max_queries
         self.adaptive_per_plan_top_k = adaptive_per_plan_top_k
         self.normalizer_retries = normalizer_retries
+        self.condense_with_llm = condense_with_llm
         self.last_adaptive_result: AdaptiveRetrievalResult | None = None
         self.last_evidence_check: EvidenceCheck | None = None
         self.last_verification: VerificationResult | None = None
         self.memory = ConversationMemory(token_limit=memory_token_limit)
-        self.llm = OllamaClient(
-            model=model,
-            base_url=ollama_base_url,
+        self.llm = build_completion_client(
+            model,
+            ollama_base_url=ollama_base_url,
             request_timeout=request_timeout,
         )
+
+    def reset_memory(self) -> None:
+        """Clear conversation state so independent questions do not leak context.
+
+        Used by evaluation, where each case must be answered in isolation.
+        """
+        self.memory.clear()
+        self.last_adaptive_result = None
+        self.last_evidence_check = None
+        self.last_verification = None
 
     def answer(self, question: str, *, generate: bool = True) -> tuple[str, list[SearchResult]]:
         standalone_question = self.condense_question(question)
@@ -168,9 +190,35 @@ class LegalChatAssistant:
         if not last_question:
             return question
         pronouns = ("这个", "这条", "上一条", "刚才", "它", "该条", "这一条")
-        if any(word in question for word in pronouns):
-            return f"结合上一轮问题“{last_question}”，回答：{question}"
-        return question
+        if not any(word in question for word in pronouns):
+            return question
+        if self.condense_with_llm:
+            rewritten = self.condense_with_llm_rewrite(question, last_question)
+            if rewritten:
+                return rewritten
+        # Rule fallback: carry over the previous question plus the laws and
+        # article numbers the assistant just cited, so retrieval keeps anchors.
+        references = extract_reference_hints(self.memory.last_assistant_answer())
+        condensed = f"结合上一轮问题“{last_question}”，回答：{question}"
+        if references:
+            condensed += f"（上一轮涉及：{'、'.join(references)}）"
+        return condensed
+
+    def condense_with_llm_rewrite(self, question: str, last_question: str) -> str:
+        prompt = (
+            "把用户的追问改写成一个不依赖上下文的独立中文检索问题。\n"
+            "只输出改写后的问题本身，不要解释，不要加引号。\n\n"
+            f"上一轮问题: {last_question}\n"
+            f"上一轮回答摘要: {self.memory.last_assistant_answer()[:300]}\n"
+            f"用户追问: {question}\n"
+        )
+        try:
+            rewritten = self.llm.complete(prompt).strip().strip("\"'“”")
+        except RuntimeError:
+            return ""
+        if 0 < len(rewritten) <= 120 and "\n" not in rewritten:
+            return rewritten
+        return ""
 
 
 def build_qa_prompt(
@@ -244,8 +292,23 @@ def append_disclaimer(answer: str) -> str:
     return answer.rstrip() + "\n\n" + LEGAL_DISCLAIMER
 
 
+def extract_reference_hints(text: str, limit: int = 4) -> list[str]:
+    if not text:
+        return []
+    hints = extract_law_names(text) + extract_article_numbers(text)
+    return hints[:limit]
+
+
 def estimate_tokens(text: str) -> int:
-    return max(1, len(text) // 2)
+    """Approximate token count: one token per CJK char, one per ASCII word.
+
+    The old `len(text) // 2` heuristic underestimated Chinese text by ~2x and
+    let the memory window grow far beyond its configured limit.
+    """
+    cjk_chars = len(re.findall(r"[\u4e00-\u9fff]", text))
+    ascii_words = len(re.findall(r"[a-zA-Z0-9]+", text))
+    other_chars = len(re.findall(r"[^\u4e00-\u9fffa-zA-Z0-9\s]", text))
+    return max(1, cjk_chars + ascii_words + other_chars // 2)
 
 
 def render_sources(results: list[SearchResult]) -> str:

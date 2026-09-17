@@ -2,7 +2,9 @@
 
 ## 这份文档在做什么
 
-这份文档记录本项目在开发过程中做过的关键架构取舍、被数据推翻的想法、实验设计和面试讲法。以后每次新增优化模块、删除模块、修改默认策略或发现失败模式，都要同步更新这里。
+这份文档记录本项目在开发过程中做过的关键架构取舍、被数据推翻的想法、实验设计和可复述的工程结论。以后每次新增优化模块、删除模块、修改默认策略或发现失败模式，都要同步更新这里。
+
+其中第 01-07 条保留项目早期基线形成时的数据与判断，第 08-12 条记录 2026-06 的 203 部法律 / 19,050 chunks 实验快照。不同阶段的规模数字用于说明演进过程，不应混为同一次实验。
 
 每条记录尽量保持这个结构:
 
@@ -12,7 +14,7 @@
 后来发现
 为什么原方案不够
 最终决策
-面试讲法
+可复述工程结论
 后续验证指标
 ```
 
@@ -28,10 +30,10 @@
 
 ### 后来发现
 
-数据画像显示:
+早期基线数据画像显示:
 
 - 177 个法律文本文件；
-- 14597 条记录；
+- 14,597 条记录；
 - 平均每条 131 字符；
 - P95 为 285 字符，P99 为 428 字符；
 - 解析率 0.9875，大多数记录可解析出法律名称和条文号。
@@ -51,7 +53,7 @@ long_split: 只切异常长条文
 fixed_chars: 固定字符切分，仅作为对照组
 ```
 
-### 面试讲法
+### 可复述的工程结论
 
 ```text
 我没有直接套用 512 token chunk，因为现行法律数据集本身是一行一条法条。法律 RAG 的关键是保留条文边界和引用可解释性，所以我先做数据画像，再把条文级、邻近条文、长条文切分和固定长度切分作为实验变量，用 Hit@5、MRR、引用命中率和延迟来决定最终策略。
@@ -100,7 +102,7 @@ qwen3_embedding_4b: Qwen/Qwen3-Embedding-4B，大模型上限组
 
 `Qwen3-Embedding-8B` 暂时不作为前三组，保留为可选扩展。原因是当前语料规模约 1.46 万条，4B 已能代表高成本上限组；如果 4B 明显优于其他模型，再追加 8B 才有成本收益依据。
 
-### 面试讲法
+### 可复述的工程结论
 
 ```text
 我不是按参数量盲选 embedding，而是设计三组对照: 通用中文 baseline、法律领域模型和大模型上限组。法律问答既有条文号、法律名称这种精确匹配，也有场景语义召回，所以最终用 Hit@5、MRR、引用命中率、向量构建时间和平均检索延迟来决定，而不是默认越大越好。
@@ -156,7 +158,7 @@ BAAI/bge-reranker-base: 轻量实验
 BAAI/bge-reranker-large: 效果上限
 ```
 
-### 面试讲法
+### 可复述的工程结论
 
 ```text
 我先引入 RRF，而不是马上加 reranker。因为 BM25 适合法律名、条号、术语精确匹配，dense 适合场景化语义召回，两者分数尺度不同，所以用 RRF 按排名融合，避免归一化分数带来的不稳定。reranker 放在第二阶段，只对 RRF top-20 重排，这样可以清楚衡量它相对基础召回的增益和延迟成本。
@@ -182,7 +184,7 @@ BAAI/bge-reranker-large: 效果上限
 
 ### 后来发现
 
-用户可使用 SiliconFlow，并且该平台支持 OpenAI-compatible embeddings API。对 14597 条法条构建向量时，API 调用能避免本地环境和显存配置问题，也更接近真实工程中的“按需调用外部模型服务”。
+用户可使用 SiliconFlow，并且该平台支持 OpenAI-compatible embeddings API。对早期基线的 14,597 条法条构建向量时，API 调用能避免本地环境和显存配置问题，也更接近真实工程中的“按需调用外部模型服务”。
 
 ### 为什么原方案不够
 
@@ -200,7 +202,7 @@ qwen3_embedding_4b: SiliconFlow API
 
 API Key 不写入配置文件，只从环境变量 `SILICONFLOW_API_KEY` 读取。
 
-### 面试讲法
+### 可复述的工程结论
 
 ```text
 我保留 Qwen3-Embedding-4B 作为大模型上限组，但没有强行本地部署。因为这个组的目的不是证明我能调显卡，而是比较大模型 embedding 在法律 RAG 检索中的边际收益。为了控制实验成本和环境风险，我用 SiliconFlow 的 OpenAI-compatible embeddings API 构建向量缓存，并把 API 结果和本地 BGE/ChatLaw 在同一套 Hit@5、MRR、延迟指标下比较。
@@ -255,7 +257,7 @@ retrieval trace JSONL
 
 默认检索链路仍保持保守，`article + BM25` 不因为 Phase 1 自动变成 adaptive。复杂 query 的 LLM normalizer 放到 Phase 2。
 
-### 面试讲法
+### 可复述的工程结论
 
 ```text
 我没有在 baseline 后马上加 LLM query rewrite，而是先做失败归因。因为法律 RAG 的关键不是让链路更复杂，而是能解释为什么没召回正确法条。我给 BM25/RRF 加了 ranking trace，给 evaluation 加了 wrong_law、wrong_article、metadata_gap、low_rank 等 failure label，并让 build-index 输出 chunk diagnostics。这样后续再加 adaptive query understanding 时，可以用同一套 trace 判断它到底解决了哪个失败类型。
@@ -297,7 +299,7 @@ Query Analyzer -> trigger check -> NormalizedQuery JSON -> RetrievalPlan -> mult
 
 默认 direct retrieval 不变。只有 `--adaptive` 且 analyzer 判断为 `vague`、`contradictory`、`emotional`、`too_long`、`multi_intent`、`many_law_hints` 或 `low_confidence` 时，才触发 adaptive。`--adaptive` 默认使用 deterministic fallback normalizer；只有 `--adaptive-use-llm` 才调用 Ollama 严格 JSON normalizer，异常时回退到规则结果。
 
-### 面试讲法
+### 可复述的工程结论
 
 ```text
 我没有把法律 RAG 升级成自由 Agent，而是做了受控 Adaptive RAG。清晰短查询继续走单 query 检索；复杂输入才触发 normalizer。LLM 只允许输出固定 JSON contract，planner 最多生成有限个 RetrievalPlan，merge 按 chunk_id 去重并保留 source_query 和 plan_id。这样既能处理多意图和模糊问题，又能用 trace 复盘每条证据来自哪里。
@@ -340,7 +342,7 @@ Query Analyzer -> retrieval/adaptive merge -> EvidenceCheck -> at most one follo
 
 `EvidenceCheck` 检查无结果、显式法律/条文缺失、低覆盖和 normalizer 标出的缺失事实；证据不足时最多补检索一轮。`VerificationResult` 检查 `[Sx]` 引用有效性、免责声明、高风险拒答和基础证据支撑。失败时统一降级到资料不足或边界拒答模板。
 
-### 面试讲法
+### 可复述的工程结论
 
 ```text
 我没有直接做自由补检索或 LLM verifier，而是先把证据门槛做成规则型、可测、可追踪。系统会在生成前判断证据是否覆盖显式法律和条文提示，证据不足最多补检索一轮；生成后校验引用编号、免责声明和越界拒答。这样能稳定检测虚假引用、资料不足和个案策略请求，同时保留 trace 解释每次为什么降级。
@@ -354,3 +356,93 @@ Query Analyzer -> retrieval/adaptive merge -> EvidenceCheck -> at most one follo
 - Refusal correctness；
 - follow-up retrieval 触发率和 `stop_reason` 分布；
 - 被降级样例中是否真的缺法律依据或引用无效。
+
+## 08. Phase 4A 评测体系升级: 每个主张都要有数和置信区间
+
+### 问题 / 触发点
+
+前三个 Phase 把机制建完了，但所有"A 比 B 好"的主张都没有数据支撑: 测试集只有 30 条、没有置信区间、generate 评测时记忆跨 case 泄漏、答案质量只有规则校验没有语义评分。面试里任何一个追问（"你怎么知道 RRF 更好?"）都接不住。
+
+### 最终决策
+
+1. 测试集扩到 120 条（v3），覆盖 9 种题型 + 12 条拒答 case，所有 gold 标注程序化校验过存在于索引中；
+2. 评测报告对 Hit@k / MRR 加 percentile bootstrap 95% CI，拒答类单独统计不混入检索指标；
+3. generate 评测每个 case 前 `reset_memory()`，保证模型对比公平；
+4. 接入 LLM-as-judge（SiliconFlow DeepSeek-V3，严格 JSON 输出 faithfulness / relevance / completeness），与规则 verifier 互补而非替代。
+
+### 可复述的工程结论
+
+```text
+我把"效果稳定可控"翻译成三件事: 足够大的分层测试集、置信区间、可复现实验。120 条 case 上 bootstrap CI 告诉我哪些差距是真的（qwen3 dense 0.981 vs BM25 0.704，区间不重叠），哪些只是噪声（chunk 策略之间 2pp 的差距，区间高度重叠）。LLM judge 只负责语义维度，引用有效性这种可规则化的事情绝不交给 LLM。
+```
+
+### 后续验证指标
+
+- 各实验结论的 CI 是否重叠；judge 与 verifier 的分歧率；judge 对同 backend 的 self-preference 偏置。
+
+## 09. Dense 检索: 文本工程先于模型选型，框架默认值是隐藏变量
+
+### 问题 / 触发点
+
+同一个 bge-large-zh-v1.5 模型，LlamaIndex dense Hit@5 = 0.870，自研 dense 只有 0.676。差距来自哪里?
+
+### 后来发现
+
+LlamaIndex 默认把 node metadata（法律名、条号）拼进 embedding 文本，而自研管线只 embed 纯条文文本；bge 官方还要求 query 侧加 instruction 前缀。逐项消融: metadata 拼接 +5.5pp（0.731），query instruction 再 +3.8pp（0.769）。剩余差距未追平，因为更优解是直接换模型: Qwen3-Embedding-4B（API）到 0.981。同时发现法律领域专用模型 ChatLaw-Text2Vec 只有 0.222——"领域模型一定更好"不成立。
+
+### 最终决策
+
+- `embed_with_metadata` 配置化，并在 `qwen3_embedding_4b_meta` 消融配置中开启；
+- RRF 仅在两路检索质量接近时使用（bge: RRF 0.796 > 单路），dense 显著强时不融合（qwen3: RRF 0.944 < dense 0.981）；
+- LlamaIndex 自带 BM25（不分中文词，0.111）证明自研 BM25（单字+bigram+metadata boost，0.704）的必要性。
+
+### 可复述的工程结论
+
+```text
+我发现框架和自研同模型差 19 个点，没有归因成"框架更好"，而是消融出两个具体变量: embedding 喂什么文本、query 加不加 instruction。这俩加起来追回一半差距，成本为零。这件事的教训是 dense 检索第一性的杠杆是文本工程，不是换模型；以及用框架时必须知道它默认帮你做了什么。
+```
+
+## 10. Adaptive lane 的诚实结论: 当前实现整体负收益
+
+### 问题 / 触发点
+
+Phase 2 建好的 adaptive lane 一直没做同集 A/B。120 条 case 上 direct vs adaptive 对比结果: BM25 0.704→0.667，qwen3 dense 0.981→0.954，整体均为负收益。
+
+### 最终决策
+
+保留 adaptive lane 但默认关闭，结论如实写入报告: 规则式 query 改写会丢失语义信息（semantic_scenario 0.467→0.367），检索器越强伤害越大；唯一正收益是 multi_article 题型（0.800→0.867，多意图拆分有效）。后续方向是只对 multi_intent 触发、或改用 LLM normalizer 重测，而不是默认全开。
+
+### 可复述的工程结论
+
+```text
+A/B 测出来 adaptive 整体是负的，我没有藏这个结果。它说明查询理解的价值取决于检索器强度——强 embedding 模型已经能理解模糊问题，规则改写反而丢信息。这比"我做了 agentic 查询改写"更有面试价值: 我知道它什么时候有害，并有分题型的数据支撑。
+```
+
+## 11. 生成对比: 检索固定后比 backend，量化结论仍需同权重 A/B
+
+### 问题 / 触发点
+
+本地硬件跑不动多个 Ollama 模型串行生成（单实验 7+ 小时未完成），且"哪个 LLM backend 更好"没有数据。
+
+### 最终决策
+
+检索固定为 BM25 + article（四组 Hit@5 完全一致），30 条子集上对比 4 个 backend，DeepSeek-V3 做 judge。本地只保留 qwen2.5:7b（q4_K_M），其余走 SiliconFlow API。结果: faithfulness 普遍 ≥0.94（prompt 约束 + 引用校验有效）；Qwen3.5-4B 推理型 verifier pass 最高（0.633）但延迟 141s 不可用于交互；本地 4bit 7B 在该子集上未观察到明显劣势，但它与 API Instruct 模型并非同一权重，因此不能把结果单独解释为严格的量化无损实验。
+
+### 可复述的工程结论
+
+```text
+比生成模型前先把检索钉死，否则比的是检索抖动。当前子集说明 backend 差距主要体现在覆盖完整性和延迟；量化影响还需要同权重、同提示、同样例的严格 A/B 才能单独下结论。
+```
+
+## 12. Phase 4A 证据边界与 Phase 4B 回滚条件
+
+### 证据边界
+
+- 上述检索结果来自 2026-06 的本地增强语料快照（203 部法律、19,050 article chunks），不是任意未来语料上的稳定常数。
+- v3 检索集有 108 条目标样例；30 条生成子集乘 4 个 backend 形成 120 条 model-case 记录，不能写成 120 个独立生成问题。
+- DeepSeek-V3 同时作为 judge 和被评模型之一，该行存在 self-preference 风险；规则 verifier 和人工抽查仍是必要对照。
+- 当前矩阵由固定 CLI 命令手工执行。Phase 4B 的自动 matrix runner、reranker、cache health 和统一成本聚合尚未实现。
+
+### 决策
+
+在 Phase 4B 完成前，保留 `article + BM25` 作为无外部 API 的可复现 baseline；Qwen3 dense 只作为质量优先配置。Adaptive 继续默认关闭，只有新的分题型 A/B 能证明收益时才扩大触发范围。

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
+import random
 import time
 from collections import defaultdict
 from dataclasses import fields
@@ -12,6 +13,7 @@ from .adaptive import retrieve_adaptive
 from .chat import LegalChatAssistant
 from .evidence import check_evidence_sufficiency
 from .failure_analysis import label_retrieval_failure
+from .judge import judge_answer
 from .models import EvalCase, EvalRecord, SearchResult
 from .query import analyze_query
 from .query_understanding import CompletionClient
@@ -57,9 +59,14 @@ def evaluate(
     adaptive_max_queries: int = 3,
     adaptive_per_plan_top_k: int | None = None,
     normalizer_retries: int = 0,
+    judge_client: CompletionClient | None = None,
 ) -> list[EvalRecord]:
     records: list[EvalRecord] = []
     for case in cases:
+        if assistant is not None:
+            # Each case must be answered in isolation; otherwise conversation
+            # memory leaks across cases and contaminates model comparisons.
+            assistant.reset_memory()
         analysis = analyze_query(case.question)
         adaptive_trace: dict[str, Any] = {"enabled": adaptive_enabled, "used": False}
         started = time.perf_counter()
@@ -114,6 +121,16 @@ def evaluate(
             )
         latency_ms = int((time.perf_counter() - started) * 1000)
         failure = label_retrieval_failure(results, case, top_k=top_k)
+        judge_result = None
+        if judge_client is not None and generate and not error:
+            judge_result = judge_answer(
+                judge_client,
+                question=case.question,
+                answer=answer,
+                results=results,
+            )
+        judge_succeeded = judge_result is not None and judge_result.source != "error"
+        answer_metrics_available = generate and not error
         if trace_writer:
             trace_writer.write(
                 build_retrieval_trace_record(
@@ -145,15 +162,23 @@ def evaluate(
                 keyword_coverage=keyword_coverage(answer, case.keywords),
                 citation_hit=citation_hit(results, case),
                 sufficiency_pass=int(evidence_check.sufficient),
-                citation_valid=int(verification.citation_valid),
-                verifier_pass=int(verification.passed),
-                refusal_correctness=int(verification.refusal_correct),
+                citation_valid=int(verification.citation_valid) if answer_metrics_available else -1,
+                verifier_pass=int(verification.passed) if answer_metrics_available else -1,
+                refusal_correctness=(
+                    int(verification.refusal_correct) if answer_metrics_available else -1
+                ),
                 latency_ms=latency_ms,
                 answer=answer[:1200],
                 sources=format_sources(results),
                 error=error,
                 failure_label=failure.label,
                 failure_reason=failure.reason,
+                judge_faithfulness=judge_result.faithfulness if judge_succeeded else -1.0,
+                judge_relevance=judge_result.relevance if judge_succeeded else -1.0,
+                judge_completeness=judge_result.completeness if judge_succeeded else -1.0,
+                judge_pass=int(judge_result.passed) if judge_succeeded else -1,
+                judge_comment=judge_result.comment if judge_succeeded else "",
+                judge_error=judge_result.error if judge_result and not judge_succeeded else "",
             )
         )
     return records
@@ -230,6 +255,46 @@ def write_eval_outputs(
     return csv_path, report_path
 
 
+def bootstrap_ci(
+    values: list[float],
+    *,
+    n_resamples: int = 2000,
+    confidence: float = 0.95,
+    seed: int = 42,
+) -> tuple[float, float]:
+    """Percentile bootstrap confidence interval for the mean of `values`."""
+    if n_resamples < 1:
+        raise ValueError("n_resamples must be at least 1")
+    if not 0.0 < confidence < 1.0:
+        raise ValueError("confidence must be between 0 and 1")
+    if not values:
+        return (0.0, 0.0)
+    if len(values) == 1:
+        return (values[0], values[0])
+    rng = random.Random(seed)
+    n = len(values)
+    means = sorted(
+        sum(rng.choice(values) for _ in range(n)) / n for _ in range(n_resamples)
+    )
+    alpha = (1.0 - confidence) / 2
+    lower = means[int(alpha * n_resamples)]
+    upper = means[min(int((1.0 - alpha) * n_resamples), n_resamples - 1)]
+    return (round(lower, 4), round(upper, 4))
+
+
+def scored_records(records: list[EvalRecord]) -> list[EvalRecord]:
+    """Records with a retrieval target (refusal cases have none and would dilute hit metrics)."""
+    return [record for record in records if record.failure_label != "not_applicable"]
+
+
+def available_mean(records: list[EvalRecord], field_name: str) -> float | None:
+    values = [float(getattr(record, field_name)) for record in records]
+    available = [value for value in values if value >= 0.0]
+    if not available:
+        return None
+    return sum(available) / len(available)
+
+
 def render_eval_report(records: list[EvalRecord], *, metadata: dict[str, Any] | None = None) -> str:
     if not records:
         return "# 评估报告\n\n没有评估记录。\n"
@@ -240,9 +305,9 @@ def render_eval_report(records: list[EvalRecord], *, metadata: dict[str, Any] | 
     avg_latency = sum(record.latency_ms for record in records) / len(records)
     avg_keyword = sum(record.keyword_coverage for record in records) / len(records)
     avg_sufficiency = sum(record.sufficiency_pass for record in records) / len(records)
-    avg_citation_valid = sum(record.citation_valid for record in records) / len(records)
-    avg_verifier = sum(record.verifier_pass for record in records) / len(records)
-    avg_refusal = sum(record.refusal_correctness for record in records) / len(records)
+    avg_citation_valid = available_mean(records, "citation_valid")
+    avg_verifier = available_mean(records, "verifier_pass")
+    avg_refusal = available_mean(records, "refusal_correctness")
     first = records[0]
 
     lines = [
@@ -266,10 +331,79 @@ def render_eval_report(records: list[EvalRecord], *, metadata: dict[str, Any] | 
         f"- 目标条文覆盖率: {avg_target_coverage:.3f}",
         f"- 关键词覆盖率: {avg_keyword:.3f}",
         f"- Evidence sufficiency pass: {avg_sufficiency:.3f}",
-        f"- Citation validity: {avg_citation_valid:.3f}",
-        f"- Verifier pass: {avg_verifier:.3f}",
-        f"- Refusal correctness: {avg_refusal:.3f}",
+        f"- Citation validity: {avg_citation_valid:.3f}" if avg_citation_valid is not None else "- Citation validity: N/A (retrieval-only)",
+        f"- Verifier pass: {avg_verifier:.3f}" if avg_verifier is not None else "- Verifier pass: N/A (retrieval-only)",
+        f"- Refusal correctness: {avg_refusal:.3f}" if avg_refusal is not None else "- Refusal correctness: N/A (retrieval-only)",
         f"- 平均延迟: {avg_latency:.1f} ms",
+    ])
+    scored = scored_records(records)
+    if scored:
+        scored_hit3 = [float(record.hit_at_3) for record in scored]
+        scored_hit5 = [float(record.hit_at_5) for record in scored]
+        scored_mrr = [record.mrr for record in scored]
+        hit3_ci = bootstrap_ci(scored_hit3)
+        hit5_ci = bootstrap_ci(scored_hit5)
+        mrr_ci = bootstrap_ci(scored_mrr)
+        lines.extend([
+            "",
+            f"## 有目标样例指标 (n={len(scored)}, 排除拒答类, bootstrap 95% CI)",
+            f"- Hit@3: {sum(scored_hit3) / len(scored):.3f} [{hit3_ci[0]:.3f}, {hit3_ci[1]:.3f}]",
+            f"- Hit@5: {sum(scored_hit5) / len(scored):.3f} [{hit5_ci[0]:.3f}, {hit5_ci[1]:.3f}]",
+            f"- MRR: {sum(scored_mrr) / len(scored):.3f} [{mrr_ci[0]:.3f}, {mrr_ci[1]:.3f}]",
+        ])
+    judged = [record for record in records if record.judge_pass >= 0]
+    judge_errors = [record for record in records if record.judge_error]
+    if judged or judge_errors:
+        lines.extend([
+            "",
+            f"## LLM Judge 指标 (成功 n={len(judged)}, 失败 n={len(judge_errors)})",
+        ])
+    if judged:
+        avg_faithfulness = sum(record.judge_faithfulness for record in judged) / len(judged)
+        avg_relevance = sum(record.judge_relevance for record in judged) / len(judged)
+        avg_completeness = sum(record.judge_completeness for record in judged) / len(judged)
+        pass_rate = sum(record.judge_pass for record in judged) / len(judged)
+        lines.extend([
+            f"- Faithfulness: {avg_faithfulness:.3f}",
+            f"- Relevance: {avg_relevance:.3f}",
+            f"- Completeness: {avg_completeness:.3f}",
+            f"- Judge pass rate: {pass_rate:.3f}",
+        ])
+    if judge_errors:
+        lines.append("- Judge 调用或格式错误已从质量均值中排除。")
+    models = sorted({record.model for record in records})
+    if len(models) > 1:
+        lines.extend([
+            "",
+            "## 按模型分组",
+        ])
+        for model_name in models:
+            group = [record for record in records if record.model == model_name]
+            group_scored = scored_records(group)
+            hit5 = (
+                sum(record.hit_at_5 for record in group_scored) / len(group_scored)
+                if group_scored
+                else 0.0
+            )
+            keyword = sum(record.keyword_coverage for record in group) / len(group)
+            verifier = available_mean(group, "verifier_pass")
+            verifier_text = f"{verifier:.3f}" if verifier is not None else "N/A"
+            latency = sum(record.latency_ms for record in group) / len(group)
+            line = (
+                f"- `{model_name}` n={len(group)} Hit@5(scored)={hit5:.3f} "
+                f"KeywordCov={keyword:.3f} VerifierPass={verifier_text} "
+            )
+            line += f"latency={latency:.1f}ms"
+            judged_group = [record for record in group if record.judge_pass >= 0]
+            if judged_group:
+                faith = sum(record.judge_faithfulness for record in judged_group) / len(judged_group)
+                jpass = sum(record.judge_pass for record in judged_group) / len(judged_group)
+                line += f" JudgeFaith={faith:.3f} JudgePass={jpass:.3f}"
+            judge_error_count = sum(bool(record.judge_error) for record in group)
+            if judge_error_count:
+                line += f" JudgeErrors={judge_error_count}"
+            lines.append(line)
+    lines.extend([
         "",
         "## 分组指标",
     ])
@@ -279,13 +413,14 @@ def render_eval_report(records: list[EvalRecord], *, metadata: dict[str, Any] | 
         group_mrr = sum(record.mrr for record in group) / len(group)
         group_target = sum(record.target_coverage for record in group) / len(group)
         group_sufficiency = sum(record.sufficiency_pass for record in group) / len(group)
-        group_verifier = sum(record.verifier_pass for record in group) / len(group)
+        group_verifier = available_mean(group, "verifier_pass")
+        group_verifier_text = f"{group_verifier:.3f}" if group_verifier is not None else "N/A"
         group_latency = sum(record.latency_ms for record in group) / len(group)
         lines.append(
             f"- `{case_type}` n={len(group)} Hit@3={group_hit3:.3f} "
             f"Hit@5={group_hit5:.3f} MRR={group_mrr:.3f} "
             f"TargetCoverage={group_target:.3f} Sufficiency={group_sufficiency:.3f} "
-            f"Verifier={group_verifier:.3f} latency={group_latency:.1f}ms"
+            f"Verifier={group_verifier_text} latency={group_latency:.1f}ms"
         )
     failure_counts = defaultdict(int)
     for record in records:
@@ -331,6 +466,10 @@ def report_metadata_items(metadata: dict[str, Any]) -> list[tuple[str, str]]:
         ("case_path", "评测集"),
         ("top_k", "Top K"),
         ("chunk_count", "Chunk 数"),
+        ("index_size_mb", "索引体积 (MB)"),
+        ("retriever_build_seconds", "检索器构建耗时 (s)"),
+        ("retriever_build_peak_mb", "检索器构建峰值内存 (MB)"),
+        ("judge_model", "Judge 模型"),
         ("adaptive_enabled", "Adaptive enabled"),
         ("adaptive_use_llm", "Adaptive LLM normalizer"),
         ("adaptive_max_queries", "Adaptive max queries"),

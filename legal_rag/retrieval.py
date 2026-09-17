@@ -33,12 +33,15 @@ class BM25Retriever:
         b: float = 0.75,
         law_boost: float = 40.0,
         article_boost: float = 80.0,
+        deprecated_penalty: float = 1.0,
     ) -> None:
         self.chunks = chunks
         self.k1 = k1
         self.b = b
         self.law_boost = law_boost
         self.article_boost = article_boost
+        self.deprecated_penalty = deprecated_penalty
+        self.known_law_hints = build_known_law_hints(chunks)
         self.doc_tokens = [tokenize(chunk.text) for chunk in chunks]
         self.doc_lengths = [len(tokens) for tokens in self.doc_tokens]
         self.avgdl = sum(self.doc_lengths) / max(len(self.doc_lengths), 1)
@@ -50,7 +53,7 @@ class BM25Retriever:
 
     def retrieve(self, query: str, top_k: int = 5) -> list[SearchResult]:
         query_terms = tokenize(query)
-        law_hints = extract_law_hints(query)
+        law_hints = extract_law_hints(query, known_hints=self.known_law_hints)
         article_hints = extract_article_terms(query)
         scores: list[tuple[int, float, dict]] = []
         for index, freqs in enumerate(self.term_freqs):
@@ -72,24 +75,24 @@ class BM25Retriever:
                 law_boost=self.law_boost,
                 article_boost=self.article_boost,
             )
-            score = bm25_score + boost
+            multiplier = deprecated_multiplier(
+                self.chunks[index], law_hints, penalty=self.deprecated_penalty
+            )
+            score = (bm25_score + boost) * multiplier
             if score > 0:
-                scores.append(
-                    (
-                        index,
-                        score,
-                        {
-                            "bm25_score": bm25_score,
-                            "metadata_boost": boost,
-                            "law_hints": law_hints,
-                            "article_hints": article_hints,
-                            "bm25_k1": self.k1,
-                            "bm25_b": self.b,
-                            "bm25_law_boost": self.law_boost,
-                            "bm25_article_boost": self.article_boost,
-                        },
-                    )
-                )
+                trace = {
+                    "bm25_score": bm25_score,
+                    "metadata_boost": boost,
+                    "law_hints": law_hints,
+                    "article_hints": article_hints,
+                    "bm25_k1": self.k1,
+                    "bm25_b": self.b,
+                    "bm25_law_boost": self.law_boost,
+                    "bm25_article_boost": self.article_boost,
+                }
+                if multiplier != 1.0:
+                    trace["deprecated_penalty"] = multiplier
+                scores.append((index, score, trace))
 
         scores.sort(key=lambda item: item[1], reverse=True)
         return [
@@ -144,16 +147,31 @@ class CachedDenseRetriever:
         cache_dir: str | Path,
         model_config: EmbeddingModelConfig,
         device: str = "auto",
+        deprecated_penalty: float = 1.0,
     ) -> None:
         self.chunks = chunks
         self.model_config = model_config
         self.cache = load_embedding_cache(cache_dir)
         validate_cache_matches_chunks(self.cache, chunks)
         self.encoder = build_encoder(model_config, device=device)
+        self.deprecated_penalty = deprecated_penalty
+        self.known_law_hints = build_known_law_hints(chunks)
+        self.deprecated_indexes = [
+            index for index, chunk in enumerate(chunks) if chunk.metadata.get("deprecated")
+        ]
 
     def retrieve(self, query: str, top_k: int = 5) -> list[SearchResult]:
         query_embedding = self.encoder.encode_query(query)
         scores = self.cache.vectors @ query_embedding
+        if self.deprecated_penalty != 1.0 and self.deprecated_indexes:
+            law_hints = extract_law_hints(query, known_hints=self.known_law_hints)
+            scores = scores.copy()
+            for index in self.deprecated_indexes:
+                multiplier = deprecated_multiplier(
+                    self.chunks[index], law_hints, penalty=self.deprecated_penalty
+                )
+                if multiplier != 1.0 and scores[index] > 0:
+                    scores[index] = scores[index] * multiplier
         ranked = sorted(enumerate(scores), key=lambda item: float(item[1]), reverse=True)[:top_k]
         return [
             SearchResult(
@@ -252,6 +270,7 @@ def build_retriever(
     bm25_b: float = 0.75,
     bm25_law_boost: float = 40.0,
     bm25_article_boost: float = 80.0,
+    deprecated_penalty: float = 1.0,
 ) -> Retriever:
     if kind == "bm25":
         return BM25Retriever(
@@ -260,6 +279,7 @@ def build_retriever(
             b=bm25_b,
             law_boost=bm25_law_boost,
             article_boost=bm25_article_boost,
+            deprecated_penalty=deprecated_penalty,
         )
     if kind == "dense":
         if embedding_cache_dir and embedding_model_config:
@@ -268,6 +288,7 @@ def build_retriever(
                 cache_dir=embedding_cache_dir,
                 model_config=embedding_model_config,
                 device=device,
+                deprecated_penalty=deprecated_penalty,
             )
         return DenseRetriever(chunks, model_name=embedding_model)
     if kind in {"rrf", "hybrid"}:
@@ -277,6 +298,7 @@ def build_retriever(
             b=bm25_b,
             law_boost=bm25_law_boost,
             article_boost=bm25_article_boost,
+            deprecated_penalty=deprecated_penalty,
         )
         if embedding_cache_dir and embedding_model_config:
             dense = CachedDenseRetriever(
@@ -284,6 +306,7 @@ def build_retriever(
                 cache_dir=embedding_cache_dir,
                 model_config=embedding_model_config,
                 device=device,
+                deprecated_penalty=deprecated_penalty,
             )
         else:
             dense = DenseRetriever(chunks, model_name=embedding_model)
@@ -315,24 +338,62 @@ def extract_article_terms(text: str) -> list[str]:
     return re.findall(r"第[^条]{1,30}条", text)
 
 
-def extract_law_hints(text: str) -> list[str]:
+FALLBACK_LAW_HINTS = [
+    "民法典",
+    "宪法",
+    "刑法",
+    "民事诉讼法",
+    "刑事诉讼法",
+    "行政诉讼法",
+    "消费者权益保护法",
+    "数据安全法",
+    "网络安全法",
+    "劳动法",
+    "劳动合同法",
+]
+
+
+def build_known_law_hints(chunks: list[Chunk]) -> list[str]:
+    """Collect full and short law names from the corpus so query hints cover
+    every law in the dataset instead of a hardcoded subset."""
+    hints: set[str] = set()
+    for chunk in chunks:
+        for law in chunk.law_names:
+            name = law.strip()
+            if len(name) < 2:
+                continue
+            hints.add(name)
+            short = name.removeprefix("中华人民共和国").strip()
+            if len(short) >= 2:
+                hints.add(short)
+    # Longest first so substring suppression keeps the most specific match.
+    return sorted(hints, key=len, reverse=True)
+
+
+def extract_law_hints(text: str, known_hints: list[str] | None = None) -> list[str]:
     explicit_titles = re.findall(r"《([^》]+)》", text)
-    common_hints = [
-        "民法典",
-        "宪法",
-        "刑法",
-        "民事诉讼法",
-        "刑事诉讼法",
-        "行政诉讼法",
-        "消费者权益保护法",
-        "数据安全法",
-        "网络安全法",
-        "劳动法",
-        "劳动合同法",
-    ]
+    candidates = known_hints if known_hints else FALLBACK_LAW_HINTS
+    matched: list[str] = []
+    for hint in candidates:
+        if hint in text:
+            # Skip hints fully contained in an already matched longer hint
+            # (e.g. drop 保险法 when 社会保险法 matched).
+            if any(hint != kept and hint in kept for kept in matched):
+                continue
+            matched.append(hint)
     hints = explicit_titles[:]
-    hints.extend(hint for hint in common_hints if hint in text)
+    hints.extend(matched)
     return list(dict.fromkeys(hints))
+
+
+def deprecated_multiplier(chunk: Chunk, law_hints: list[str], *, penalty: float) -> float:
+    """Score multiplier for deprecated laws. No penalty when the query
+    explicitly references the deprecated law."""
+    if penalty >= 1.0 or not chunk.metadata.get("deprecated"):
+        return 1.0
+    if law_hints and any(hint in law for hint in law_hints for law in chunk.law_names):
+        return 1.0
+    return penalty
 
 
 def metadata_boost(

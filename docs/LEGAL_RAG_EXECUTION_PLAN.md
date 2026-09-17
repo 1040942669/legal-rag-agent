@@ -2,12 +2,15 @@
 
 ## 当前执行状态
 
-截至 Phase 3，本项目已经完成:
+截至 2026-09-18，本项目已经完成 Phase 0-3，以及 Phase 4 的评测硬化子阶段（下称 Phase 4A）:
 
 - Phase 0: baseline/reproducibility 基础，包括 baseline 命令、manifest、v2 eval 默认路径、run metadata 和最小回归测试入口。
 - Phase 1: retrieval reliability and failure attribution，包括 sliding neighbor chunk、chunk diagnostics、规则 Query Analyzer、BM25 参数配置化、RRF trace、failure labeler 和检索 trace JSONL。
 - Phase 2: controlled query understanding and multi-query planning，包括 `NormalizedQuery` JSON contract、触发式 adaptive lane、Ollama normalizer adapter with fallback、候选法律/关键词 suggester、bounded retrieval planner、multi-query evidence merge、adaptive trace 和 adaptive eval cases。
 - Phase 3: evidence sufficiency、bounded follow-up retrieval 和 answer verifier，包括生成前风险拒答、证据充分性检查、最多一轮补检索、低置信降级模板、引用/免责声明/verifier 校验、answer eval 指标扩展和 Phase 3 回归测试。
+- Phase 4A: evaluation hardening and manual experiment matrix，包括 120 条 v3 固定评测集、30 条生成子集、bootstrap 95% CI、case 间 memory reset、LLM-as-judge、废止法律降权、保守去重、metadata embedding 消融、LlamaIndex 对照和结果总结。
+
+当前全量单元测试为 `57 passed`。Phase 4A 的历史实验结论保存在 `reports/RESULTS_SUMMARY.md`；报告反映 2026-06 的本地增强语料和当时模型版本，精确数值不是跨时间稳定承诺。
 
 Phase 1 验证命令:
 
@@ -24,14 +27,21 @@ python -B -m pytest
 python -m legal_rag.cli evaluate --chunk-strategy article --retriever bm25 --cases eval_cases/legal_eval_cases_adaptive.jsonl --adaptive --trace-path reports/eval_article_bm25_adaptive_trace.jsonl --prefix eval_article_bm25_adaptive
 ```
 
-下一阶段建议进入 Phase 4，重点做 reranker protocol、embedding cache health check、实验矩阵和成本/延迟观测。继续保持 Phase 3 的证据校验和受控补检索边界。
-
 Phase 3 验证命令:
 
 ```powershell
 python -B -m pytest
 python -m legal_rag.cli evaluate --chunk-strategy article --retriever bm25 --cases eval_cases/legal_eval_cases_adaptive.jsonl --adaptive --trace-path reports/eval_article_bm25_phase3_trace.jsonl --prefix eval_article_bm25_phase3
 ```
+
+Phase 4A 验证命令:
+
+```powershell
+python -B -m pytest
+python -m legal_rag.cli evaluate --chunk-strategy article --retriever bm25 --cases eval_cases/legal_eval_cases_v3.jsonl --prefix v3_article_bm25
+```
+
+下一阶段不是继续堆叠 Agent 能力，而是完成 Phase 4B: reranker protocol、embedding cache health check、自动 experiment matrix runner 和统一成本/延迟观测。当前手工实验已经能支持技术判断，但尚不能替代可重复执行的矩阵工具。
 
 ## 1. 项目目标
 
@@ -65,7 +75,7 @@ python -m legal_rag.cli evaluate --chunk-strategy article --retriever bm25 --cas
 | 查询理解过弱 | 真实用户的长描述、情绪化表达、多意图请求会稀释检索 query。 | Phase 2 加触发式 LLM normalizer 和 deterministic fallback。 |
 | 多 query 证据合并缺失 | 多法律领域问题容易只命中一部分证据。 | Phase 2 加 law router、bounded planner、merge trace。 |
 | 证据充分性与引用校验缺失 | 资料不足时仍可能生成过度结论或虚假引用。 | Phase 3 加 sufficiency checker、bounded follow-up、answer verifier。 |
-| 实验矩阵和成本观测不足 | 无法判断 reranker、embedding、adaptive 是否值得默认启用。 | Phase 4 加 matrix runner、latency/cost profiler。 |
+| 实验矩阵仍靠手工命令，成本观测不统一 | 已有 embedding/adaptive 历史对比，但难以一键复跑，reranker 也尚未纳入。 | Phase 4B 加 matrix runner、cache health、reranker 和 latency/cost profiler。 |
 | LawBench 解释不足 | 容易把所有 benchmark 分数误归因于检索。 | Phase 5 加 task map、score importer 和文档硬化。 |
 
 ### 应该暂缓的部分
@@ -195,6 +205,8 @@ flowchart TD
 
 退出标准：产出 BM25、dense、RRF、RRF+rerank、direct/adaptive 的分组对比和默认策略说明。
 
+当前状态：**部分完成**。Phase 4A 已补齐评测集、置信区间、judge 和一轮手工实验矩阵，并确认 adaptive 当前整体负收益、Qwen3 dense 在该快照上质量最高。下表原定的 P4-01 至 P4-05 尚未完整实现；P4-06 只有手工结果总结，需在自动矩阵完成后重新生成。这里保留原任务编号，避免把实验已经跑过误写成工程自动化已经完成。
+
 | ID | 目标 | 范围/可能触达文件 | 预期产出 | 验收标准 | 非目标 | 建议测试/验证 |
 | --- | --- | --- | --- | --- | --- | --- |
 | P4-01 | 定义 Reranker protocol | 新增 `legal_rag/rerank.py`，`legal_rag/retrieval.py`，`legal_rag/cli.py` | `Reranker` 接口和 `NoOpReranker`，CLI 支持 `--reranker none` | 默认 none 不改变结果；接口可组合到 RRF 后 | 不下载模型 | 单测 no-op rerank 顺序不变 |
@@ -318,5 +330,5 @@ P4-04 -> P4-05 -> P4-06 -> P5-03 -> P5-04
 | Phase 1 | 失败样例有 label，RRF 有 trace，chunk 有诊断。 | eval report 的失败归因统计和 trace JSONL。 |
 | Phase 2 | 复杂输入触发 adaptive，清晰输入不触发；multi-query evidence 可追踪。 | adaptive cases direct vs adaptive 对比报告。 |
 | Phase 3 | 已完成。证据不足、虚假引用、越界请求能被降级或拒答，trace/report 包含 sufficiency/verifier 字段。 | `python -B -m pytest`；`evaluate --adaptive --trace-path ...` 检查 evidence/verifier JSONL。 |
-| Phase 4 | reranker/embedding/adaptive 的质量和成本对比完整。 | experiment matrix `summary.csv` 和默认策略报告。 |
+| Phase 4 | 部分完成。Phase 4A 已有固定评测、CI、judge 和手工对比；Phase 4B 的 reranker、cache health、自动 matrix/cost 聚合待开发。 | 当前证据为 `reports/RESULTS_SUMMARY.md`；最终验收仍需自动 experiment matrix `summary.csv`。 |
 | Phase 5 | README、ADL、LawBench 报告能解释项目闭环。 | quickstart smoke、LawBench importer 小样例、最终验收清单。 |

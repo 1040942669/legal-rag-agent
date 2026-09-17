@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import json
 import time
 from pathlib import Path
@@ -8,6 +9,23 @@ from .chunking import build_chunks, save_chunks
 from .data import load_articles
 from .diagnostics import build_chunk_diagnostics, write_chunk_diagnostics
 from .manifest import new_run_id, summarize_path, write_artifact_manifest
+from .models import Chunk
+
+
+def mark_deprecated_chunks(chunks: list[Chunk], deprecated_laws: list[str]) -> list[Chunk]:
+    """Tag chunks whose laws are all deprecated so retrievers can downweight them."""
+    if not deprecated_laws:
+        return chunks
+    deprecated = set(deprecated_laws)
+    marked: list[Chunk] = []
+    for chunk in chunks:
+        if chunk.law_names and all(law in deprecated for law in chunk.law_names):
+            marked.append(
+                dataclasses.replace(chunk, metadata={**chunk.metadata, "deprecated": True})
+            )
+        else:
+            marked.append(chunk)
+    return marked
 
 
 def build_index(
@@ -17,6 +35,7 @@ def build_index(
     output_root: str | Path,
     strategy: str,
     chunking_config: dict,
+    deprecated_laws: list[str] | None = None,
     run_id: str | None = None,
 ) -> dict:
     profile = Path(profile_path)
@@ -37,6 +56,7 @@ def build_index(
         fixed_chars_size=int(chunking_config.get("fixed_chars_size", 500)),
         fixed_chars_overlap=int(chunking_config.get("fixed_chars_overlap", 80)),
     )
+    chunks = mark_deprecated_chunks(chunks, deprecated_laws or [])
 
     index_dir = Path(output_root) / strategy
     chunks_path = save_chunks(chunks, index_dir / "chunks.jsonl")

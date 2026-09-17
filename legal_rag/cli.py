@@ -16,7 +16,7 @@ from .env import load_dotenv
 from .evaluation import evaluate, load_eval_cases, write_eval_outputs
 from .indexing import build_index, resolve_chunks_path
 from .llamaindex_backend import LlamaIndexRetriever
-from .llm import OllamaClient
+from .llm import OllamaClient, SiliconFlowClient
 from .manifest import new_run_id
 from .query import analyze_query
 from .retrieval import build_retriever
@@ -106,6 +106,11 @@ def build_parser() -> argparse.ArgumentParser:
     chat.add_argument("--adaptive-max-queries", type=int, default=None)
     chat.add_argument("--adaptive-per-plan-top-k", type=int, default=None)
     chat.add_argument("--normalizer-retries", type=int, default=None)
+    chat.add_argument(
+        "--condense-llm",
+        action="store_true",
+        help="Use the chat LLM to rewrite follow-up questions into standalone queries.",
+    )
     chat.set_defaults(handler=handle_chat)
 
     eval_parser = subparsers.add_parser("evaluate", help="Run retrieval or generation evaluation.")
@@ -126,6 +131,12 @@ def build_parser() -> argparse.ArgumentParser:
     eval_parser.add_argument("--adaptive-max-queries", type=int, default=None)
     eval_parser.add_argument("--adaptive-per-plan-top-k", type=int, default=None)
     eval_parser.add_argument("--normalizer-retries", type=int, default=None)
+    eval_parser.add_argument(
+        "--judge",
+        action="store_true",
+        help="Score generated answers with an LLM judge (requires --generate).",
+    )
+    eval_parser.add_argument("--judge-model", default=None, help="Override judge model name.")
     eval_parser.set_defaults(handler=handle_evaluate)
 
     return parser
@@ -162,6 +173,7 @@ def handle_build_index(args: argparse.Namespace) -> int:
         output_root=index_root,
         strategy=strategy,
         chunking_config=chunking_config,
+        deprecated_laws=list(config["data"].get("deprecated_laws", [])),
         run_id=new_run_id(f"index_{strategy}"),
     )
     print(json.dumps(metadata, ensure_ascii=False, indent=2))
@@ -189,6 +201,7 @@ def handle_baseline(args: argparse.Namespace) -> int:
         output_root=index_root,
         strategy=strategy,
         chunking_config=config["chunking"],
+        deprecated_laws=list(config["data"].get("deprecated_laws", [])),
         run_id=run_id,
     )
     index_dir = index_root / strategy
@@ -288,6 +301,7 @@ def handle_chat(args: argparse.Namespace) -> int:
         adaptive_max_queries=adaptive_options["max_queries"],
         adaptive_per_plan_top_k=adaptive_options["per_plan_top_k"],
         normalizer_retries=adaptive_options["normalizer_retries"],
+        condense_with_llm=args.condense_llm,
     )
     trace_writer = None
     if args.trace_path:
@@ -370,9 +384,27 @@ def handle_evaluate(args: argparse.Namespace) -> int:
         adaptive_options=adaptive_options,
     )
 
+    judge_client = None
+    if getattr(args, "judge", False):
+        if not args.generate:
+            raise ValueError("--judge requires --generate (it scores generated answers).")
+        judge_config = config.get("judge", {})
+        judge_client = SiliconFlowClient(
+            model=args.judge_model or judge_config.get("model", "deepseek-ai/DeepSeek-V3"),
+            base_url=judge_config.get("api_base_url", "https://api.siliconflow.cn/v1"),
+            api_key_env=judge_config.get("api_key_env", "SILICONFLOW_API_KEY"),
+            request_timeout=int(judge_config.get("request_timeout", 120)),
+            temperature=float(judge_config.get("temperature", 0.0)),
+        )
+        metadata["judge_model"] = judge_client.model
+
     models = resolve_models(args, config)
     all_records = []
     for model in models:
+        import tracemalloc
+
+        tracemalloc.start()
+        build_started = time.perf_counter()
         retriever = create_retriever(
             retriever_kind,
             chunks,
@@ -382,6 +414,11 @@ def handle_evaluate(args: argparse.Namespace) -> int:
             embedding_key=args.embedding,
             embedding_cache_dir_arg=args.embedding_cache_dir,
         )
+        retriever_build_seconds = round(time.perf_counter() - build_started, 3)
+        _, peak_bytes = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+        metadata.setdefault("retriever_build_seconds", retriever_build_seconds)
+        metadata.setdefault("retriever_build_peak_mb", round(peak_bytes / (1024 * 1024), 1))
         assistant = None
         adaptive_llm_client = None
         if args.generate:
@@ -420,6 +457,7 @@ def handle_evaluate(args: argparse.Namespace) -> int:
             adaptive_max_queries=adaptive_options["max_queries"],
             adaptive_per_plan_top_k=adaptive_options["per_plan_top_k"],
             normalizer_retries=adaptive_options["normalizer_retries"],
+            judge_client=judge_client,
         )
         all_records.extend(records)
 
@@ -477,6 +515,7 @@ def create_retriever(
         bm25_b=float(config["retrieval"].get("bm25_b", 0.75)),
         bm25_law_boost=float(config["retrieval"].get("bm25_law_boost", 40.0)),
         bm25_article_boost=float(config["retrieval"].get("bm25_article_boost", 80.0)),
+        deprecated_penalty=float(config["retrieval"].get("deprecated_penalty", 1.0)),
     )
 
 
@@ -519,6 +558,7 @@ def build_eval_metadata(
         "case_path": str(case_path),
         "top_k": top_k,
         "chunk_count": len(chunks),
+        "index_size_mb": round(Path(chunks_path).stat().st_size / (1024 * 1024), 2),
         "chunks_path": str(chunks_path),
         "retriever": retriever_kind,
         "chunk_strategy": strategy,

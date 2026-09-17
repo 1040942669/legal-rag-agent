@@ -2,7 +2,7 @@
 
 ## 当前问题
 
-早期 `eval_cases/legal_eval_cases.jsonl` 只有 10 条手写样例，主要用于 smoke test。它能验证系统是否跑通，但不足以支持模型选择、chunk 策略选择和面试中的工程结论。
+早期 `eval_cases/legal_eval_cases.jsonl` 只有 10 条手写样例，主要用于 smoke test。Phase 4A 已新增 `legal_eval_cases_v3.jsonl`（120 条，其中 108 条有检索目标、12 条拒答）和 30 条生成子集。v1/v2 继续保留用于兼容和快速回归，但实验结论应明确写出使用的 case 版本。
 
 ## 评估目标
 
@@ -31,6 +31,8 @@
 - `adaptive_contradictory`: 描述中存在相互冲突的事实。
 - `adaptive_many_law_hints`: 用户同时提到多部候选法律，需要 bounded planner 截断。
 
+`eval_cases/legal_eval_cases_v3.jsonl` 用于 Phase 4A 的分层实验。它合并 article lookup、semantic scenario、multi-article、cross-law、hard negative、四类 adaptive 输入和 refusal；`legal_eval_cases_v3_gen_subset.jsonl` 是其中固定的 30 条生成评测子集。测试会校验总数、ID 唯一性和子集关系，避免数据文件被无意改坏。
+
 ## 指标
 
 Retrieval:
@@ -39,6 +41,7 @@ Retrieval:
 - MRR: 第一个正确结果的倒数排名。
 - Citation hit: top-k 中是否有可引用的目标条文。
 - Group metrics: 按 case type 分组统计。
+- Bootstrap 95% CI: 对有检索目标的 Hit@3、Hit@5 和 MRR 做固定随机种子的 percentile bootstrap；拒答样例不混入检索均值。
 - Latency: 单次检索平均耗时。
 - Failure label: 对未命中样例标注 `wrong_law`、`wrong_article`、`metadata_gap`、`low_rank`、`miss` 或 `not_applicable`。
 - Ranking trace: BM25 记录 metadata boost，RRF 记录 BM25/dense 子排名、子分数和 fused score。
@@ -52,6 +55,9 @@ Answer:
 - Verifier pass: 规则 verifier 是否同时通过引用、免责声明、越界拒答和基础证据支撑检查。
 - Refusal correctness: 越界问题是否拒答，包括个案策略、违法帮助、非法律问题、医疗/金融越界建议。
 - Hallucination sample review: 人工抽查答案是否编造法律依据。
+- LLM judge: 可选 `--judge`，输出 faithfulness、relevance、completeness；judge 调用失败或 JSON contract 失败单独计数，不进入质量均值。
+
+`Citation validity`、`Verifier pass` 和 `Refusal correctness` 只对 `--generate` 运行有定义。Retrieval-only 报告将这些字段显示为 `N/A`，避免把拼接的检索文本误当作模型回答；拒答数据在 retrieval-only 阶段只用于验证风险 router 是否命中。
 
 ## 实验矩阵
 
@@ -70,6 +76,7 @@ Retriever:
 BM25
 Dense
 BM25 + Dense + RRF
+LlamaIndex BM25 / Dense (framework comparison only)
 ```
 
 Embedding:
@@ -78,6 +85,7 @@ Embedding:
 bge_large_zh
 chatlaw_text2vec
 qwen3_embedding_4b
+bge_large_zh_meta / qwen3_embedding_4b_meta (metadata-text ablation)
 ```
 
 ## Phase 1 诊断产物
@@ -150,6 +158,41 @@ python -m legal_rag.cli evaluate --chunk-strategy article --retriever bm25 --cas
 
 Trace JSONL 现在除 `adaptive` 外，还包含 `evidence` 和 `verifier` 字段，评估报告会汇总 `Evidence sufficiency pass`、`Citation validity`、`Verifier pass` 和 `Refusal correctness`。
 
+## Phase 4A 评测硬化与实验结论
+
+Phase 4A 已完成以下能力:
+
+- v3 固定评测集和 30 条生成子集。
+- 有检索目标样例的 bootstrap 95% CI。
+- 每个生成 case 前清空对话记忆，避免跨 case 泄漏。
+- 可选 LLM-as-judge；其输出使用严格数值/布尔 contract，`passed` 由分数阈值重新计算。
+- judge API 或格式错误与模型质量失败分开统计。
+- BM25、dense、RRF、LlamaIndex adapter、metadata embedding 和 adaptive lane 的固定命令对照。
+
+检索基线复跑命令:
+
+```powershell
+python -m legal_rag.cli evaluate --chunk-strategy article --retriever bm25 --cases eval_cases/legal_eval_cases_v3.jsonl --prefix v3_article_bm25
+```
+
+生成与 judge 命令（会调用本地 Ollama 和/或 SiliconFlow）:
+
+```powershell
+python -m legal_rag.cli evaluate --chunk-strategy article --retriever bm25 --cases eval_cases/legal_eval_cases_v3_gen_subset.jsonl --generate --models qwen2.5:7b,siliconflow:deepseek-ai/DeepSeek-V3 --judge --prefix v3gen_models_bm25
+```
+
+历史结果见 `reports/RESULTS_SUMMARY.md`。该报告来自 2026-06 的本地增强语料快照；精确复现需要相同的 203 部法律语料、embedding cache 和当时的 API 模型版本。仓库当前可以复现评测逻辑与命令，但还没有自动下载并校验该语料快照。
+
+## Phase 4B 尚未完成
+
+- Reranker protocol、NoOp/BGE adapter。
+- Embedding cache 的模型 key、维度、normalize、chunk ID 和数量 health check。
+- 自动 experiment matrix runner 和统一 `summary.csv`。
+- 将检索、normalizer、reranker、judge 的延迟/调用次数/估算成本统一聚合。
+- 基于自动矩阵重新生成默认策略决策报告。
+
+因此当前状态应描述为“Phase 4A 已完成、Phase 4B 待开发”，不能把手工实验矩阵等同于自动化实验平台。
+
 ## Phase 1 验收命令
 
 ```powershell
@@ -178,5 +221,5 @@ python -m legal_rag.cli evaluate --chunk-strategy article --retriever bm25 --cas
 - 如果 `article_lookup` 很强但 `semantic_scenario` 弱，说明需要更好的 embedding 或 reranker。
 - 如果 `multi_article` 弱，说明可能需要 `neighbor` chunk 或扩大 top-k。
 - 如果 `cross_law` 弱，说明查询改写或 hybrid retrieval 需要改。
-- 如果 Qwen3 提升不明显但成本显著增加，默认方案仍选 `bge_large_zh + BM25 + RRF`。
+- 默认策略必须同时报告质量、延迟和外部 API 依赖；历史实验中 Qwen3 dense 质量最高，但不能只凭 Hit@5 忽略成本、隐私和离线可用性。
 - 如果 failure label 集中在 `wrong_law`，优先检查法律名提示和 hybrid retrieval；如果集中在 `wrong_article`，优先检查条号解析、metadata boost 和 chunk 边界；如果集中在 `low_rank`，再考虑 reranker。

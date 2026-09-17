@@ -182,10 +182,21 @@ def parse_law_file(path: str | Path) -> list[LawArticle]:
     return articles
 
 
-def load_articles(dataset_dir: str | Path) -> list[LawArticle]:
+def load_articles(dataset_dir: str | Path, *, deduplicate: bool = True) -> list[LawArticle]:
+    """Load all articles. With deduplicate=True, drop exact duplicates that share
+    the same law name, article number and normalized text (e.g. the same provision
+    appearing in both the law file and a related quotation file). Cross-law
+    quotations keep different law names and are preserved."""
     articles: list[LawArticle] = []
+    seen: set[tuple[str, str, str]] = set()
     for file_path in discover_law_files(dataset_dir):
-        articles.extend(parse_law_file(file_path))
+        for article in parse_law_file(file_path):
+            if deduplicate and article.article_number:
+                key = (article.law_name, article.article_number, normalize_text(article.raw_text))
+                if key in seen:
+                    continue
+                seen.add(key)
+            articles.append(article)
     return articles
 
 
@@ -196,6 +207,7 @@ def stable_id(*parts: str) -> str:
 
 def profile_dataset(dataset_dir: str | Path, readme_path: str | Path | None = None) -> dict:
     files = discover_law_files(dataset_dir)
+    raw_count = len(load_articles(dataset_dir, deduplicate=False))
     articles = load_articles(dataset_dir)
     char_lengths = [len(article.raw_text) for article in articles]
     normalized_texts = [normalize_text(article.raw_text) for article in articles]
@@ -209,6 +221,7 @@ def profile_dataset(dataset_dir: str | Path, readme_path: str | Path | None = No
         "readme_summary": read_readme_summary(readme_path),
         "file_count": len(files),
         "article_count": len(articles),
+        "exact_duplicate_removed": raw_count - len(articles),
         "duplicate_article_count": duplicates,
         "parse_counts": dict(parse_counts),
         "parse_rate": round((parse_counts["with_law"] + parse_counts["from_filename"]) / max(len(articles), 1), 4),
@@ -354,7 +367,8 @@ def render_profile_markdown(profile: dict) -> str:
         "## 总体统计",
         f"- 文件数: {profile.get('file_count', 0)}",
         f"- 条文记录数: {profile.get('article_count', 0)}",
-        f"- 重复记录数: {profile.get('duplicate_article_count', 0)}",
+        f"- 去重移除的完全重复条文: {profile.get('exact_duplicate_removed', 0)}",
+        f"- 剩余跨法律重复文本: {profile.get('duplicate_article_count', 0)}",
         f"- 可解析率: {profile.get('parse_rate', 0)}",
         f"- 解析状态: `{json.dumps(parse_counts, ensure_ascii=False)}`",
         "",

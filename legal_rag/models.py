@@ -172,3 +172,9 @@ class EvalRecord:
     error: str = ""
     failure_label: str = ""
     failure_reason: str = ""
+    judge_faithfulness: float = -1.0
+    judge_relevance: float = -1.0
+    judge_completeness: float = -1.0
+    judge_pass: int = -1
+    judge_comment: str = ""
+    judge_error: str = ""

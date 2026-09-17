@@ -9,6 +9,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "data": {
         "dataset_dir": "Chinese-Laws/Chinese-Laws",
         "readme_path": "Chinese-Laws/README.md",
+        # 已被民法典(2021-01-01 施行)废止但仍保留在数据集中的法律。
+        # 保留原文用于对照，检索时默认降权，见 retrieval.deprecated_penalty。
+        "deprecated_laws": [
+            "中华人民共和国民法通则",
+            "中华人民共和国合同法",
+            "中华人民共和国继承法",
+        ],
     },
     "artifacts": {
         "profile_dir": "artifacts/profile",
@@ -34,6 +41,30 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "trust_remote_code": False,
                 "query_prefix": "",
                 "document_prefix": "",
+            },
+            "bge_large_zh_meta": {
+                "provider": "sentence_transformers",
+                "model_name": "BAAI/bge-large-zh-v1.5",
+                "role": "metadata_embedding_ablation",
+                "normalize": True,
+                "trust_remote_code": False,
+                "query_prefix": "为这个句子生成表示以用于检索相关文章：",
+                "document_prefix": "",
+                "embed_with_metadata": True,
+            },
+            "qwen3_embedding_4b_meta": {
+                "provider": "siliconflow",
+                "model_name": "Qwen/Qwen3-Embedding-4B",
+                "role": "metadata_embedding_ablation",
+                "normalize": True,
+                "trust_remote_code": False,
+                "api_base_url": "https://api.siliconflow.cn/v1",
+                "api_key_env": "SILICONFLOW_API_KEY",
+                "dimensions": None,
+                "max_retries": 3,
+                "query_prefix": "Instruct: Given a legal question, retrieve relevant Chinese law provisions.\nQuery: ",
+                "document_prefix": "",
+                "embed_with_metadata": True,
             },
             "chatlaw_text2vec": {
                 "provider": "sentence_transformers",
@@ -69,6 +100,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "rrf_k": 60,
         "rrf_bm25_weight": 1.0,
         "rrf_dense_weight": 1.0,
+        # 已废止法律的得分乘数。1.0 表示不降权；查询明确提到该法律时不降权。
+        "deprecated_penalty": 0.5,
     },
     "adaptive": {
         "enabled": False,
@@ -81,6 +114,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "memory_token_limit": 2000,
         "ollama_base_url": "http://localhost:11434",
         "request_timeout": 180,
+    },
+    "judge": {
+        "provider": "siliconflow",
+        "model": "deepseek-ai/DeepSeek-V3",
+        "api_base_url": "https://api.siliconflow.cn/v1",
+        "api_key_env": "SILICONFLOW_API_KEY",
+        "request_timeout": 120,
+        "temperature": 0.0,
     },
     "chunking": {
         "default_strategy": "article",

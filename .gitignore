@@ -10,6 +10,8 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+/.codegraph/
+/.reasonix/
 artifacts/indexes/
 artifacts/embeddings/
 artifacts/lawbench/
@@ -18,12 +20,10 @@ artifacts/uv-python/
 artifacts/profile/
 artifacts/test_tmp/
 artifacts/*.env
-reports/*.csv
-reports/*.json
-reports/baseline_*.md
-reports/eval_*.md
-reports/smoke_*.md
-reports/data_profile.md
+reports/*
+!reports/RESULTS_SUMMARY.md
+eval_cases/_*.jsonl
+/_smoke_out.txt
 /evaluation_result.*
 /temp_out*.txt
 /Chinese-Laws/

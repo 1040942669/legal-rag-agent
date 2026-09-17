@@ -27,6 +27,9 @@ class EmbeddingModelConfig:
     max_retries: int = 3
     query_prefix: str = ""
     document_prefix: str = ""
+    # Prepend law names and article numbers to the chunk text before embedding.
+    # LlamaIndex does this by default and it markedly improves legal retrieval.
+    embed_with_metadata: bool = False
 
 
 @dataclass(frozen=True)
@@ -136,6 +139,7 @@ def resolve_embedding_model(config: dict, embedding_key: str | None = None) -> E
         max_retries=int(item.get("max_retries", 3)),
         query_prefix=item.get("query_prefix", ""),
         document_prefix=item.get("document_prefix", ""),
+        embed_with_metadata=bool(item.get("embed_with_metadata", False)),
     )
 
 
@@ -152,7 +156,10 @@ def build_embedding_cache(
     chunks = load_chunks(chunks_path)
     encoder = build_encoder(model_config, device=device)
     started = time.perf_counter()
-    vectors = encoder.encode_documents([chunk.text for chunk in chunks], batch_size=batch_size)
+    vectors = encoder.encode_documents(
+        [embedding_document_text(chunk, model_config) for chunk in chunks],
+        batch_size=batch_size,
+    )
 
     try:
         import numpy as np  # type: ignore
@@ -185,6 +192,7 @@ def build_embedding_cache(
         "chunk_ids_path": str(chunk_ids_path),
         "chunks_path": str(chunks_path),
         "normalize": model_config.normalize,
+        "embed_with_metadata": model_config.embed_with_metadata,
         "manifest_path": str(manifest_path),
         "build_seconds": round(time.perf_counter() - started, 3),
     }
@@ -216,6 +224,15 @@ def build_embedding_cache(
         },
     )
     return metadata
+
+
+def embedding_document_text(chunk: Chunk, model_config: EmbeddingModelConfig) -> str:
+    if not model_config.embed_with_metadata:
+        return chunk.text
+    law = "、".join(chunk.law_names)
+    article = "、".join(chunk.article_numbers)
+    header = " ".join(part for part in (law, article) if part)
+    return f"{header}\n{chunk.text}" if header else chunk.text
 
 
 def build_encoder(model_config: EmbeddingModelConfig, *, device: str = "auto"):
