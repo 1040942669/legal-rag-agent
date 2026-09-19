@@ -4,6 +4,17 @@
 
 ## [Unreleased]
 
+### Added
+
+- M2 进行中的严格实验 manifest 与分阶段精确缓存契约，区分 fresh、cache 和零外调 replay。
+- 不可变逐 case attempt/complete artifact、校验和、损坏清单、兼容性检查和 pending commit 恢复。
+- 通用 work-unit runner 基础，支持 session group 内顺序执行、不同 work unit 并发、重试预算、断点续跑、分层计时和外部调用账本。
+
+### Known limitations
+
+- M2 尚未完成真实评测/chat adapter、真实会话状态等价恢复、artifact-only 聚合、数据集 registry、CLI 生命周期、provider timeout/error 分类和 M2 累积门禁。
+- 当前变更只存在于 M2 草稿 PR，包版本仍为 `0.2.0`；尚未创建 `v0.3.0` Tag 或 Release。
+
 ## [0.2.0] - 2026-09-20
 
 ### Added

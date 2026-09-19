@@ -7,8 +7,8 @@
     "observed_default_branch": "master",
     "observed_baseline_commit": "00ec3ad5b193a7442e427486e8bfade2dbabd482",
     "observed_on": "2026-09-20",
-    "workspace_head": "00ec3ad5b193a7442e427486e8bfade2dbabd482",
-    "workspace_head_note": "M2 started from the verified M1 release-finalization merge on origin/master. The v0.2.0 tag remains pinned to the M1 software release target.",
+    "workspace_head": "efd5f53df73a74b816444146358f652cf1a8dbe0",
+    "workspace_head_note": "Latest recorded M2 implementation checkpoint. This STATE update is a following documentation-only handoff commit, so read the remote branch for its exact tip. The v0.2.0 tag remains pinned to the M1 software release target.",
     "workspace_branch": "codex/m2-experiment-lifecycle",
     "workspace_dirty": false,
     "remote_tags_checked": true
@@ -158,7 +158,7 @@
       "branch": "codex/m2-experiment-lifecycle",
       "issue_url": "https://github.com/1040942669/legal-rag-agent/issues/8",
       "milestone_url": "https://github.com/1040942669/legal-rag-agent/milestone/3",
-      "pr_url": null,
+      "pr_url": "https://github.com/1040942669/legal-rag-agent/pull/9",
       "candidate_sha": null,
       "release_target_sha": null,
       "tag": null,
@@ -169,7 +169,30 @@
         "passed": null,
         "failed": null,
         "skipped": null,
-        "report_path": null
+        "report_path": null,
+        "scope": "final cumulative M2 milestone gate; not yet installed or run"
+      },
+      "interim_progress": {
+        "latest_implementation_sha": "efd5f53df73a74b816444146358f652cf1a8dbe0",
+        "completed_subtasks": [
+          "A: strict experiment identity and exact stage cache contracts",
+          "B: immutable per-case attempt/complete artifacts and resume inventory",
+          "C: generic isolated work-unit runner, checkpoint resume, concurrency, timings and call ledgers"
+        ],
+        "targeted_tests_passed": 74,
+        "full_regression_passed": 260,
+        "full_regression_subtests_passed": 148,
+        "ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/35470921788",
+        "ci_status": "passed",
+        "ci_scope": "existing cumulative M1 gate; the final cumulative M2 gate remains pending",
+        "live_model_calls": 0,
+        "remaining_acceptance_boundaries": [
+          "production evaluation/chat adapter and real ConversationMemory export/restore equivalence",
+          "exact cache/replay identity integration for stage observations",
+          "provider timeout and retryable/non-retryable error classification",
+          "artifact-only aggregation, dataset registry, evaluation modes and CLI lifecycle",
+          "cumulative M2-T01 through M2-T08 gate, documentation, package proof, merge, tag, release and receipt"
+        ]
       },
       "blockers": []
     },
@@ -294,5 +317,5 @@
       "blockers": []
     }
   ],
-  "next_action": "Implement the first M2 test-driven subtask on codex/m2-experiment-lifecycle: experiment plan/manifest identity, exact cache contracts, and the corresponding M2-T01/M2-T02 coverage; keep all live model calls disabled."
+  "next_action": "Continue only M2 Subtask D on codex/m2-experiment-lifecycle: integrate the production evaluation/chat runtime with exact cache identities and real conversation-state restore, add provider timeout/error classification, artifact-only aggregation, dataset registry and the plan/run/resume/aggregate/replay CLI; keep all live model calls disabled."
 }

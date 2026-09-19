@@ -2,8 +2,8 @@
 
 ## 当前真实状态
 
-- M2 已按用户连续执行指令启动，状态为 `in_progress`；基线为已验证的 `origin/master` `00ec3ad5b193a7442e427486e8bfade2dbabd482`，工作分支为 `codex/m2-experiment-lifecycle`。
-- M2 使用 [Issue #8](https://github.com/1040942669/legal-rag-agent/issues/8) 与 [Milestone 3](https://github.com/1040942669/legal-rag-agent/milestone/3) 跟踪；计划版本为 `v0.3.0`。当前尚未创建 M2 PR、Tag 或 Release，也未运行真实模型或付费调用。
+- M2 状态为 `in_progress`；基线为已验证的 `origin/master` `00ec3ad5b193a7442e427486e8bfade2dbabd482`，工作分支为 `codex/m2-experiment-lifecycle`。最近的实现提交为 `efd5f53df73a74b816444146358f652cf1a8dbe0`，已经推送到同名远端分支；本交接更新本身是后续纯文档提交，精确分支 tip 应以远端读取为准。
+- M2 使用 [Issue #8](https://github.com/1040942669/legal-rag-agent/issues/8)、[Milestone 3](https://github.com/1040942669/legal-rag-agent/milestone/3) 与 [草稿 PR #9](https://github.com/1040942669/legal-rag-agent/pull/9) 跟踪；计划版本为 `v0.3.0`。Tag、Release、候选 SHA 和发布回执均尚未创建，也未运行真实模型或付费调用。
 - M0 软件版本已经发布并远端核验；终态为 `released`。发布回执 [PR #3](https://github.com/1040942669/legal-rag-agent/pull/3) 已于 `2026-09-19T07:13:37Z` 合并，`master` merge commit `52714d5f84634f008a5860f6bf4f5aa199ae3261` 的 [CI 35428743968](https://github.com/1040942669/legal-rag-agent/actions/runs/35428743968) 成功，Milestone 1 已关闭。
 - 目标仓库：`1040942669/legal-rag-agent`；远端默认分支为 `master`。M1 工作基线为 `52714d5f84634f008a5860f6bf4f5aa199ae3261`。
 - M1 软件 [PR #5](https://github.com/1040942669/legal-rag-agent/pull/5) 已于 `2026-09-19T18:56:38Z` 普通合并；最终 PR head 为 `d2fa34776cd188197954eff9a0092c207f309b97`，release target / merge commit 为 `d51ed481f986dde807163f4b5583b07bc9ef6750`。
@@ -20,6 +20,17 @@
 - 默认离线、并发 1、真实模型调用关闭；dense query embedding 或 adaptive normalizer 是否产生外部调用必须由 manifest 与调用账本显式记录，不能笼统写成 retrieval-only 永远零调用。
 - 本阶段不引入 PostgreSQL/pgvector、FastAPI、LangGraph、Redis/Celery、UI 或生产部署；这些仍属于 M3-M7。
 - 发布前必须累计通过 M0、M1 和 M2 门禁；发布 `v0.3.0` 后另以文档回执记录真实远端状态，不移动软件 Tag。
+
+## M2 当前进展与唯一下一步
+
+- 子任务 A 已在 `ee972a1` 完成：严格 canonical JSON、实验 manifest 身份、分阶段精确 cache key，以及 fresh/cache/replay 的 fail-closed 契约。
+- 子任务 B 已在 `7bb06bf` 完成：不可变逐 case attempt/complete artifact、原子 no-clobber 发布、校验和、损坏清单、兼容 resume、retry budget 和 pending commit 恢复。
+- 子任务 C 已在 `efd5f53` 完成：单 case/session work unit、group 内顺序与 group 间并发、真实 attempt 历史校验、checkpoint hash chain、进程内单 owner、provider semaphore、分层 timing/call ledger 和 replay 防绕过基础。
+- 子任务 C 定向离线测试为 `74 passed`；整仓回归为 `260 passed, 148 subtests passed`；本次修改的 Python 文件 Ruff、compileall、diff check 与 95 个 Git 候选文件的高置信秘密扫描通过，findings 为 0。独立对抗审查在 generic runner/store 职责内未发现剩余可复现 P0/P1。
+- 额外的非门禁命令 `ruff check .` 仍报告 3 个本分支未修改的既有问题：`legal_rag/indexing.py` 一个 F841，以及 `scripts/quality_gate.py` 两个 F401。它们不影响现有测试/CI 结论，也没有被混入本次 M2-C 提交；后续应在独立清理或门禁升级时处理。
+- 实现提交 `efd5f53...` 的 [CI 35470921788](https://github.com/1040942669/legal-rag-agent/actions/runs/35470921788) 成功，但该 workflow 仍是现有 M1 累积门禁，不能冒充最终 M2-T01 至 M2-T08 门禁。
+- 当前不是 M2 候选：generic runner 无法证明不同 wrapper 没有共享隐藏的 assistant/client/history；fake checkpoint 也不能证明真实 `ConversationMemory` 完整恢复；cache/replay observation 尚未与生产精确 cache identity 做端到端绑定；provider 单次请求 timeout 与 429/网络/鉴权错误分类尚未接入；跨进程唯一所有权仍未提供。
+- 唯一下一步是继续 M2 子任务 D：实现真实 evaluation/chat adapter 与会话状态等价恢复、精确 cache identity 接线、provider timeout/error classification、artifact-only aggregation、dataset registry、四种 evaluation mode 和 `experiment plan/run/resume/aggregate/replay` CLI。继续保持 live model 调用关闭，不进入 M3。
 
 ## M1 启动边界
 
@@ -78,7 +89,7 @@
 - 没有运行在线或本地生成模型、Embedding、reranker、LLM judge、真实法律语料实验或付费调用。
 - 没有读取/上传 `.env` 值、完整语料、Embedding cache、私人课程/简历/面试材料或大型产物。
 - 没有引入数据库、FastAPI、LangGraph、Redis/Celery，没有部署生产。
-- M1 软件、发布回执和 Milestone 收尾均已完成；没有重复发版或移动 Tag，M2 未开始。
+- M1 软件、发布回执和 Milestone 收尾均已完成；没有重复发版或移动 Tag。M2 正在草稿 PR #9 中，尚未合并或发布。
 - 本地门禁 JSON、下载的 CI JSON 与包构建物只保存在被忽略的本地 `.tmp`；它们没有进入 Git 或 Release 附件。GitHub Actions 产物按平台保留策略远端保存。
 - 没有把历史 203 部法律或模型质量数字冒充 M0 新实测。
 
@@ -111,7 +122,9 @@
 | 当前里程碑 | M2 / `in_progress`（从已验证的 M1 最终 master 基线启动） |
 | M2 branch / base | `codex/m2-experiment-lifecycle` / `00ec3ad5b193a7442e427486e8bfade2dbabd482` |
 | M2 Issue / Milestone | [#8](https://github.com/1040942669/legal-rag-agent/issues/8) / [Milestone 3](https://github.com/1040942669/legal-rag-agent/milestone/3) |
-| M2 PR / Tag / Release | not_created / not_created / not_created |
+| M2 PR / Tag / Release | [草稿 PR #9](https://github.com/1040942669/legal-rag-agent/pull/9) / not_created / not_created |
+| M2 最近实现提交 / CI | `efd5f53df73a74b816444146358f652cf1a8dbe0` / [run 35470921788](https://github.com/1040942669/legal-rag-agent/actions/runs/35470921788) success（仍为现有 M1 累积 gate） |
+| M2 子任务测试 | A/B/C 已推送；C 定向 74 passed；整仓 260 passed + 148 subtests；M2 最终门禁 not_run |
 | 软件分支 / 回执分支 | `codex/m1-verification` / `codex/m1-release-receipt` |
 | 最终 PR head / release target | `d2fa34776cd188197954eff9a0092c207f309b97` / `d51ed481f986dde807163f4b5583b07bc9ef6750` |
 | M1 PR / Tag / Release | [PR #5](https://github.com/1040942669/legal-rag-agent/pull/5) / `v0.2.0` / [published](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.2.0) |
@@ -122,8 +135,8 @@
 | M1 PR / master CI | [run 35462691374](https://github.com/1040942669/legal-rag-agent/actions/runs/35462691374) / [run 35462786212](https://github.com/1040942669/legal-rag-agent/actions/runs/35462786212) / success |
 | M1 Issue / Milestone | [#4](https://github.com/1040942669/legal-rag-agent/issues/4) / [Milestone 2](https://github.com/1040942669/legal-rag-agent/milestone/2) |
 | 阻塞 | 无 |
-| 下一条可执行动作 | 测试驱动实现 M2 的 experiment plan/manifest identity、精确缓存契约与 `M2-T01/M2-T02`；完成后测试、commit 并 push 工作分支 |
+| 下一条可执行动作 | 只继续 M2 子任务 D：真实 evaluation/chat adapter、真实会话恢复、精确 cache identity 接线、provider timeout/error 分类、artifact-only aggregate、dataset registry 和 CLI 生命周期；不得开始 M3 |
 
 ## 完成说明
 
-`v0.2.0` 的 `release_target_sha` 始终保持 `d51ed481f986dde807163f4b5583b07bc9ef6750`，即使 `master` 已因回执与最终文档收口前进到 `00ec3ad5b193a7442e427486e8bfade2dbabd482`。回执 PR 不属于新的软件版本。M1 已完成；M2 已从该最终 master 基线独立启动，尚未发布。
+`v0.2.0` 的 `release_target_sha` 始终保持 `d51ed481f986dde807163f4b5583b07bc9ef6750`，即使 `master` 已因回执与最终文档收口前进到 `00ec3ad5b193a7442e427486e8bfade2dbabd482`。回执 PR 不属于新的软件版本。M1 已完成；M2 已从该最终 master 基线独立启动，A/B/C 中间提交位于草稿 PR #9，尚未形成最终候选、Tag 或 Release。
