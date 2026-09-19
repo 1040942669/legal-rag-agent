@@ -945,6 +945,7 @@ class M1VerificationTest(unittest.TestCase):
 
     def test_structured_parser_rejects_non_string_deep_and_oversized_inputs(self) -> None:
         deeply_nested = '{"x":' + "[" * 2000 + "0" + "]" * 2000 + "}"
+        oversized_integer = '{"answer_text":' + "1" * 5000 + "}"
         oversized = json.dumps(
             {
                 "answer_text": "x" * 1_000_000,
@@ -954,7 +955,13 @@ class M1VerificationTest(unittest.TestCase):
                 "clarification_question": None,
             }
         )
-        malformed_inputs = (None, {"answer_text": "not a string input"}, deeply_nested, oversized)
+        malformed_inputs = (
+            None,
+            {"answer_text": "not a string input"},
+            deeply_nested,
+            oversized_integer,
+            oversized,
+        )
 
         for malformed in malformed_inputs:
             with self.subTest(input_type=type(malformed).__name__, size=len(str(malformed))):
@@ -974,6 +981,7 @@ class M1VerificationTest(unittest.TestCase):
     def test_malformed_provider_payloads_degrade_to_verified_safe_terminal(self) -> None:
         result = self.make_result()
         deeply_nested = '{"x":' + "[" * 2000 + "0" + "]" * 2000 + "}"
+        oversized_integer = '{"answer_text":' + "1" * 5000 + "}"
 
         class StaticRetriever:
             name = "fixture"
@@ -988,7 +996,11 @@ class M1VerificationTest(unittest.TestCase):
             def complete(self, prompt: str) -> str:
                 return self.payload  # type: ignore[return-value]
 
-        for payload in ({"answer_text": "not a string input"}, deeply_nested):
+        for payload in (
+            {"answer_text": "not a string input"},
+            deeply_nested,
+            oversized_integer,
+        ):
             with self.subTest(payload_type=type(payload).__name__):
                 assistant = LegalChatAssistant(StaticRetriever(), model="fake")
                 assistant.llm = MalformedModel(payload)

@@ -148,6 +148,12 @@ def parse_structured_answer(answer: str | StructuredAnswer) -> StructuredAnswer:
             return _legacy_answer(raw, [f"invalid_json:{exc.msg}"])
         except RecursionError:
             return _invalid_answer(["invalid_json:nesting_too_deep"])
+        except (ValueError, OverflowError):
+            # CPython can reject otherwise syntactically valid JSON when a
+            # numeric token exceeds interpreter resource limits. Treat every
+            # such model payload as invalid input instead of letting it abort
+            # the request path.
+            return _invalid_answer(["invalid_json:resource_limit"])
         except TypeError:
             return _invalid_answer(["invalid_json:unsupported_input_type"])
         parsed, errors = _answer_from_payload(payload)

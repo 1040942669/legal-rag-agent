@@ -207,7 +207,10 @@ def evaluate(
                 if generation_error:
                     generation_status = stage_status("error", generation_error)
                     service_status = stage_status("degraded", generation_error)
-                elif getattr(structured_answer, "adapter_source", None) == "programmatic":
+                elif (
+                    getattr(structured_answer, "adapter_source", None) == "programmatic"
+                    and pre_fallback_verification is None
+                ):
                     generation_status = stage_status("not_run", "programmatic_terminal")
             else:
                 adaptive_result = retrieve_adaptive(

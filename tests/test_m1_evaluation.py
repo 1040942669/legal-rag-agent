@@ -341,8 +341,11 @@ class M1EvaluationTest(unittest.TestCase):
 
         self.assertEqual(record.generation_attempt["status"], "rejected")
         self.assertFalse(record.generation_attempt["verification"]["citation_ids_valid"])
+        self.assertEqual(record.execution["generation"]["status"], "succeeded")
+        self.assertIsNone(record.execution["generation"]["reason"])
         self.assertEqual(record.verifier_pass, 1)
         self.assertEqual(record.observed_answer_mode, "insufficient_evidence")
+        self.assertEqual(trace["execution"], record.execution)
         self.assertEqual(trace["generation_attempt"], record.generation_attempt)
         self.assertTrue(trace["final_response"]["value"]["verification"]["passed"])
         self.assertEqual(
