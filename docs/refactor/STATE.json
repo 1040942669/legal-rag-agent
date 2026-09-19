@@ -7,8 +7,8 @@
     "observed_default_branch": "master",
     "observed_baseline_commit": "4ed96ec921593ef81de61ce545513e3f1211b5db",
     "observed_on": "2026-09-19",
-    "workspace_head": "2d3c6030a12e240850e7b1b4d1a4cf455bff3069",
-    "workspace_head_note": "Last fully tested M1 module commit, covering the metric contract, synthetic examples, and canonical-metrics mapping. A metadata-only checkpoint commit records this state, so the branch tip may be one commit newer. Final candidate SHA is not frozen yet.",
+    "workspace_head": "ded1ea6bbf07229a81f374359caa4375c0b11e95",
+    "workspace_head_note": "Last fully tested M1 module commit, covering the cumulative 17-check gate, CI artifact contract, and fail-closed offline model/dotenv controls. A metadata-only checkpoint commit records this state, so the branch tip may be one commit newer. Final candidate SHA is not frozen yet.",
     "workspace_branch": "codex/m1-verification",
     "workspace_dirty": false,
     "remote_tags_checked": true
@@ -99,13 +99,15 @@
       "remote_release_verified": false,
       "tests": {
         "status": "passed",
-        "passed": 145,
+        "passed": 155,
         "failed": 0,
         "skipped": 0,
-        "subtests_passed": 60,
+        "subtests_passed": 64,
         "mandatory_tests_passed": 10,
         "mandatory_tests_total": 10,
-        "quality_gate_status": "not_run",
+        "cumulative_mandatory_checks_passed": 17,
+        "cumulative_mandatory_checks_total": 17,
+        "quality_gate_status": "passed",
         "report_path": null
       },
       "blockers": []
@@ -255,5 +257,5 @@
       "blockers": []
     }
   ],
-  "next_action": "Implement and run the independent M1 cumulative quality gate and CI, then freeze the v0.2.0 release candidate."
+  "next_action": "Write the M1 acceptance report, bump and build v0.2.0, then freeze the release candidate for PR review."
 }
