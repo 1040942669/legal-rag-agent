@@ -1,4 +1,4 @@
-name: M0 Quality Gate
+name: Milestone Quality Gate
 
 on:
   pull_request:
@@ -12,8 +12,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: m0-quality-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: milestone-quality-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   offline:
@@ -26,13 +26,23 @@ jobs:
       HF_DATASETS_OFFLINE: "1"
       HF_HUB_DISABLE_TELEMETRY: "1"
       HF_HUB_OFFLINE: "1"
+      LEGAL_RAG_DISABLE_DOTENV: "1"
       PYTHONDONTWRITEBYTECODE: "1"
       TRANSFORMERS_OFFLINE: "1"
 
     steps:
-      - name: Check out the candidate commit
+      - name: Check out the pull request head commit
+        if: github.event_name == 'pull_request'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Check out the pushed commit
+        if: github.event_name == 'push'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
           persist-credentials: false
 
       - name: Set up Python
@@ -55,9 +65,18 @@ jobs:
       - name: Verify the environment in uv offline mode
         run: uv sync --check --offline --frozen
 
-      - name: Run the M0 offline quality gate
+      - name: Run the M1 cumulative offline quality gate
         run: >-
           uv run --offline --frozen --no-sync python scripts/quality_gate.py
-          --milestone M0
+          --milestone M1
           --mode offline
-          --output "${RUNNER_TEMP}/m0-quality-gate.json"
+          --output "${RUNNER_TEMP}/m1-quality-gate.json"
+
+      - name: Upload the machine-readable gate report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: m1-quality-gate-${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/m1-quality-gate.json
+          if-no-files-found: error
+          retention-days: 14

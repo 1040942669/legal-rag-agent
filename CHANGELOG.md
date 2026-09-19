@@ -2,6 +2,38 @@
 
 本文件记录候选与已发布版本的用户可见变更。历史实验数字仍以对应报告中的语料、模型和时间条件为准。
 
+## [Unreleased]
+
+## [0.2.0] - 2026-09-20
+
+### Added
+
+- M1 结构化回答兼容层，显式区分 `evidence_answer`、`insufficient_evidence`、`needs_clarification` 与 `out_of_scope`。
+- schema、证据目录、引用 ID/对齐、可注入快照/权限范围、免责声明、回答模式和未知语义状态的分层验证结果。
+- 评测指标 schema v2，记录应答/应拒答/应澄清、服务失败和 Judge 三态分母，并单独计算拒答召回与过度拒答。
+- 明确标注为虚构且非法律内容的 M1 改前/改后回归 fixture。
+
+### Changed
+
+- 免责声明和普通法律陈述中的“不得”“不能”不再被当作拒答；受限模式只接受有界模板。
+- 伪造、未对齐，或在显式 `VerificationContext` 下越权的来源会使生成草稿失败；最终降级响应会再次验证后才交付。
+- Retrieval-only 不再拼接检索文本冒充回答，也不运行 answer verifier 或 Judge；不可用指标使用 `null + reason`，旧 CSV 仍保留 `-1` 兼容哨兵。
+- Judge 超时、传输与格式错误独立归因并排除质量均值；评测输出拒绝覆盖已有历史文件。
+- Normalizer、生成回答和 Judge 的模型 JSON 使用精确字段集，拒绝重复 key、非标准数值、孤立 surrogate、超限或资源异常输入；生成回答与 Judge 失败关闭，Normalizer 使用稳定错误码并确定性回退。
+
+### Security
+
+- 当可信调用方显式注入 `VerificationContext` 时，不在允许快照或权限范围内的证据会在进入生成提示和返回 sources 之前被移除；当前 CLI 尚无认证身份、租户隔离或默认快照约束。
+- Trace 分开保存被拒绝的生成尝试与最终交付结果；被拒绝草稿正文、schema 详情、畸形引用片段和生成 source ID 列表不进入普通 Trace，只保留安全字段与计数。
+- 引用和拒答边界对全角/Unicode 括号、格式控制符、组合标记、filler 和不可见字符做保守失败关闭；正确引用只接受精确 ASCII `[S正整数]`。
+- M1 累积离线门禁显式禁用 dotenv 与真实模型调用，CI 上传按 commit 和重跑编号区分的机器可读报告。
+
+### Known limitations
+
+- 当前语义支持仍是确定性词面启发式，只能可靠表达 `uncertain` 或 `not_checked`；没有声称已验证法律正确性。
+- `VerificationContext` 是供可信上层注入的集成边界，不等于当前 CLI 已实现用户鉴权或多租户隔离。
+- 本候选只运行离线 fake/fixture 测试，没有调用真实生成模型、Embedding、reranker 或 LLM Judge，也没有复跑历史法律质量实验。
+
 ## [0.1.1] - 2026-09-19
 
 ### Added

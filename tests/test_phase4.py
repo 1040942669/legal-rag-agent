@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 from pathlib import Path
 
@@ -158,16 +159,60 @@ class JudgeTest(unittest.TestCase):
         self.assertEqual(result.source, "error")
         self.assertFalse(result.passed)
 
+    def test_judge_rejects_oversized_json_without_exposing_the_full_response(self):
+        client = StubJudgeClient(
+            '{"faithfulness": 0.9, "relevance": 0.8, "completeness": 0.7, '
+            '"passed": true, "comment": "' + "x" * 200_000 + '"}'
+        )
+
+        result = judge_answer(client, question="q", answer="a", results=self.make_results())
+
+        self.assertEqual(result.status, "error")
+        self.assertEqual(result.error_code, "invalid_json")
+        self.assertIsNone(result.faithfulness)
+        self.assertIsNone(result.relevance)
+        self.assertIsNone(result.completeness)
+        self.assertIsNone(result.passed)
+        self.assertLessEqual(len(result.raw_response), 500)
+
+    def test_judge_converts_pathological_json_into_a_stable_error(self):
+        deeply_nested = '{"comment":' + "[" * 2_000 + "0" + "]" * 2_000 + "}"
+        huge_integer = (
+            '{"faithfulness": '
+            + "9" * 10_000
+            + ', "relevance": 0.8, "completeness": 0.7, "passed": true}'
+        )
+
+        for raw in (deeply_nested, huge_integer):
+            with self.subTest(kind="nested" if raw is deeply_nested else "huge_integer"):
+                result = judge_answer(
+                    StubJudgeClient(raw),
+                    question="q",
+                    answer="a",
+                    results=self.make_results(),
+                )
+
+                self.assertEqual(result.status, "error")
+                self.assertIn(result.error_code, {"invalid_json", "invalid_schema"})
+                self.assertIsNone(result.faithfulness)
+                self.assertIsNone(result.relevance)
+                self.assertIsNone(result.completeness)
+                self.assertIsNone(result.passed)
+                self.assertLessEqual(len(result.raw_response), 500)
+
     def test_judge_handles_client_exception(self):
         class FailingClient:
             def complete(self, prompt: str) -> str:
-                raise ValueError("transport failed")
+                raise ValueError("SECRET_PROVIDER_DETAIL_" + "x" * 100_000)
 
         result = judge_answer(
             FailingClient(), question="q", answer="a", results=self.make_results()
         )
         self.assertEqual(result.source, "error")
-        self.assertIn("transport failed", result.error)
+        self.assertEqual(result.error_code, "transport_error")
+        self.assertEqual(result.error, "judge provider request failed")
+        self.assertNotIn("SECRET_PROVIDER_DETAIL", result.error)
+        self.assertLessEqual(len(result.error), 200)
 
     def test_judge_recomputes_inconsistent_pass_flag(self):
         client = StubJudgeClient(
@@ -188,6 +233,69 @@ class JudgeTest(unittest.TestCase):
         )
         result = judge_answer(out_of_range, question="q", answer="a", results=self.make_results())
         self.assertEqual(result.source, "error")
+
+    def test_judge_rejects_numeric_strings_as_schema_invalid(self):
+        client = StubJudgeClient(
+            '{"faithfulness": "0.9", "relevance": "0.8", '
+            '"completeness": "0.7", "passed": true, "comment": "ok"}'
+        )
+
+        result = judge_answer(client, question="q", answer="a", results=self.make_results())
+
+        self.assertEqual(result.status, "error")
+        self.assertEqual(result.error_code, "invalid_schema")
+        self.assertIsNone(result.faithfulness)
+        self.assertIsNone(result.passed)
+
+    def test_judge_rejects_duplicate_missing_and_unknown_fields(self):
+        responses = (
+            (
+                '{"faithfulness": 0.0, "faithfulness": 1.0, "relevance": 0.8, '
+                '"completeness": 0.7, "passed": true, "comment": "ok"}',
+                "invalid_json",
+            ),
+            (
+                '{"faithfulness": 0.9, "relevance": 0.8, "completeness": 0.7, '
+                '"passed": true}',
+                "invalid_schema",
+            ),
+            (
+                '{"faithfulness": 0.9, "relevance": 0.8, "completeness": 0.7, '
+                '"passed": true, "comment": "ok", "extra": 1}',
+                "invalid_schema",
+            ),
+            (
+                '{"faithfulness": NaN, "relevance": 0.8, "completeness": 0.7, '
+                '"passed": true, "comment": "ok"}',
+                "invalid_json",
+            ),
+            (
+                json.dumps(
+                    {
+                        "faithfulness": 0.9,
+                        "relevance": 0.8,
+                        "completeness": 0.7,
+                        "passed": True,
+                        "comment": chr(0xD800),
+                    },
+                    ensure_ascii=True,
+                ),
+                "invalid_json",
+            ),
+        )
+
+        for raw, error_code in responses:
+            with self.subTest(error_code=error_code, raw=raw):
+                result = judge_answer(
+                    StubJudgeClient(raw),
+                    question="q",
+                    answer="a",
+                    results=self.make_results(),
+                )
+
+                self.assertEqual(result.status, "error")
+                self.assertEqual(result.error_code, error_code)
+                self.assertIsNone(result.passed)
 
     def test_extract_json_object_plain(self):
         self.assertEqual(extract_json_object('前缀 {"a": 1} 后缀'), {"a": 1})

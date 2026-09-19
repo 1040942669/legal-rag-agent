@@ -37,7 +37,11 @@ from .rerank import (
     wrap_with_reranker,
 )
 from .retrieval import build_retriever
-from .tracing import JsonlTraceWriter, build_retrieval_trace_record
+from .tracing import (
+    JsonlTraceWriter,
+    build_retrieval_trace_record,
+    verification_result_to_trace,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -368,6 +372,109 @@ def handle_cache_health(args: argparse.Namespace) -> int:
     return 0 if report.valid else 2
 
 
+def build_chat_response_trace(
+    assistant: LegalChatAssistant,
+    *,
+    generate: bool,
+) -> dict[str, Any]:
+    """Describe the attempted generation and the separately delivered response."""
+
+    if not generate:
+        return {
+            "execution": {
+                "service": {"status": "succeeded", "reason": None},
+                "generation": {"status": "not_run", "reason": "retrieval_only"},
+                "verification": {"status": "not_run", "reason": "retrieval_only"},
+                "judge": {"status": "not_run", "reason": "retrieval_only"},
+            },
+            "generation_attempt": {"attempted": False, "reason": "retrieval_only"},
+            "final_response": {"value": None, "unavailable_reason": "retrieval_only"},
+            "verifier": None,
+        }
+
+    structured_answer = getattr(assistant, "last_structured_answer", None)
+    final_verification = getattr(assistant, "last_verification", None)
+    pre_fallback_answer = getattr(assistant, "last_pre_fallback_answer", None)
+    pre_fallback_verification = getattr(
+        assistant,
+        "last_pre_fallback_verification",
+        None,
+    )
+    generation_error = getattr(assistant, "last_generation_error", None)
+    programmatic_terminal = (
+        getattr(structured_answer, "adapter_source", None) == "programmatic"
+        and not generation_error
+        and pre_fallback_verification is None
+    )
+    attempted_mode = getattr(pre_fallback_answer, "answer_mode", None)
+    if attempted_mode is None:
+        attempted_mode = getattr(structured_answer, "answer_mode", None)
+
+    generation_attempt = {
+        "attempted": not programmatic_terminal,
+        "status": (
+            "rejected"
+            if pre_fallback_verification is not None
+            else "error"
+            if generation_error
+            else "not_run"
+            if programmatic_terminal
+            else "accepted"
+        ),
+        "reason": (
+            "verification_failed"
+            if pre_fallback_verification is not None
+            else generation_error
+            or ("programmatic_terminal" if programmatic_terminal else None)
+        ),
+        "answer_mode": attempted_mode,
+        "verification": (
+            verification_result_to_trace(pre_fallback_verification)
+            if pre_fallback_verification is not None
+            else None
+        ),
+    }
+    final_mode = getattr(structured_answer, "answer_mode", None)
+    if final_mode is None and final_verification is not None:
+        final_mode = getattr(final_verification, "actual_answer_mode", None)
+    final_verification_payload = (
+        verification_result_to_trace(final_verification)
+    )
+    final_response = {
+        "value": {
+            "answer_mode": final_mode,
+            "verification": final_verification_payload,
+        },
+        "unavailable_reason": None,
+    }
+    generation_stage = (
+        {"status": "error", "reason": generation_error}
+        if generation_error
+        else {"status": "not_run", "reason": "programmatic_terminal"}
+        if programmatic_terminal
+        else {"status": "succeeded", "reason": None}
+    )
+    verification_stage = (
+        {"status": "succeeded", "reason": None}
+        if final_verification is not None
+        else {"status": "not_run", "reason": "verification_not_available"}
+    )
+    return {
+        "execution": {
+            "service": {
+                "status": "degraded" if generation_error else "succeeded",
+                "reason": generation_error,
+            },
+            "generation": generation_stage,
+            "verification": verification_stage,
+            "judge": {"status": "not_run", "reason": "judge_not_configured"},
+        },
+        "generation_attempt": generation_attempt,
+        "final_response": final_response,
+        "verifier": final_verification_payload,
+    }
+
+
 def handle_chat(args: argparse.Namespace) -> int:
     config = load_config(args.config)
     run_id = new_run_id("chat")
@@ -425,6 +532,10 @@ def handle_chat(args: argparse.Namespace) -> int:
             analysis = assistant.last_adaptive_result.analysis
             adaptive_trace = assistant.last_adaptive_result.to_trace()
         if trace_writer:
+            response_trace = build_chat_response_trace(
+                assistant,
+                generate=not args.no_generate,
+            )
             trace_writer.write(
                 build_retrieval_trace_record(
                     query=question,
@@ -435,7 +546,10 @@ def handle_chat(args: argparse.Namespace) -> int:
                     analyzer=analysis.to_dict(),
                     adaptive=adaptive_trace,
                     evidence=assistant.last_evidence_check.to_dict() if assistant.last_evidence_check else {},
-                    verifier=assistant.last_verification.to_dict() if assistant.last_verification else {},
+                    verifier=response_trace["verifier"],
+                    execution=response_trace["execution"],
+                    generation_attempt=response_trace["generation_attempt"],
+                    final_response=response_trace["final_response"],
                     metadata={
                         "chunk_strategy": strategy,
                         "generate": not args.no_generate,

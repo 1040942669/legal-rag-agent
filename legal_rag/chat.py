@@ -1,18 +1,33 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from .adaptive import AdaptiveRetrievalResult, retrieve_adaptive
-from .evidence import build_low_confidence_answer
+from .evidence import build_low_confidence_answer, check_evidence_sufficiency
 from .llm import build_completion_client
-from .models import EvidenceCheck, SearchResult, VerificationResult
+from .models import (
+    AnswerClaim,
+    EvidenceCheck,
+    SearchResult,
+    StructuredAnswer,
+    VerificationContext,
+    VerificationResult,
+)
 from .query import analyze_query, extract_article_numbers, extract_law_names
 from .retrieval import Retriever, format_sources
-from .verifier import build_verifier_fallback_answer, verify_answer
+from .verifier import (
+    SAFE_CLARIFICATION_QUESTION,
+    SAFE_CLARIFICATION_RESPONSE,
+    STANDARD_DISCLAIMER,
+    build_verifier_fallback_answer,
+    filter_results_to_context,
+    parse_structured_answer,
+    verify_answer,
+)
 
 
-LEGAL_DISCLAIMER = "仅供课程学习和法律文本检索参考，不构成法律意见。"
+LEGAL_DISCLAIMER = STANDARD_DISCLAIMER
 PRE_RETRIEVAL_REFUSAL_FLAGS = {
     "case_strategy",
     "illegal_help",
@@ -69,6 +84,7 @@ class LegalChatAssistant:
         adaptive_per_plan_top_k: int | None = None,
         normalizer_retries: int = 0,
         condense_with_llm: bool = False,
+        verification_context: VerificationContext | None = None,
     ) -> None:
         self.retriever = retriever
         self.model = model
@@ -79,9 +95,16 @@ class LegalChatAssistant:
         self.adaptive_per_plan_top_k = adaptive_per_plan_top_k
         self.normalizer_retries = normalizer_retries
         self.condense_with_llm = condense_with_llm
+        self.verification_context = verification_context
         self.last_adaptive_result: AdaptiveRetrievalResult | None = None
         self.last_evidence_check: EvidenceCheck | None = None
         self.last_verification: VerificationResult | None = None
+        self.last_pre_fallback_verification: VerificationResult | None = None
+        self.last_pre_fallback_answer: StructuredAnswer | None = None
+        self.last_structured_answer: StructuredAnswer | None = None
+        self.last_rejected_original_source_ids: list[str] = []
+        self.last_evidence_source_id_map: dict[str, str] = {}
+        self.last_generation_error: str | None = None
         self.memory = ConversationMemory(token_limit=memory_token_limit)
         self.llm = build_completion_client(
             model,
@@ -98,6 +121,12 @@ class LegalChatAssistant:
         self.last_adaptive_result = None
         self.last_evidence_check = None
         self.last_verification = None
+        self.last_pre_fallback_verification = None
+        self.last_pre_fallback_answer = None
+        self.last_structured_answer = None
+        self.last_rejected_original_source_ids = []
+        self.last_evidence_source_id_map = {}
+        self.last_generation_error = None
 
     def answer(self, question: str, *, generate: bool = True) -> tuple[str, list[SearchResult]]:
         standalone_question = self.condense_question(question)
@@ -105,11 +134,31 @@ class LegalChatAssistant:
         self.last_adaptive_result = None
         self.last_evidence_check = None
         self.last_verification = None
+        self.last_pre_fallback_verification = None
+        self.last_pre_fallback_answer = None
+        self.last_structured_answer = None
+        self.last_rejected_original_source_ids = []
+        self.last_evidence_source_id_map = {}
+        self.last_generation_error = None
         if should_refuse_before_retrieval(pre_analysis.risk_flags):
-            answer = build_risk_refusal_answer(pre_analysis.risk_flags)
+            answer = programmatic_answer(
+                build_risk_refusal_answer(pre_analysis.risk_flags),
+                answer_mode="out_of_scope",
+                limitations=["请求超出法律文本学习助手允许的帮助范围。"],
+            )
+            answer, verification = self._verify_programmatic_answer(
+                answer,
+                [],
+                expected_answer_mode="out_of_scope",
+                risk_flags=pre_analysis.risk_flags,
+                disclaimer=LEGAL_DISCLAIMER,
+                context=self.verification_context,
+            )
+            self.last_structured_answer = answer
+            self.last_verification = verification
             self.memory.add("user", question)
-            self.memory.add("assistant", answer)
-            return answer, []
+            self.memory.add("assistant", answer.answer_text)
+            return answer.answer_text, []
         adaptive_result = retrieve_adaptive(
             standalone_question,
             self.retriever,
@@ -121,33 +170,76 @@ class LegalChatAssistant:
             per_plan_top_k=self.adaptive_per_plan_top_k,
             normalizer_retries=self.normalizer_retries,
         )
+        results, rejected_source_ids, source_id_map = filter_results_to_context(
+            adaptive_result.results,
+            self.verification_context,
+        )
+        if rejected_source_ids:
+            evidence_check = check_evidence_sufficiency(
+                standalone_question,
+                results,
+                analysis=adaptive_result.analysis,
+                normalized_query=adaptive_result.normalized_query,
+                plans=adaptive_result.plans,
+            )
+            evidence_check = replace(evidence_check, stop_reason="evidence_scope_filtered")
+            adaptive_result = replace(
+                adaptive_result,
+                results=results,
+                evidence_check=evidence_check,
+                merge_trace={
+                    **adaptive_result.merge_trace,
+                    "evidence_filter": {
+                        "rejected_original_source_ids": rejected_source_ids,
+                        "source_id_map": source_id_map,
+                        "returned_count": len(results),
+                    },
+                },
+            )
+        self.last_rejected_original_source_ids = rejected_source_ids
+        self.last_evidence_source_id_map = source_id_map
         self.last_adaptive_result = adaptive_result
         self.last_evidence_check = adaptive_result.evidence_check
-        results = adaptive_result.results
 
         if not results:
-            answer = build_low_confidence_answer(adaptive_result.evidence_check)
-            answer = append_disclaimer(answer)
+            answer = build_limited_structured_answer(adaptive_result.evidence_check)
+            answer, verification = self._verify_programmatic_answer(
+                answer,
+                [],
+                evidence_check=adaptive_result.evidence_check,
+                risk_flags=adaptive_result.analysis.risk_flags,
+                expected_answer_mode=expected_limited_answer_mode(adaptive_result.evidence_check),
+                disclaimer=LEGAL_DISCLAIMER,
+                context=self.verification_context,
+            )
+            self.last_structured_answer = answer
+            self.last_verification = verification
             self.memory.add("user", question)
-            self.memory.add("assistant", answer)
-            return answer, results
+            self.memory.add("assistant", answer.answer_text)
+            return answer.answer_text, results
 
         if adaptive_result.evidence_check and not adaptive_result.evidence_check.sufficient:
-            answer = append_disclaimer(build_low_confidence_answer(adaptive_result.evidence_check))
-            verification = verify_answer(
+            answer = build_limited_structured_answer(adaptive_result.evidence_check)
+            answer, verification = self._verify_programmatic_answer(
                 answer,
                 results,
                 evidence_check=adaptive_result.evidence_check,
                 risk_flags=adaptive_result.analysis.risk_flags,
+                expected_answer_mode=expected_limited_answer_mode(adaptive_result.evidence_check),
                 disclaimer=LEGAL_DISCLAIMER,
+                context=self.verification_context,
             )
+            self.last_structured_answer = answer
             self.last_verification = verification
             self.memory.add("user", question)
-            self.memory.add("assistant", answer)
-            return answer, results
+            self.memory.add("assistant", answer.answer_text)
+            return answer.answer_text, results
 
         if not generate:
-            answer = render_retrieval_only_answer(results)
+            answer_text = append_disclaimer(render_retrieval_only_answer(results))
+            self.memory.add("user", question)
+            self.memory.add("assistant", answer_text)
+            return answer_text, results
         else:
             prompt = build_qa_prompt(
                 question=standalone_question,
@@ -156,34 +248,101 @@ class LegalChatAssistant:
                 results=results,
             )
             try:
-                answer = self.llm.complete(prompt)
-            except RuntimeError as exc:
-                answer = (
-                    "当前无法连接 Ollama 生成模型，先返回检索依据。\n\n"
-                    + render_retrieval_only_answer(results)
-                    + f"\n\n运行错误: {exc}"
+                raw_answer = self.llm.complete(prompt)
+            except Exception:
+                self.last_generation_error = "generation_error"
+                answer = programmatic_answer(
+                    "当前无法连接生成模型，因此无法给出可靠结论。",
+                    answer_mode="insufficient_evidence",
+                    limitations=["生成模型当前不可用。"],
                 )
+                answer, verification = self._verify_programmatic_answer(
+                    answer,
+                    results,
+                    expected_answer_mode="insufficient_evidence",
+                    disclaimer=LEGAL_DISCLAIMER,
+                    context=self.verification_context,
+                )
+                self.last_structured_answer = answer
+                self.last_verification = verification
+                self.memory.add("user", question)
+                self.memory.add("assistant", answer.answer_text)
+                return answer.answer_text, results
 
-        answer = append_disclaimer(answer)
+        answer = parse_structured_answer(raw_answer)
+        answer = replace(answer, answer_text=append_disclaimer(answer.answer_text))
         verification = verify_answer(
             answer,
             results,
             evidence_check=adaptive_result.evidence_check,
             risk_flags=adaptive_result.analysis.risk_flags,
+            expected_answer_mode="evidence_answer",
             disclaimer=LEGAL_DISCLAIMER,
+            context=self.verification_context,
         )
-        self.last_verification = verification
         if not verification.passed:
-            low_confidence = append_disclaimer(build_low_confidence_answer(adaptive_result.evidence_check))
-            answer = build_verifier_fallback_answer(
-                answer,
+            self.last_pre_fallback_verification = verification
+            self.last_pre_fallback_answer = answer
+            low_confidence = build_low_confidence_answer(adaptive_result.evidence_check)
+            fallback_text = build_verifier_fallback_answer(
+                answer.answer_text,
                 verification,
                 low_confidence_answer=low_confidence,
             )
-            answer = append_disclaimer(answer)
+            answer = programmatic_answer(
+                fallback_text,
+                answer_mode="insufficient_evidence",
+                limitations=["原生成回答未通过结构或行为检查。"],
+            )
+            answer, verification = self._verify_programmatic_answer(
+                answer,
+                results,
+                expected_answer_mode="insufficient_evidence",
+                disclaimer=LEGAL_DISCLAIMER,
+                context=self.verification_context,
+            )
+        self.last_structured_answer = answer
+        self.last_verification = verification
         self.memory.add("user", question)
-        self.memory.add("assistant", answer)
-        return answer, results
+        self.memory.add("assistant", answer.answer_text)
+        return answer.answer_text, results
+
+    def _verify_programmatic_answer(
+        self,
+        answer: StructuredAnswer,
+        results: list[SearchResult],
+        *,
+        expected_answer_mode: str,
+        evidence_check: EvidenceCheck | None = None,
+        risk_flags: list[str] | None = None,
+        disclaimer: str = "",
+        context: VerificationContext | None = None,
+    ) -> tuple[StructuredAnswer, VerificationResult]:
+        verification = verify_answer(
+            answer,
+            results,
+            expected_answer_mode=expected_answer_mode,
+            evidence_check=evidence_check,
+            risk_flags=risk_flags,
+            disclaimer=disclaimer,
+            context=context,
+        )
+        if verification.passed:
+            return answer, verification
+
+        safe_answer = safe_terminal_answer(expected_answer_mode)
+        safe_verification = verify_answer(
+            safe_answer,
+            results,
+            expected_answer_mode=expected_answer_mode,
+            evidence_check=evidence_check,
+            risk_flags=risk_flags,
+            disclaimer=disclaimer,
+            context=context,
+        )
+        if not safe_verification.passed:
+            raise RuntimeError("programmatic terminal response failed verification")
+        return safe_answer, safe_verification
 
     def condense_question(self, question: str) -> str:
         last_question = self.memory.last_user_question()
@@ -214,7 +373,7 @@ class LegalChatAssistant:
         )
         try:
             rewritten = self.llm.complete(prompt).strip().strip("\"'“”")
-        except RuntimeError:
+        except Exception:
             return ""
         if 0 < len(rewritten) <= 120 and "\n" not in rewritten:
             return rewritten
@@ -245,6 +404,15 @@ def build_qa_prompt(
 3. 必须引用资料编号，例如 [S1]。
 4. 具体案件策略、胜诉判断、个性化法律意见必须拒答。
 5. 末尾保留免责声明: {LEGAL_DISCLAIMER}
+6. 只输出一个 JSON 对象，不要输出 Markdown 代码围栏或额外说明。
+7. JSON 必须且只能包含以下字段:
+   - answer_text: 面向用户的完整字符串
+   - answer_mode: evidence_answer / insufficient_evidence / needs_clarification / out_of_scope 之一
+   - claims: 数组；每项只能包含 claim_id、text、source_ids
+   - limitations: 字符串数组
+   - clarification_question: 字符串或 null
+8. 每条需要证据支撑的 claim 都要绑定本次资料中的 source_ids，禁止生成不存在的编号。
+9. 不要在 JSON 中填写 snapshot、用户、权限或其他系统字段。
 
 最近对话:
 {memory or "无"}
@@ -262,6 +430,84 @@ def build_qa_prompt(
 """
 
 
+def programmatic_answer(
+    answer_text: str,
+    *,
+    answer_mode: str,
+    limitations: list[str] | None = None,
+    clarification_question: str | None = None,
+    claims: list[AnswerClaim] | None = None,
+) -> StructuredAnswer:
+    if answer_mode != "evidence_answer":
+        answer_text = sanitize_source_tokens(answer_text)
+        limitations = [sanitize_source_tokens(item) for item in limitations or []]
+        if clarification_question is not None:
+            clarification_question = sanitize_source_tokens(clarification_question)
+    return StructuredAnswer(
+        answer_text=append_disclaimer(answer_text),
+        answer_mode=answer_mode,
+        claims=claims or [],
+        limitations=limitations or [],
+        clarification_question=clarification_question,
+        adapter_source="programmatic",
+    )
+
+
+def safe_terminal_answer(answer_mode: str) -> StructuredAnswer:
+    if answer_mode == "out_of_scope":
+        return programmatic_answer(
+            "这个请求超出当前法律文本学习助手的范围，我不能提供具体操作方案。",
+            answer_mode="out_of_scope",
+            limitations=["请求超出允许范围。"],
+        )
+    if answer_mode == "needs_clarification":
+        question = SAFE_CLARIFICATION_QUESTION
+        return programmatic_answer(
+            SAFE_CLARIFICATION_RESPONSE,
+            answer_mode="needs_clarification",
+            limitations=["缺少作答所需的关键事实。"],
+            clarification_question=question,
+        )
+    return programmatic_answer(
+        "当前检索资料不足，无法给出可靠结论。",
+        answer_mode="insufficient_evidence",
+        limitations=["当前检索资料不足。"],
+    )
+
+
+def sanitize_source_tokens(text: str) -> str:
+    """Prevent user/provider text from being interpreted as trusted citations."""
+
+    return re.sub(r"\[S(\d+)\]", r"S\1", text)
+
+
+def build_limited_structured_answer(check: EvidenceCheck) -> StructuredAnswer:
+    limitations = [
+        *check.missing_law_support,
+        *check.missing_facts,
+        *check.low_coverage,
+    ]
+    if check.missing_facts:
+        return programmatic_answer(
+            SAFE_CLARIFICATION_RESPONSE,
+            answer_mode="needs_clarification",
+            limitations=limitations,
+            clarification_question=SAFE_CLARIFICATION_QUESTION,
+        )
+    return programmatic_answer(
+        (
+            "我无法仅根据当前检索资料给出可靠结论。\n\n"
+            "可以补充更具体的法律名称、条文编号或事实背景后再检索。"
+        ),
+        answer_mode="insufficient_evidence",
+        limitations=limitations or ["当前检索资料不足。"],
+    )
+
+
+def expected_limited_answer_mode(check: EvidenceCheck) -> str:
+    return "needs_clarification" if check.missing_facts else "insufficient_evidence"
+
+
 def render_retrieval_only_answer(results: list[SearchResult]) -> str:
     snippets = []
     for result in results:
@@ -276,18 +522,18 @@ def should_refuse_before_retrieval(risk_flags: list[str]) -> bool:
 
 def build_risk_refusal_answer(risk_flags: list[str]) -> str:
     if "illegal_help" in risk_flags:
-        reason = "这个问题涉及违法帮助或规避执法，我不能提供操作方案。"
+        reason = "我不能提供违法帮助、规避执法或相关操作方案。"
     elif "case_strategy" in risk_flags:
-        reason = "这个问题涉及具体案件策略、胜诉判断或个性化法律意见，我不能直接给出方案。"
+        reason = "我不能直接给出具体案件策略、胜诉判断或个性化法律意见。"
     elif "medical_financial_advice" in risk_flags:
-        reason = "这个问题涉及医疗、金融或投资等专业建议，不能作为法律文本检索回答处理。"
+        reason = "我不能提供医疗、金融或投资等专业建议。"
     else:
         reason = "这个问题不属于当前中国现行法律文本检索范围。"
     return append_disclaimer(reason + "\n\n我可以帮助检索相关法律条文或解释公开法律文本。")
 
 
 def append_disclaimer(answer: str) -> str:
-    if LEGAL_DISCLAIMER in answer:
+    if answer.rstrip().endswith(LEGAL_DISCLAIMER):
         return answer
     return answer.rstrip() + "\n\n" + LEGAL_DISCLAIMER
 

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from .chunking import load_chunks
-from .env import load_dotenv
+from .env import load_dotenv, require_live_model_calls_allowed
 from .manifest import new_run_id, summarize_path, write_artifact_manifest
 from .models import Chunk
 
@@ -89,6 +89,7 @@ class CacheHealthReport:
 
 class SentenceTransformerEncoder:
     def __init__(self, model_config: EmbeddingModelConfig, *, device: str = "auto") -> None:
+        require_live_model_calls_allowed("sentence-transformer embedding")
         try:
             from sentence_transformers import SentenceTransformer  # type: ignore
         except ModuleNotFoundError as exc:
@@ -105,6 +106,7 @@ class SentenceTransformerEncoder:
         self.model = SentenceTransformer(model_config.model_name, **kwargs)
 
     def encode_documents(self, texts: list[str], *, batch_size: int) -> Any:
+        require_live_model_calls_allowed("sentence-transformer embedding")
         return self.model.encode(
             [self.model_config.document_prefix + text for text in texts],
             batch_size=batch_size,
@@ -113,6 +115,7 @@ class SentenceTransformerEncoder:
         )
 
     def encode_query(self, text: str) -> Any:
+        require_live_model_calls_allowed("sentence-transformer embedding")
         return self.model.encode(
             [self.model_config.query_prefix + text],
             normalize_embeddings=self.model_config.normalize,
@@ -122,6 +125,7 @@ class SentenceTransformerEncoder:
 
 class SiliconFlowEmbeddingEncoder:
     def __init__(self, model_config: EmbeddingModelConfig) -> None:
+        require_live_model_calls_allowed("SiliconFlow embedding")
         try:
             from openai import OpenAI  # type: ignore
         except ModuleNotFoundError as exc:
@@ -142,6 +146,7 @@ class SiliconFlowEmbeddingEncoder:
         )
 
     def encode_documents(self, texts: list[str], *, batch_size: int) -> list[list[float]]:
+        require_live_model_calls_allowed("SiliconFlow embedding")
         vectors: list[list[float]] = []
         for start in range(0, len(texts), batch_size):
             batch = texts[start : start + batch_size]
@@ -153,6 +158,7 @@ class SiliconFlowEmbeddingEncoder:
         return vectors
 
     def encode_query(self, text: str) -> list[float]:
+        require_live_model_calls_allowed("SiliconFlow embedding")
         response = self._create_embeddings([self.model_config.query_prefix + text])
         return list(response.data[0].embedding)
 

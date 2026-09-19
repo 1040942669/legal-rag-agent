@@ -1,6 +1,6 @@
 # 真实发布回执
 
-此目录目前没有任何已完成里程碑的回执，因为业务改造尚未开始。
+此目录保存已经完成远端核验的里程碑回执。当前已有 `M0.json`；其余里程碑只有在对应 Release 发布并核验后才新增回执。
 
 每个阶段远程核验发布后，将模板 `../templates/RELEASE_RECEIPT.example.json` 填为 `Mx.json`。
 必须记录实际 Tag 目标 SHA、PR、CI、Release URL、是否 draft 以及发布验证时间。

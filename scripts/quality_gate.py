@@ -17,6 +17,8 @@ import platform
 import re
 import subprocess
 import sys
+import tempfile
+import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Callable, Iterable, Mapping, Sequence
@@ -24,9 +26,13 @@ from urllib.parse import unquote, urlsplit
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SUPPORTED_MILESTONES = frozenset({"M0"})
+SUPPORTED_MILESTONES = frozenset({"M0", "M1"})
 SUPPORTED_MODES = frozenset({"offline"})
 REPORT_SCHEMA_VERSION = 1
+MILESTONE_PREREQUISITES: dict[str, tuple[str, ...]] = {
+    "M0": (),
+    "M1": ("M0",),
+}
 
 MANDATORY_M0_CHECK_IDS = frozenset(
     {
@@ -37,6 +43,55 @@ MANDATORY_M0_CHECK_IDS = frozenset(
         "M0-Q01-markdown-links",
         "M0-Q02-state-manifests",
         "M0-Q03-secret-scan",
+    }
+)
+
+M1_TEST_SELECTORS: dict[str, tuple[str, ...]] = {
+    "M1-T01": (
+        "tests/test_m1_verification.py::M1VerificationTest::test_m1_t01_disclaimer_is_not_a_refusal",
+        "tests/test_m1_synthetic_examples.py::test_fixture_is_explicitly_synthetic_non_legal_and_not_a_quality_claim",
+        "tests/test_m1_synthetic_examples.py::test_disclaimer_regression_example_is_not_counted_as_refusal",
+    ),
+    "M1-T02": (
+        "tests/test_m1_verification.py::M1VerificationTest::test_m1_t02_legal_prohibition_words_are_not_a_refusal",
+    ),
+    "M1-T03": (
+        "tests/test_m1_verification.py::M1VerificationTest::test_m1_t03_unknown_source_id_fails_and_falls_back",
+        "tests/test_m1_verification.py::M1VerificationTest::test_invalid_generated_source_is_reverified_after_fallback",
+    ),
+    "M1-T04": (
+        "tests/test_m1_verification.py::M1VerificationTest::test_m1_t04_real_id_does_not_imply_semantic_support",
+        "tests/test_m1_synthetic_examples.py::test_fixture_is_explicitly_synthetic_non_legal_and_not_a_quality_claim",
+        "tests/test_m1_synthetic_examples.py::test_real_but_irrelevant_source_id_never_implies_semantic_support",
+    ),
+    "M1-T05": (
+        "tests/test_m1_verification.py::M1VerificationTest::test_m1_t05_insufficient_evidence_without_sources_is_valid_mode",
+    ),
+    "M1-T06": (
+        "tests/test_m1_evaluation.py::M1EvaluationTest::test_m1_t06_ab_and_ba_are_deterministic_and_case_isolated",
+    ),
+    "M1-T07": (
+        "tests/test_m1_evaluation.py::M1EvaluationTest::test_m1_t07_retrieval_only_skips_generation_verifier_and_judge",
+        "tests/test_m1_evaluation.py::M1EvaluationTest::test_m1_t07_retrieval_only_uses_explicit_na_in_record_and_trace",
+    ),
+    "M1-T08": (
+        "tests/test_m1_evaluation.py::M1EvaluationTest::test_m1_t08_judge_errors_are_null_and_excluded_from_quality_denominator",
+        "tests/test_m1_evaluation.py::M1EvaluationTest::test_m1_t08_judge_errors_have_nullable_scores_and_canonical_codes",
+        "tests/test_m1_evaluation.py::M1EvaluationTest::test_m1_t08_judge_three_way_counts_and_success_mean_share_one_summary",
+    ),
+    "M1-T09": (
+        "tests/test_m1_evaluation.py::M1EvaluationTest::test_m1_t09_behavior_denominators_and_over_refusal_are_explicit",
+    ),
+    "M1-T10": (
+        "tests/test_m1_verification.py::M1VerificationTest::test_m1_t10_cross_snapshot_and_scope_sources_are_rejected",
+        "tests/test_m1_verification.py::M1VerificationTest::test_cross_snapshot_generation_is_rejected_without_leaking_evidence",
+    ),
+}
+
+MANDATORY_M1_CHECK_IDS = frozenset(
+    {
+        *MANDATORY_M0_CHECK_IDS,
+        *M1_TEST_SELECTORS,
     }
 )
 
@@ -118,6 +173,8 @@ def environment_summary() -> dict[str, Any]:
     """Describe the execution environment without exposing environment values."""
 
     return {
+        "dotenv_loading_disabled": True,
+        "live_model_calls_allowed": False,
         "mode": "offline",
         "os": platform.system() or os.name,
         "python": platform.python_version(),
@@ -155,7 +212,9 @@ def sanitized_environment(source: Mapping[str, str] | None = None) -> dict[str, 
     clean = {key: value for key, value in original.items() if key.upper() in allowed_names}
     clean.update(
         {
+            "ALLOW_LIVE_MODEL_CALLS": "false",
             "HF_HUB_OFFLINE": "1",
+            "LEGAL_RAG_DISABLE_DOTENV": "1",
             "NO_PROXY": "*",
             "PIP_DISABLE_PIP_VERSION_CHECK": "1",
             "PIP_NO_INDEX": "1",
@@ -292,6 +351,100 @@ def run_subprocess_check(
         artifact_path=artifact_path,
         executed_at=executed_at,
     )
+
+
+def _junit_counts(path: Path) -> dict[str, int]:
+    """Read aggregate pytest JUnit counts without trusting process exit alone."""
+
+    root = ET.parse(path).getroot()
+    local_name = root.tag.rsplit("}", maxsplit=1)[-1]
+    if local_name == "testsuite":
+        suites = [root]
+    else:
+        suites = [
+            child
+            for child in root
+            if child.tag.rsplit("}", maxsplit=1)[-1] == "testsuite"
+        ]
+    if not suites:
+        raise ValueError("JUnit report contains no testsuite")
+
+    counts = {name: 0 for name in ("tests", "failures", "errors", "skipped")}
+    for suite in suites:
+        for name in counts:
+            raw_value = suite.attrib.get(name, "0")
+            value = int(raw_value)
+            if value < 0:
+                raise ValueError(f"JUnit {name} count must be non-negative")
+            counts[name] += value
+    return counts
+
+
+def run_pytest_check(
+    *,
+    test_id: str,
+    selectors: Sequence[str],
+    repo_root: Path,
+    timeout_seconds: int,
+    artifact_path: str | None = None,
+) -> dict[str, Any]:
+    """Run mandatory pytest selectors and fail closed on skip, xfail, or no tests."""
+
+    with tempfile.TemporaryDirectory(prefix="legal-rag-quality-gate-") as temp_dir:
+        junit_path = Path(temp_dir) / "pytest-junit.xml"
+        command = uv_run_command(
+            "pytest",
+            "-q",
+            "-o",
+            "xfail_strict=true",
+            "--junitxml",
+            str(junit_path),
+            *selectors,
+        )
+        record = run_subprocess_check(
+            test_id=test_id,
+            command=command,
+            repo_root=repo_root,
+            timeout_seconds=timeout_seconds,
+            artifact_path=artifact_path,
+        )
+        if record["exit_code"] != 0:
+            return record
+
+        try:
+            counts = _junit_counts(junit_path)
+        except (OSError, ET.ParseError, ValueError) as exc:
+            record["status"] = "failed"
+            record["exit_code"] = 1
+            record["output_summary"] = _clean_summary(
+                f"{record['output_summary']}\nmandatory pytest JUnit validation failed: {exc}"
+            )
+            return record
+
+        problems: list[str] = []
+        if counts["tests"] == 0:
+            problems.append("no tests were executed")
+        if counts["skipped"]:
+            problems.append(
+                f"{counts['skipped']} mandatory test(s) were skipped or xfailed"
+            )
+        if counts["failures"] or counts["errors"]:
+            problems.append(
+                f"JUnit recorded {counts['failures']} failure(s) and {counts['errors']} error(s)"
+            )
+        junit_summary = (
+            "JUnit: "
+            f"tests={counts['tests']}, failures={counts['failures']}, "
+            f"errors={counts['errors']}, skipped={counts['skipped']}"
+        )
+        if problems:
+            record["status"] = "failed"
+            record["exit_code"] = 1
+            junit_summary += "; " + "; ".join(problems)
+        record["output_summary"] = _clean_summary(
+            f"{record['output_summary']}\n{junit_summary}"
+        )
+        return record
 
 
 def _safe_candidate_path(repo_root: Path, relative_path: Path) -> Path | None:
@@ -476,8 +629,8 @@ def validate_state_payload(payload: Any, milestone: str = "M0") -> list[str]:
             errors.append("stage_status_values must not contain duplicates")
 
     active_milestone = payload.get("active_milestone")
-    if active_milestone != milestone:
-        errors.append(f"active_milestone must be {milestone!r} for this gate")
+    if not isinstance(active_milestone, str) or not active_milestone:
+        errors.append("active_milestone must be a non-empty string")
 
     milestones = payload.get("milestones")
     milestone_entries: dict[str, dict[str, Any]] = {}
@@ -502,24 +655,51 @@ def validate_state_payload(payload: Any, milestone: str = "M0") -> list[str]:
             if not isinstance(tests, dict) or not isinstance(tests.get("status"), str):
                 errors.append(f"milestone {milestone_id} must have tests.status")
 
-    active_entry = milestone_entries.get(milestone)
-    if active_entry is None:
+    gate_entry = milestone_entries.get(milestone)
+    if gate_entry is None:
         errors.append(f"milestones must contain {milestone}")
     else:
-        if active_entry.get("required") is not True:
+        if gate_entry.get("required") is not True:
             errors.append(f"milestone {milestone} must be required")
-        if payload.get("execution_status") != active_entry.get("status"):
-            errors.append("execution_status must equal the active milestone status")
-        if active_entry.get("status") == "released":
-            if not active_entry.get("tag"):
-                errors.append(f"released milestone {milestone} must record a tag")
-            if not active_entry.get("release_url"):
-                errors.append(f"released milestone {milestone} must record a release_url")
-            if active_entry.get("remote_release_verified") is not True:
-                errors.append(f"released milestone {milestone} must verify the remote release")
-            tests = active_entry.get("tests", {})
-            if tests.get("status") != "passed":
-                errors.append(f"released milestone {milestone} tests.status must be passed")
+        if active_milestone != milestone and gate_entry.get("status") != "released":
+            errors.append(
+                f"non-active gated milestone {milestone} must already be released"
+            )
+
+    for prerequisite_id in MILESTONE_PREREQUISITES.get(milestone, ()):
+        prerequisite = milestone_entries.get(prerequisite_id)
+        if prerequisite is None:
+            errors.append(f"milestones must contain prerequisite {prerequisite_id}")
+        elif prerequisite.get("status") != "released":
+            errors.append(
+                f"prerequisite milestone {prerequisite_id} must already be released"
+            )
+
+    active_entry = (
+        milestone_entries.get(active_milestone)
+        if isinstance(active_milestone, str)
+        else None
+    )
+    if isinstance(active_milestone, str) and active_entry is None:
+        errors.append(f"milestones must contain active_milestone {active_milestone}")
+    elif (
+        active_entry is not None
+        and payload.get("execution_status") != active_entry.get("status")
+    ):
+        errors.append("execution_status must equal the active milestone status")
+
+    for milestone_id, entry in milestone_entries.items():
+        if entry.get("status") != "released":
+            continue
+        if not entry.get("tag"):
+            errors.append(f"released milestone {milestone_id} must record a tag")
+        if not entry.get("release_url"):
+            errors.append(f"released milestone {milestone_id} must record a release_url")
+        if entry.get("remote_release_verified") is not True:
+            errors.append(f"released milestone {milestone_id} must verify the remote release")
+        tests = entry.get("tests", {})
+        if tests.get("status") != "passed":
+            errors.append(f"released milestone {milestone_id} tests.status must be passed")
 
     repository = payload.get("repository")
     if not isinstance(repository, dict):
@@ -787,25 +967,28 @@ def _candidate_static_records(repo_root: Path, milestone: str) -> list[dict[str,
     return [markdown_record, json_record, secret_record]
 
 
-def run_m0_offline(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
-    """Execute the complete M0 offline gate and return its report."""
+def _m0_offline_records(
+    repo_root: Path,
+    *,
+    state_milestone: str,
+) -> list[dict[str, Any]]:
+    """Run the cumulative M0 checks while validating the requested active stage."""
 
-    started_at = utc_now()
     records: list[dict[str, Any]] = []
 
     records.append(
-        run_subprocess_check(
+        run_pytest_check(
             test_id="M0-T02-offline-pytest",
-            command=uv_run_command("pytest", "-q"),
+            selectors=(),
             repo_root=repo_root,
             timeout_seconds=900,
         )
     )
 
     records.append(
-        run_subprocess_check(
+        run_pytest_check(
             test_id="M0-T03-synthetic-offline-smoke",
-            command=uv_run_command("pytest", "-q", "tests/test_m0_smoke.py"),
+            selectors=("tests/test_m0_smoke.py",),
             repo_root=repo_root,
             timeout_seconds=120,
             artifact_path="tests/test_m0_smoke.py",
@@ -851,21 +1034,73 @@ def run_m0_offline(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
             timeout_seconds=120,
         )
     )
-    records.extend(_candidate_static_records(repo_root, "M0"))
+    records.extend(_candidate_static_records(repo_root, state_milestone))
 
-    passed = gate_succeeded(records)
+    return records
+
+
+def _gate_report(
+    *,
+    milestone: str,
+    started_at: str,
+    records: list[dict[str, Any]],
+    mandatory_check_ids: frozenset[str],
+) -> dict[str, Any]:
+    passed = gate_succeeded(records, mandatory_check_ids)
     return {
         "schema_version": REPORT_SCHEMA_VERSION,
-        "milestone": "M0",
+        "milestone": milestone,
         "mode": "offline",
         "started_at": started_at,
         "finished_at": utc_now(),
         "status": "passed" if passed else "failed",
         "exit_code": 0 if passed else 1,
-        "mandatory_check_ids": sorted(MANDATORY_M0_CHECK_IDS),
+        "mandatory_check_ids": sorted(mandatory_check_ids),
         "checks": records,
         "artifact_path": None,
     }
+
+
+def run_m0_offline(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
+    """Execute the complete M0 offline gate and return its report."""
+
+    started_at = utc_now()
+    records = _m0_offline_records(repo_root, state_milestone="M0")
+    return _gate_report(
+        milestone="M0",
+        started_at=started_at,
+        records=records,
+        mandatory_check_ids=MANDATORY_M0_CHECK_IDS,
+    )
+
+
+def _m1_acceptance_records(repo_root: Path) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for test_id, selectors in M1_TEST_SELECTORS.items():
+        records.append(
+            run_pytest_check(
+                test_id=test_id,
+                selectors=selectors,
+                repo_root=repo_root,
+                timeout_seconds=180,
+                artifact_path=selectors[0].split("::", maxsplit=1)[0],
+            )
+        )
+    return records
+
+
+def run_m1_offline(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
+    """Execute cumulative M0 checks plus every named M1 acceptance test."""
+
+    started_at = utc_now()
+    records = _m0_offline_records(repo_root, state_milestone="M1")
+    records.extend(_m1_acceptance_records(repo_root))
+    return _gate_report(
+        milestone="M1",
+        started_at=started_at,
+        records=records,
+        mandatory_check_ids=MANDATORY_M1_CHECK_IDS,
+    )
 
 
 def validate_request(milestone: str | None, mode: str | None) -> list[str]:
@@ -917,7 +1152,7 @@ def _write_report(path: Path, report: Mapping[str, Any]) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run a milestone quality gate.")
-    parser.add_argument("--milestone", help="Milestone identifier (currently M0).")
+    parser.add_argument("--milestone", help="Milestone identifier (M0 or M1).")
     parser.add_argument("--mode", help="Gate mode (currently offline).")
     parser.add_argument("--output", help="Optional path for the JSON report.")
     return parser
@@ -928,6 +1163,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     request_errors = validate_request(args.milestone, args.mode)
     if request_errors:
         report = _invalid_request_report(args.milestone, args.mode, request_errors)
+    elif args.milestone == "M1":
+        report = run_m1_offline(REPO_ROOT)
     else:
         report = run_m0_offline(REPO_ROOT)
 

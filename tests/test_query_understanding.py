@@ -66,7 +66,7 @@ class QueryUnderstandingTest(unittest.TestCase):
 
             def complete(self, prompt: str) -> str:
                 self.calls += 1
-                return "not json"
+                return "SECRET_PROVIDER_RAW_BODY not json"
 
         client = BadClient()
         analysis = analyze_query("这个事情有没有依据？")
@@ -80,8 +80,92 @@ class QueryUnderstandingTest(unittest.TestCase):
 
         self.assertEqual(client.calls, 2)
         self.assertEqual(normalized.source, "rules:llm_error")
-        self.assertTrue(normalized.errors)
+        self.assertEqual(
+            normalized.errors,
+            ["normalizer_invalid_response", "normalizer_invalid_response"],
+        )
+        self.assertEqual(normalized.raw_response, "")
+        self.assertNotIn(
+            "SECRET_PROVIDER_RAW_BODY",
+            json.dumps(normalized.to_dict(), ensure_ascii=False),
+        )
         self.assertTrue(normalized.legal_questions)
+
+    def test_llm_normalizer_does_not_trace_provider_exception_details(self) -> None:
+        class FailingClient:
+            def complete(self, prompt: str) -> str:
+                raise RuntimeError("SECRET_PROVIDER_TOKEN=do-not-trace")
+
+        analysis = analyze_query("这个事情有没有依据？")
+        normalized = normalize_query(
+            analysis.original_query,
+            analysis=analysis,
+            llm_client=FailingClient(),
+            use_llm=True,
+        )
+        payload = json.dumps(normalized.to_dict(), ensure_ascii=False)
+
+        self.assertEqual(normalized.errors, ["normalizer_provider_error"])
+        self.assertEqual(normalized.raw_response, "")
+        self.assertNotIn("SECRET_PROVIDER_TOKEN", payload)
+
+    def test_llm_normalizer_rejects_non_finite_and_boolean_confidence(self) -> None:
+        confidence_values = ("true", "NaN", "Infinity", "-Infinity")
+
+        for confidence in confidence_values:
+            with self.subTest(confidence=confidence):
+                class ConstantClient:
+                    def complete(self, prompt: str) -> str:
+                        return (
+                            '{"legal_questions":["问题"],"missing_facts":[],'
+                            '"law_hints":[],"article_hints":[],"keywords":[],'
+                            f'"risk_flags":[],"confidence":{confidence}}}'
+                        )
+
+                analysis = analyze_query("这个事情有没有依据？")
+                normalized = normalize_query(
+                    analysis.original_query,
+                    analysis=analysis,
+                    llm_client=ConstantClient(),
+                    use_llm=True,
+                )
+
+                self.assertEqual(normalized.source, "rules:llm_error")
+                self.assertEqual(normalized.errors, ["normalizer_invalid_response"])
+                self.assertEqual(normalized.raw_response, "")
+
+    def test_llm_normalizer_rejects_unpaired_surrogates_but_accepts_emoji(self) -> None:
+        base_payload = {
+            "legal_questions": ["问题"],
+            "missing_facts": [],
+            "law_hints": [],
+            "article_hints": [],
+            "keywords": [],
+            "risk_flags": [],
+            "confidence": 0.8,
+        }
+
+        class SurrogateClient:
+            def complete(self, prompt: str) -> str:
+                payload = {**base_payload, "legal_questions": [chr(0xD800)]}
+                return json.dumps(payload, ensure_ascii=True)
+
+        analysis = analyze_query("这个事情有没有依据？")
+        normalized = normalize_query(
+            analysis.original_query,
+            analysis=analysis,
+            llm_client=SurrogateClient(),
+            use_llm=True,
+        )
+        emoji_payload = {**base_payload, "legal_questions": ["问题😀"]}
+        emoji_result = parse_normalized_query_json(
+            json.dumps(emoji_payload, ensure_ascii=True),
+            original_query="问题",
+        )
+
+        self.assertEqual(normalized.source, "rules:llm_error")
+        self.assertEqual(normalized.errors, ["normalizer_invalid_response"])
+        self.assertEqual(emoji_result.legal_questions, ["问题😀"])
 
     def test_planner_limits_queries_and_adds_hints(self) -> None:
         normalized = NormalizedQuery(

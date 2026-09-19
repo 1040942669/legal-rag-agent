@@ -1,6 +1,8 @@
 # Legal RAG Evaluation Plan
 
 > 本文中的 Phase 编号描述评测能力的历史来源；当前 M0-M7 改造状态以 `docs/refactor/MASTER_PLAN.md`、`STATE.json` 和 `HANDOFF.md` 为准。
+>
+> M1 起，指标字段、分母、不可用原因和旧字段映射以 [评测指标字典](METRICS.md) 为唯一权威定义。本文保留 case、实验流程和历史 Phase 口径，避免把历史结果改写成新 schema 实测。
 
 ## 当前问题
 
@@ -50,19 +52,20 @@ Retrieval:
 - Ranking trace: BM25 记录 metadata boost，RRF 记录 BM25/dense 子排名、子分数和 fused score。
 - Adaptive trace: 记录是否触发 adaptive、normalizer 输出、retrieval plans、merge 去重数量和每条证据的来源 query。
 
-Answer:
+Answer 和 verification:
 
-- Keyword coverage: 答案是否覆盖关键事实。
-- Evidence sufficiency pass: 生成前证据是否覆盖必要法律/条文提示，资料不足时是否进入降级路径。
-- Citation validity: `[Sx]` 引用编号是否属于本次检索结果；不判断该来源是否语义支持相邻 claim。
-- Verifier pass: 规则 verifier 是否同时通过引用编号、免责声明、越界拒答和基础词面检查。它不等于语义支持或法律正确性。
-- Refusal correctness: 高风险 flag 触发后，答案是否命中旧版拒答词；非风险样例当前自动记为 true，汇总均值包含这些样例，且不衡量过度拒答。
-- Hallucination sample review: 人工抽查答案是否编造法律依据。
-- LLM judge: 可选 `--judge`，输出 faithfulness、relevance、completeness；judge 调用失败或 JSON contract 失败单独计数，不进入质量均值。
+- 结构层分别记录 `schema_valid`、`evidence_catalog_valid`、纯 ID 存在性的 `source_ids_exist`、复合引用门禁 `citation_ids_valid`、`citation_alignment_valid` 和可选的 `evidence_scope_valid`。
+- 行为层分别记录 `disclaimer_present`、`response_mode_valid`、`response_mode_correct`、`refusal_recall`、`over_refusal_rate` 和 `clarification_recall`。
+- 语义层使用 `supported / unsupported / uncertain / not_checked`。当前确定性词面启发式只允许产生 `uncertain` 或 `not_checked`，不会把“没有发现问题”自动写成 `supported`。
+- `verifier_pass` 只表示配置要求的结构/行为检查通过，不表示法律正确性或 claim-source 语义蕴含。
+- LLM judge 仍为可选项；成功、失败和未执行有独立计数，超时、传输或 JSON/schema 错误以 `null + reason` 保存并排除质量均值。
+- Hallucination sample review 仍需人工抽查；M1 合成 fixture 只证明规则边界，不代表真实法律回答质量提高。
 
-`Citation validity`、`Verifier pass` 和 `Refusal correctness` 只对 `--generate` 运行有定义。Retrieval-only 报告将这些字段显示为 `N/A`，避免把拼接的检索文本误当作模型回答；拒答数据在 retrieval-only 阶段只用于验证风险 router 是否命中。
+新报告显式列出 retrieval gold、应答、应拒答、应澄清、服务失败和 Judge 三态分母。拒答召回只统计 `out_of_scope` 真值集合；过度拒答只统计应回答集合。预期行为来自评测 case，不来自 router 是否恰好识别风险，避免把 analyzer 漏检从分母中删除。
 
-当前 verifier 的边界必须单独解释：有效 `[Sx]` 只证明编号属于本次结果，不能证明来源语义支持该句；未引用法律语句仅做有限词面重合启发式检查；“不能”和“不构成法律意见”等词也可能触发拒答判断。旧版 `Refusal correctness` 不是 precision/recall 或语义正确率，也不检测危险建议是否在免责声明之前已经输出。M0 保留实现并如实记录，后续 M1 才按“应拒答 / 应回答”集合拆分分母，并区分结构、行为与语义状态。
+Retrieval-only 不构造 answer、不调用 answer verifier 或 Judge。回答、拒答、语义和 Judge 指标统一为 `null + retrieval_only`；旧 CSV 中保留 `-1` / `-1.0` 兼容哨兵，但这些值不得进入均值。Trace 同时明确 generation、verification 和 judge 未执行，旧 `verifier` 键保持空对象。
+
+旧报告中的 `Citation validity` 主要表示引用 rank/ID 存在，`Refusal correctness` 则是旧风险 flag + 宽泛词语匹配；两者不得按 schema v2 重新解释。当前纯 ID 存在性由 `source_ids_exist` 表示，`citation_ids_valid` 还组合可见引用/claim 对齐要求；权限/快照由 `evidence_scope_valid` 独立表示，语义支持状态另行记录。
 
 成本不硬编码平台价格。`--input-cost-per-million` 和 `--output-cost-per-million` 接受用户在运行时提供的美元 blended rate；当一次评测混用不同价格的生成模型和 judge 时，应拆成独立 run，不能把一个 blended estimate 当作真实账单。
 
@@ -175,12 +178,12 @@ retrieval results -> EvidenceCheck -> optional one-round follow-up -> answer -> 
 
 `EvidenceCheck` 会记录 `sufficient`、`missing_facts`、`missing_law_support`、`low_coverage`、`followup_queries` 和 `stop_reason`。如果证据不足，系统最多补检索一轮，然后要么标记 `sufficient_after_followup`，要么以 `max_rounds_reached` 停止并使用低置信回答模板。
 
-`VerificationResult` 会检查:
+旧 Phase 3 的 `VerificationResult` 当时检查:
 
 - 回答中的 `[Sx]` 是否都能对应当前 sources。
 - 答案是否保留免责声明。
 - 高风险 query 是否被拒答。
-- 关键法律结论是否至少带有引用或能被当前证据文本支撑。
+- 部分未引用法律句是否能通过有限词面启发式；它不是语义蕴含判断。
 
 Phase 3 验收命令:
 
@@ -189,7 +192,7 @@ python -B -m pytest
 python -m legal_rag.cli evaluate --chunk-strategy article --retriever bm25 --cases eval_cases/legal_eval_cases_adaptive.jsonl --adaptive --trace-path reports/eval_article_bm25_phase3_trace.jsonl --prefix eval_article_bm25_phase3
 ```
 
-Trace JSONL 现在除 `adaptive` 外，还包含 `evidence` 和 `verifier` 字段，评估报告会汇总 `Evidence sufficiency pass`、`Citation validity`、`Verifier pass` 和 `Refusal correctness`。
+M1 Trace 在历史 `adaptive`、`evidence` 和 `verifier` 键之外，新增 `execution`、`generation_attempt` 和 `final_response`。这使被 verifier 拒绝的草稿不会冒充最终交付回答；retrieval-only 也不会冒充已经生成和验证。
 
 ## Phase 4A 评测硬化与实验结论
 

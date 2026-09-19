@@ -61,17 +61,22 @@ def check_evidence_sufficiency(
     followup_queries = build_followup_queries(
         query,
         missing_law_support=missing_law_support,
-        missing_facts=missing_facts,
         max_queries=max_followup_queries,
     )
-    sufficient = not missing_law_support and not low_coverage and bool(results)
+    sufficient = not missing_law_support and not missing_facts and not low_coverage and bool(results)
+    if missing_facts:
+        stop_reason = "needs_clarification"
+    elif sufficient:
+        stop_reason = "sufficient"
+    else:
+        stop_reason = "needs_followup"
     return EvidenceCheck(
         sufficient=sufficient,
         missing_facts=unique(missing_facts),
         missing_law_support=unique(missing_law_support),
         low_coverage=unique(low_coverage),
         followup_queries=followup_queries,
-        stop_reason="sufficient" if sufficient else "needs_followup",
+        stop_reason=stop_reason,
         checked_result_count=len(results),
         covered_laws=covered_laws,
         covered_articles=covered_articles,
@@ -142,7 +147,6 @@ def build_followup_queries(
     query: str,
     *,
     missing_law_support: list[str],
-    missing_facts: list[str],
     max_queries: int,
 ) -> list[str]:
     queries: list[str] = []
@@ -151,8 +155,6 @@ def build_followup_queries(
             queries.append(f"{item.removeprefix('missing_law:')} {query}")
         elif item.startswith("missing_article:"):
             queries.append(f"{query} {item.removeprefix('missing_article:')}")
-    for fact in missing_facts:
-        queries.append(f"{query} {fact}")
     if not queries and missing_law_support:
         queries.append(query)
     return unique(queries)[:max_queries]

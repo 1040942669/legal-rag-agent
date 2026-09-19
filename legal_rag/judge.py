@@ -5,7 +5,27 @@ import math
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from .json_utils import (
+    DuplicateJsonKeyError,
+    InvalidJsonUnicodeError,
+    NonFiniteJsonConstantError,
+    reject_duplicate_object_pairs,
+    reject_non_finite_json_constant,
+    validate_json_unicode,
+)
 from .models import SearchResult
+
+
+MAX_JUDGE_RESPONSE_CHARS = 65_536
+MAX_JSON_START_CANDIDATES = 32
+MAX_JUDGE_ERROR_CHARS = 200
+JUDGE_RESPONSE_FIELDS = {
+    "faithfulness",
+    "relevance",
+    "completeness",
+    "passed",
+    "comment",
+}
 
 
 class CompletionClient(Protocol):
@@ -15,14 +35,16 @@ class CompletionClient(Protocol):
 
 @dataclass(frozen=True)
 class JudgeResult:
-    faithfulness: float
-    relevance: float
-    completeness: float
-    passed: bool
+    faithfulness: float | None
+    relevance: float | None
+    completeness: float | None
+    passed: bool | None
     comment: str
     source: str = "llm"
     error: str = ""
     raw_response: str = ""
+    status: str = "succeeded"
+    error_code: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -33,6 +55,8 @@ class JudgeResult:
             "comment": self.comment,
             "source": self.source,
             "error": self.error,
+            "status": self.status,
+            "error_code": self.error_code,
         }
 
 
@@ -78,13 +102,29 @@ def build_judge_prompt(question: str, answer: str, results: list[SearchResult]) 
 def extract_json_object(text: str) -> dict[str, Any] | None:
     """Extract the first complete JSON object without relying on greedy regexes."""
     cleaned = text.strip()
-    decoder = json.JSONDecoder()
+    if len(cleaned) > MAX_JUDGE_RESPONSE_CHARS:
+        return None
+    decoder = json.JSONDecoder(
+        object_pairs_hook=reject_duplicate_object_pairs,
+        parse_constant=reject_non_finite_json_constant,
+    )
+    candidates_checked = 0
     for start, char in enumerate(cleaned):
         if char != "{":
             continue
+        candidates_checked += 1
+        if candidates_checked > MAX_JSON_START_CANDIDATES:
+            return None
         try:
             parsed, _ = decoder.raw_decode(cleaned[start:])
-        except json.JSONDecodeError:
+            validate_json_unicode(parsed)
+        except (
+            DuplicateJsonKeyError,
+            InvalidJsonUnicodeError,
+            NonFiniteJsonConstantError,
+        ):
+            return None
+        except (ValueError, RecursionError, OverflowError):
             continue
         if isinstance(parsed, dict):
             return parsed
@@ -92,27 +132,34 @@ def extract_json_object(text: str) -> dict[str, Any] | None:
 
 
 def parse_score(value: Any) -> float | None:
-    if isinstance(value, bool):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     try:
         score = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
     if not math.isfinite(score) or not 0.0 <= score <= 1.0:
         return None
     return round(score, 4)
 
 
-def error_result(message: str, *, raw_response: str = "") -> JudgeResult:
+def error_result(
+    message: str,
+    *,
+    error_code: str = "judge_error",
+    raw_response: str = "",
+) -> JudgeResult:
     return JudgeResult(
-        faithfulness=0.0,
-        relevance=0.0,
-        completeness=0.0,
-        passed=False,
+        faithfulness=None,
+        relevance=None,
+        completeness=None,
+        passed=None,
         comment="",
         source="error",
-        error=message,
+        error=message[:MAX_JUDGE_ERROR_CHARS],
         raw_response=raw_response[:500],
+        status="error",
+        error_code=error_code,
     )
 
 
@@ -127,10 +174,37 @@ def judge_answer(
     try:
         raw = str(client.complete(prompt))
     except Exception as exc:
-        return error_result(str(exc))
+        exception_name = type(exc).__name__.lower()
+        error_code = (
+            "timeout"
+            if isinstance(exc, TimeoutError) or "timeout" in exception_name
+            else "transport_error"
+        )
+        message = (
+            "judge request timed out"
+            if error_code == "timeout"
+            else "judge provider request failed"
+        )
+        return error_result(message, error_code=error_code)
+    if len(raw) > MAX_JUDGE_RESPONSE_CHARS:
+        return error_result(
+            "judge response exceeds the maximum accepted size",
+            error_code="invalid_json",
+            raw_response=raw,
+        )
     parsed = extract_json_object(raw)
     if parsed is None:
-        return error_result("judge response is not valid JSON", raw_response=raw)
+        return error_result(
+            "judge response is not valid JSON",
+            error_code="invalid_json",
+            raw_response=raw,
+        )
+    if set(parsed) != JUDGE_RESPONSE_FIELDS:
+        return error_result(
+            "judge response fields do not match the required schema",
+            error_code="invalid_schema",
+            raw_response=raw,
+        )
     scores = {
         name: parse_score(parsed.get(name))
         for name in ("faithfulness", "relevance", "completeness")
@@ -139,10 +213,22 @@ def judge_answer(
     if invalid_fields:
         return error_result(
             f"judge response has invalid score fields: {', '.join(invalid_fields)}",
+            error_code="invalid_schema",
             raw_response=raw,
         )
     if "passed" in parsed and not isinstance(parsed["passed"], bool):
-        return error_result("judge response field `passed` must be a boolean", raw_response=raw)
+        return error_result(
+            "judge response field `passed` must be a boolean",
+            error_code="invalid_schema",
+            raw_response=raw,
+        )
+    comment = parsed.get("comment", "")
+    if not isinstance(comment, str):
+        return error_result(
+            "judge response field `comment` must be a string",
+            error_code="invalid_schema",
+            raw_response=raw,
+        )
     faithfulness = scores["faithfulness"]
     relevance = scores["relevance"]
     completeness = scores["completeness"]
@@ -155,6 +241,6 @@ def judge_answer(
         relevance=relevance,
         completeness=completeness,
         passed=passed,
-        comment=str(parsed.get("comment", ""))[:300],
+        comment=comment[:300],
         raw_response=raw[:500],
     )
