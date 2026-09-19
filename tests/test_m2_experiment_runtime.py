@@ -134,7 +134,9 @@ def test_m2_t01_exact_replay_preserves_output_without_external_calls(tmp_path) -
         stage="retrieval",
         input_payload=case_input,
         mode="replay",
-        producer=lambda: (_ for _ in ()).throw(AssertionError("replay called producer")),
+        producer=lambda: (_ for _ in ()).throw(
+            AssertionError("replay called producer")
+        ),
     )
 
     assert producer_calls == 1
@@ -146,7 +148,9 @@ def test_m2_t01_exact_replay_preserves_output_without_external_calls(tmp_path) -
     assert manifest["identity"]["resume_compatibility_hash"]
 
 
-def test_replay_miss_and_corruption_fail_closed_without_running_producer(tmp_path) -> None:
+def test_replay_miss_and_corruption_fail_closed_without_running_producer(
+    tmp_path,
+) -> None:
     manifest = _manifest()
     cache = ExactStageCache(tmp_path / "stage-cache")
     case_input = {
@@ -212,9 +216,7 @@ def test_m2_t02_stage_keys_invalidate_only_affected_contracts() -> None:
     prompt_changed = _manifest(prompt_version="prompt-v2")
     embedding_changed = _manifest(embedding_revision="embedding-v2")
     chunking_changed = _manifest(chunking_version="article-v2")
-    chunking_code_changed = _manifest(
-        chunking_implementation="chunking-runtime-v2"
-    )
+    chunking_code_changed = _manifest(chunking_implementation="chunking-runtime-v2")
     index_changed = _manifest(index_hash="index-v2")
     retrieval_input = {
         "case_id": "case-1",
@@ -240,10 +242,9 @@ def test_m2_t02_stage_keys_invalidate_only_affected_contracts() -> None:
         build_stage_cache_key(prompt_changed, "retrieval", retrieval_input)
         == base_retrieval
     )
-    assert (
-        build_stage_cache_key(prompt_changed, "generation", generation_input)
-        != build_stage_cache_key(base, "generation", generation_input)
-    )
+    assert build_stage_cache_key(
+        prompt_changed, "generation", generation_input
+    ) != build_stage_cache_key(base, "generation", generation_input)
     assert (
         build_stage_cache_key(embedding_changed, "retrieval", retrieval_input)
         != base_retrieval
@@ -371,6 +372,45 @@ def test_manifest_and_stage_inputs_reject_missing_deterministic_identity() -> No
                 "query_representation_hash": canonical_hash([0.1]),
             },
         )
+
+
+def test_dirty_manifest_requires_a_working_tree_diff_hash() -> None:
+    valid = _manifest()
+    dirty_code = deepcopy(valid["code"])
+    dirty_code["dirty"] = True
+    with pytest.raises(ExperimentContractError):
+        build_experiment_manifest(
+            experiment_id=valid["experiment_id"],
+            execution_mode=valid["execution_mode"],
+            default_cache_mode=valid["cache_policy"]["default_mode"],
+            code=dirty_code,
+            config_summary=valid["config"]["summary"],
+            corpus=valid["corpus"],
+            dataset=valid["dataset"],
+            contracts=valid["contracts"],
+            runtime=valid["runtime"],
+            environment=valid["environment"],
+            created_at=valid["created_at"],
+        )
+
+    dirty_code["diff_hash"] = canonical_hash({"tracked": "diff", "untracked": []})
+    dirty_manifest = build_experiment_manifest(
+        experiment_id=valid["experiment_id"],
+        execution_mode=valid["execution_mode"],
+        default_cache_mode=valid["cache_policy"]["default_mode"],
+        code=dirty_code,
+        config_summary=valid["config"]["summary"],
+        corpus=valid["corpus"],
+        dataset=valid["dataset"],
+        contracts=valid["contracts"],
+        runtime=valid["runtime"],
+        environment=valid["environment"],
+        created_at=valid["created_at"],
+    )
+    assert (
+        dirty_manifest["identity"]["resume_compatibility_hash"]
+        != valid["identity"]["resume_compatibility_hash"]
+    )
 
 
 def test_canonical_contract_rejects_ambiguous_values_and_unknown_stages() -> None:

@@ -113,7 +113,9 @@ def _validate_json_value(value: Any, *, path: str = "$") -> None:
     if isinstance(value, dict):
         for key, item in value.items():
             if not isinstance(key, str):
-                raise ExperimentContractError(f"JSON object key must be a string at {path}")
+                raise ExperimentContractError(
+                    f"JSON object key must be a string at {path}"
+                )
             _validate_json_value(item, path=f"{path}.{key}")
         return
     raise ExperimentContractError(
@@ -422,7 +424,23 @@ def build_experiment_manifest(
     code_payload = _require_mapping("code", code)
     if not isinstance(code_payload.get("dirty"), bool):
         raise ExperimentContractError("code.dirty must be a boolean")
-    _require_non_empty_string("code.commit", code_payload.get("commit"))
+    commit = _require_non_empty_string("code.commit", code_payload.get("commit"))
+    if not re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", commit):
+        raise ExperimentContractError("code.commit must be a lowercase Git object ID")
+    diff_hash = code_payload.get("diff_hash")
+    if code_payload["dirty"]:
+        if not isinstance(diff_hash, str) or not re.fullmatch(
+            r"[0-9a-f]{64}", diff_hash
+        ):
+            raise ExperimentContractError(
+                "dirty code requires a lowercase SHA-256 code.diff_hash"
+            )
+    elif diff_hash is not None and (
+        not isinstance(diff_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", diff_hash)
+    ):
+        raise ExperimentContractError(
+            "code.diff_hash must be null or a lowercase SHA-256 digest"
+        )
     config_payload = _require_mapping("config_summary", config_summary)
     corpus_payload = _require_mapping("corpus", corpus)
     dataset_payload = _require_mapping("dataset", dataset)
@@ -435,27 +453,45 @@ def build_experiment_manifest(
     environment_payload = _require_mapping("environment", environment)
 
     for field_name in ("snapshot_hash", "index_hash"):
-        _require_non_empty_string(f"corpus.{field_name}", corpus_payload.get(field_name))
+        _require_non_empty_string(
+            f"corpus.{field_name}", corpus_payload.get(field_name)
+        )
     for field_name in ("dataset_id", "role", "case_file_hash"):
-        _require_non_empty_string(f"dataset.{field_name}", dataset_payload.get(field_name))
+        _require_non_empty_string(
+            f"dataset.{field_name}", dataset_payload.get(field_name)
+        )
     case_schema_version = dataset_payload.get("case_schema_version")
     if (
         isinstance(case_schema_version, bool)
         or not isinstance(case_schema_version, int)
         or case_schema_version < 1
     ):
-        raise ExperimentContractError("dataset.case_schema_version must be a positive integer")
+        raise ExperimentContractError(
+            "dataset.case_schema_version must be a positive integer"
+        )
     concurrency = runtime_payload.get("concurrency")
-    if isinstance(concurrency, bool) or not isinstance(concurrency, int) or concurrency < 1:
+    if (
+        isinstance(concurrency, bool)
+        or not isinstance(concurrency, int)
+        or concurrency < 1
+    ):
         raise ExperimentContractError("runtime.concurrency must be a positive integer")
     max_retries = runtime_payload.get("max_retries")
-    if isinstance(max_retries, bool) or not isinstance(max_retries, int) or max_retries < 0:
-        raise ExperimentContractError("runtime.max_retries must be a non-negative integer")
+    if (
+        isinstance(max_retries, bool)
+        or not isinstance(max_retries, int)
+        or max_retries < 0
+    ):
+        raise ExperimentContractError(
+            "runtime.max_retries must be a non-negative integer"
+        )
     if isinstance(runtime_payload.get("random_seed"), bool) or not isinstance(
         runtime_payload.get("random_seed"), int
     ):
         raise ExperimentContractError("runtime.random_seed must be an integer")
-    _require_non_empty_string("runtime.timing_scope", runtime_payload.get("timing_scope"))
+    _require_non_empty_string(
+        "runtime.timing_scope", runtime_payload.get("timing_scope")
+    )
 
     stage_contracts = _stage_contracts(
         code=code_payload,
@@ -507,7 +543,9 @@ def validate_experiment_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
     payload = _require_mapping("manifest", manifest)
     if payload.get("manifest_schema_version") != EXPERIMENT_MANIFEST_SCHEMA_VERSION:
         raise ExperimentContractError("unsupported experiment manifest schema version")
-    cache_policy = _require_mapping("manifest.cache_policy", payload.get("cache_policy"))
+    cache_policy = _require_mapping(
+        "manifest.cache_policy", payload.get("cache_policy")
+    )
     config = _require_mapping("manifest.config", payload.get("config"))
     try:
         rebuilt = build_experiment_manifest(
@@ -706,7 +744,9 @@ class ExactStageCache:
         if stage not in STAGES or not _SAFE_STAGE.fullmatch(stage):
             raise ExperimentContractError(f"unsafe cache stage: {stage!r}")
         if not re.fullmatch(r"[0-9a-f]{64}", cache_key):
-            raise ExperimentContractError("cache key must be a lowercase SHA-256 digest")
+            raise ExperimentContractError(
+                "cache key must be a lowercase SHA-256 digest"
+            )
         return self.root / stage / f"{cache_key}.json"
 
     def _read(
@@ -760,7 +800,9 @@ class ExactStageCache:
         entry_core = {
             key: value for key, value in payload.items() if key != "entry_sha256"
         }
-        if not isinstance(entry_sha256, str) or entry_sha256 != canonical_hash(entry_core):
+        if not isinstance(entry_sha256, str) or entry_sha256 != canonical_hash(
+            entry_core
+        ):
             raise CacheCorruptionError(f"cache envelope checksum mismatch: {path}")
         return payload
 
@@ -815,7 +857,9 @@ class ExactStageCache:
                     expected_contract_fingerprint=expected_contract_fingerprint,
                     expected_input_sha256=expected_input_sha256,
                 )
-                if existing is None or canonical_hash(existing) != canonical_hash(entry):
+                if existing is None or canonical_hash(existing) != canonical_hash(
+                    entry
+                ):
                     raise CacheConflictError(
                         "concurrent writer stored a different payload for exact "
                         f"cache key: {cache_key}"
