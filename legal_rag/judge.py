@@ -15,14 +15,16 @@ class CompletionClient(Protocol):
 
 @dataclass(frozen=True)
 class JudgeResult:
-    faithfulness: float
-    relevance: float
-    completeness: float
-    passed: bool
+    faithfulness: float | None
+    relevance: float | None
+    completeness: float | None
+    passed: bool | None
     comment: str
     source: str = "llm"
     error: str = ""
     raw_response: str = ""
+    status: str = "succeeded"
+    error_code: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -33,6 +35,8 @@ class JudgeResult:
             "comment": self.comment,
             "source": self.source,
             "error": self.error,
+            "status": self.status,
+            "error_code": self.error_code,
         }
 
 
@@ -103,16 +107,23 @@ def parse_score(value: Any) -> float | None:
     return round(score, 4)
 
 
-def error_result(message: str, *, raw_response: str = "") -> JudgeResult:
+def error_result(
+    message: str,
+    *,
+    error_code: str = "judge_error",
+    raw_response: str = "",
+) -> JudgeResult:
     return JudgeResult(
-        faithfulness=0.0,
-        relevance=0.0,
-        completeness=0.0,
-        passed=False,
+        faithfulness=None,
+        relevance=None,
+        completeness=None,
+        passed=None,
         comment="",
         source="error",
         error=message,
         raw_response=raw_response[:500],
+        status="error",
+        error_code=error_code,
     )
 
 
@@ -127,10 +138,21 @@ def judge_answer(
     try:
         raw = str(client.complete(prompt))
     except Exception as exc:
-        return error_result(str(exc))
+        exception_name = type(exc).__name__.lower()
+        error_code = (
+            "timeout"
+            if isinstance(exc, TimeoutError) or "timeout" in exception_name
+            else "transport_error"
+        )
+        message = str(exc).strip() or type(exc).__name__
+        return error_result(message, error_code=error_code)
     parsed = extract_json_object(raw)
     if parsed is None:
-        return error_result("judge response is not valid JSON", raw_response=raw)
+        return error_result(
+            "judge response is not valid JSON",
+            error_code="invalid_json",
+            raw_response=raw,
+        )
     scores = {
         name: parse_score(parsed.get(name))
         for name in ("faithfulness", "relevance", "completeness")
@@ -139,10 +161,15 @@ def judge_answer(
     if invalid_fields:
         return error_result(
             f"judge response has invalid score fields: {', '.join(invalid_fields)}",
+            error_code="invalid_schema",
             raw_response=raw,
         )
     if "passed" in parsed and not isinstance(parsed["passed"], bool):
-        return error_result("judge response field `passed` must be a boolean", raw_response=raw)
+        return error_result(
+            "judge response field `passed` must be a boolean",
+            error_code="invalid_schema",
+            raw_response=raw,
+        )
     faithfulness = scores["faithfulness"]
     relevance = scores["relevance"]
     completeness = scores["completeness"]

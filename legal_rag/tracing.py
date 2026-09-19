@@ -48,6 +48,9 @@ def build_retrieval_trace_record(
     adaptive: dict[str, Any] | None = None,
     evidence: dict[str, Any] | None = None,
     verifier: dict[str, Any] | None = None,
+    execution: dict[str, Any] | None = None,
+    generation_attempt: dict[str, Any] | None = None,
+    final_response: dict[str, Any] | None = None,
     failure: dict[str, Any] | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -60,6 +63,11 @@ def build_retrieval_trace_record(
         "analyzer": analyzer or {},
         "adaptive": adaptive or {},
         "evidence": evidence or {},
+        "execution": execution or {},
+        "generation_attempt": generation_attempt or {},
+        "final_response": final_response or {},
+        # Compatibility key for pre-M1 trace readers. Retrieval-only callers
+        # leave it empty instead of fabricating a verification result.
         "verifier": verifier or {},
         "failure": failure or {},
         "results": [search_result_to_trace(result) for result in results],

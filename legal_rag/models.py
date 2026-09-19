@@ -15,6 +15,7 @@ ANSWER_MODES = frozenset(
 SEMANTIC_SUPPORT_STATUSES = frozenset(
     {"supported", "unsupported", "uncertain", "not_checked"}
 )
+EVALUATION_METRICS_SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -266,6 +267,20 @@ class EvalCase:
     expected_law: str
     expected_articles: list[str]
     keywords: list[str]
+    expected_behavior: str = ""
+    session_group: str | None = None
+    turn_index: int = 0
+    schema_version: int = 1
+
+    @property
+    def resolved_expected_behavior(self) -> str:
+        """Return the explicit behavior target, or the legacy case mapping."""
+
+        if self.expected_behavior:
+            return self.expected_behavior
+        if self.case_type == "refusal":
+            return "out_of_scope"
+        return "evidence_answer"
 
 
 @dataclass
@@ -306,3 +321,30 @@ class EvalRecord:
     total_tokens: int = 0
     token_usage_calls: int = 0
     llm_latency_ms: float = 0.0
+    # Manually constructed/pre-M1 records remain legacy until evaluate()
+    # explicitly populates the v2 canonical metrics.
+    metrics_schema_version: int = 1
+    expected_behavior: str = ""
+    observed_answer_mode: str | None = None
+    execution: dict[str, Any] = field(default_factory=dict)
+    canonical_metrics: dict[str, dict[str, Any]] = field(default_factory=dict)
+    generation_attempt: dict[str, Any] = field(default_factory=dict)
+
+    def to_canonical_dict(self) -> dict[str, Any]:
+        """Return the unambiguous v2 evaluation payload.
+
+        Legacy scalar fields remain on the dataclass for existing CSV readers.
+        New consumers should use this representation, where unavailable values
+        are always ``null`` together with an explicit reason.
+        """
+
+        return {
+            "metrics_schema_version": self.metrics_schema_version,
+            "case_id": self.case_id,
+            "case_type": self.case_type,
+            "expected_behavior": self.expected_behavior,
+            "observed_answer_mode": self.observed_answer_mode,
+            "execution": self.execution,
+            "metrics": self.canonical_metrics,
+            "generation_attempt": self.generation_attempt,
+        }
