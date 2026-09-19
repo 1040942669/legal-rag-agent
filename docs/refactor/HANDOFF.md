@@ -8,7 +8,7 @@
 - release target 的 [master CI 35462786212](https://github.com/1040942669/legal-rag-agent/actions/runs/35462786212) 成功。远端 annotated tag object `546b0207eaf7dd46f1303baec9b279c14e41592c` peeled 到同一 target。
 - Tag / Release：`v0.2.0` / [GitHub Release](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.2.0)，发布时间 `2026-09-19T18:59:07Z`；非 draft、非 prerelease、无附件。
 - 当前回执分支：`codex/m1-release-receipt`，从已发布的 `origin/master` 创建；软件 Tag 不包含也不需要包含后续回执提交。
-- M1 终态为 `released`；机器可读回执通过独立文档 [PR #6](https://github.com/1040942669/legal-rag-agent/pull/6) 落库。Issue #4 已由软件 PR 合并关闭，Milestone 2 在回执 PR 合并并核对 master CI 后关闭。
+- M1 终态为 `released`；机器可读回执 [PR #6](https://github.com/1040942669/legal-rag-agent/pull/6) 已于 `2026-09-19T19:16:26Z` 普通合并，merge `fee92b4457dc68edc413608fb3a0d263af740922` 的 [master CI 35463832520](https://github.com/1040942669/legal-rag-agent/actions/runs/35463832520) 成功。Issue #4 和 Milestone 2 均已关闭。
 - M2-M7 尚未开始；每个阶段仍独立测试、PR、合并、Tag、Release 和回执。
 
 ## M1 启动边界
@@ -45,6 +45,8 @@
 23. PR #5 普通合并为 `d51ed481f986dde807163f4b5583b07bc9ef6750`；对应 master push CI 复验 17/17、186 passed、148 subtests、JUnit 334/0/0/0。
 24. annotated `v0.2.0` 的远端 tag object / peeled target 已交叉核对；GitHub Release API/CLI 确认发布对象非 draft、非 prerelease且无附件。
 25. 机器可读发布回执为 `docs/refactor/receipts/M1.json`；它在软件 Release 之后由独立文档 PR 落库，不移动 `v0.2.0`。
+26. 回执 PR #6 最终 head `11b2165396d2dc8c55c5537e33307c15a67376e2` 的 [CI 35463637086](https://github.com/1040942669/legal-rag-agent/actions/runs/35463637086) 成功；diff 只有 6 个文档文件。
+27. 回执 merge `fee92b4457dc68edc413608fb3a0d263af740922` 的 master CI 再次通过 17/17、186 passed、148 subtests、JUnit 334/0/0/0；远端 Tag 仍 peeled 到软件 release target `d51ed481...`，Milestone 2 已关闭。
 
 ## 真实验证结果
 
@@ -66,7 +68,7 @@
 - 没有运行在线或本地生成模型、Embedding、reranker、LLM judge、真实法律语料实验或付费调用。
 - 没有读取/上传 `.env` 值、完整语料、Embedding cache、私人课程/简历/面试材料或大型产物。
 - 没有引入数据库、FastAPI、LangGraph、Redis/Celery，没有部署生产。
-- M1 软件已经发布；尚未完成的仅是发布回执文档 PR/CI/合并与 Milestone 2 收尾，不得重复发版或移动 Tag。
+- M1 软件、发布回执和 Milestone 收尾均已完成；没有重复发版或移动 Tag，M2 未开始。
 - 本地门禁 JSON、下载的 CI JSON 与包构建物只保存在被忽略的本地 `.tmp`；它们没有进入 Git 或 Release 附件。GitHub Actions 产物按平台保留策略远端保存。
 - 没有把历史 203 部法律或模型质量数字冒充 M0 新实测。
 
@@ -100,15 +102,15 @@
 | 软件分支 / 回执分支 | `codex/m1-verification` / `codex/m1-release-receipt` |
 | 最终 PR head / release target | `d2fa34776cd188197954eff9a0092c207f309b97` / `d51ed481f986dde807163f4b5583b07bc9ef6750` |
 | M1 PR / Tag / Release | [PR #5](https://github.com/1040942669/legal-rag-agent/pull/5) / `v0.2.0` / [published](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.2.0) |
-| M1 回执 PR | [PR #6](https://github.com/1040942669/legal-rag-agent/pull/6) / documentation-only；初始 head `f58bc77...` CI success |
+| M1 回执 PR | [PR #6](https://github.com/1040942669/legal-rag-agent/pull/6) / merged；final head `11b2165...` / merge `fee92b4...` / PR 与 master CI success |
 | M1 精确候选测试 | final PR head 与 release target 均为 186 passed，148 subtests passed；JUnit 334/0 failures/0 errors/0 skipped；无真实模型或语料调用 |
 | M1 累积门禁 | PR/master 均 17/17 passed（含 M0 7 项 + M1 10 项） |
 | M1 package | `0.2.0` verified build + Python 3.12.13 isolated install/import passed；hash 见上文 |
 | M1 PR / master CI | [run 35462691374](https://github.com/1040942669/legal-rag-agent/actions/runs/35462691374) / [run 35462786212](https://github.com/1040942669/legal-rag-agent/actions/runs/35462786212) / success |
 | M1 Issue / Milestone | [#4](https://github.com/1040942669/legal-rag-agent/issues/4) / [Milestone 2](https://github.com/1040942669/legal-rag-agent/milestone/2) |
-| 阻塞 | 无；回执 PR 仍须通过最终 head CI 并正常合并，失败时状态退回 `released_receipt_pending`，不得重复发版 |
-| 下一条可执行动作 | push 回执终态提交，等待 PR #6 最终 head CI，正常合并后核对 master CI、关闭 Milestone 2并停止 |
+| 阻塞 | 无 |
+| 下一条可执行动作 | 停止；M2 保持 `not_started`，只有后续明确启动里程碑时才继续 |
 
 ## 完成说明
 
-`v0.2.0` 的 `release_target_sha` 始终保持 `d51ed481f986dde807163f4b5583b07bc9ef6750`，即使 `master` 随后因回执提交高于 Tag。回执 PR 不属于新的软件版本；完成回执 CI、合并、master CI 与 Milestone 核对后停止，不开始 M2。
+`v0.2.0` 的 `release_target_sha` 始终保持 `d51ed481f986dde807163f4b5583b07bc9ef6750`，即使 `master` 已因回执提交前进到 `fee92b4457dc68edc413608fb3a0d263af740922`。回执 PR 不属于新的软件版本。M1 已完成并停止，M2 未开始。
