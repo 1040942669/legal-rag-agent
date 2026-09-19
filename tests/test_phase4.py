@@ -246,6 +246,38 @@ class JudgeTest(unittest.TestCase):
         self.assertIsNone(result.faithfulness)
         self.assertIsNone(result.passed)
 
+    def test_judge_rejects_duplicate_missing_and_unknown_fields(self):
+        responses = (
+            (
+                '{"faithfulness": 0.0, "faithfulness": 1.0, "relevance": 0.8, '
+                '"completeness": 0.7, "passed": true, "comment": "ok"}',
+                "invalid_json",
+            ),
+            (
+                '{"faithfulness": 0.9, "relevance": 0.8, "completeness": 0.7, '
+                '"passed": true}',
+                "invalid_schema",
+            ),
+            (
+                '{"faithfulness": 0.9, "relevance": 0.8, "completeness": 0.7, '
+                '"passed": true, "comment": "ok", "extra": 1}',
+                "invalid_schema",
+            ),
+        )
+
+        for raw, error_code in responses:
+            with self.subTest(error_code=error_code, raw=raw):
+                result = judge_answer(
+                    StubJudgeClient(raw),
+                    question="q",
+                    answer="a",
+                    results=self.make_results(),
+                )
+
+                self.assertEqual(result.status, "error")
+                self.assertEqual(result.error_code, error_code)
+                self.assertIsNone(result.passed)
+
     def test_extract_json_object_plain(self):
         self.assertEqual(extract_json_object('前缀 {"a": 1} 后缀'), {"a": 1})
         self.assertEqual(extract_json_object('{"a": 1}\n{"b": 2}'), {"a": 1})

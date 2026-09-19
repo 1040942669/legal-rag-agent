@@ -125,6 +125,7 @@ def test_interactive_chat_trace_separates_rejected_attempt_from_delivered_final(
             "passed": False,
             "actual_answer_mode": "evidence_answer",
             "citation_ids_valid": False,
+            "unsupported_claim_count": 0,
         },
     }
     assert trace["final_response"] == {
@@ -133,6 +134,7 @@ def test_interactive_chat_trace_separates_rejected_attempt_from_delivered_final(
             "verification": {
                 "passed": True,
                 "actual_answer_mode": "insufficient_evidence",
+                "unsupported_claim_count": 0,
             },
         },
         "unavailable_reason": None,

@@ -25,7 +25,11 @@ from .models import (
 from .query import analyze_query
 from .query_understanding import CompletionClient
 from .retrieval import Retriever, format_sources
-from .tracing import JsonlTraceWriter, build_retrieval_trace_record
+from .tracing import (
+    JsonlTraceWriter,
+    build_retrieval_trace_record,
+    verification_result_to_trace,
+)
 from .verifier import verify_answer
 
 
@@ -228,9 +232,9 @@ def evaluate(
                 analysis = adaptive_result.analysis
                 adaptive_trace = adaptive_result.to_trace() if adaptive_enabled else adaptive_trace
                 evidence_check = adaptive_result.evidence_check
-        except Exception as exc:  # Keep evaluation running across model failures.
+        except Exception:  # Keep evaluation running across model failures.
             results = []
-            error = str(exc) or type(exc).__name__
+            error = "evaluation service failed"
             service_status = stage_status("error", "service_error")
             if generate:
                 generation_status = stage_status("error", "service_error")
@@ -317,7 +321,7 @@ def evaluate(
                 ),
                 "answer_mode": attempted_mode,
                 "verification": (
-                    pre_fallback_verification.to_dict()
+                    verification_result_to_trace(pre_fallback_verification)
                     if pre_fallback_verification is not None
                     else None
                 ),
@@ -331,7 +335,7 @@ def evaluate(
                 final_response = {
                     "value": {
                         "answer_mode": observed_mode_for_trace,
-                        "verification": verification.to_dict() if verification is not None else None,
+                        "verification": verification_result_to_trace(verification),
                     },
                     "unavailable_reason": None,
                 }
@@ -492,7 +496,11 @@ def evaluate(
                     analyzer=analysis.to_dict(),
                     adaptive=adaptive_trace,
                     evidence=evidence_check.to_dict(),
-                    verifier=verification.to_dict() if generate and verification is not None else None,
+                    verifier=(
+                        verification_result_to_trace(verification)
+                        if generate and verification is not None
+                        else None
+                    ),
                     execution=execution,
                     generation_attempt=generation_attempt,
                     final_response=final_response,

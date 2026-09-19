@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from dataclasses import replace
 from typing import Any
 
@@ -15,10 +16,10 @@ from .models import (
     VerificationContext,
     VerificationResult,
 )
+from .json_utils import DuplicateJsonKeyError, reject_duplicate_object_pairs
 
 
 CITATION_RE = re.compile(r"\[S([1-9]\d*)\]")
-CITATION_LIKE_RE = re.compile(r"\[\s*[sS][^\]\r\n]*\]")
 SOURCE_ID_RE = re.compile(r"S([1-9]\d*)$")
 MAX_STRUCTURED_ANSWER_CHARS = 65_536
 STANDARD_DISCLAIMER = "仅供课程学习和法律文本检索参考，不构成法律意见。"
@@ -32,8 +33,13 @@ STRUCTURED_ANSWER_FIELDS = {
     "clarification_question",
 }
 EXPLICIT_REFUSAL_PATTERNS = (
-    re.compile(r"(?:^|[。！？\n])\s*(?:抱歉[，,]\s*)?(?:我|本助手|本系统)(?:不能|无法|不予)(?:为(?:你|您|用户))?(?:直接)?(?:提供|回答|协助|给出)"),
-    re.compile(r"(?:^|[。！？\n])\s*抱歉[，,]\s*(?:不能|无法|不予)(?:回答|提供|协助)"),
+    re.compile(
+        r"(?:^|[。！？\n])\s*(?:(?:很)?抱歉[，,]\s*)?"
+        r"(?:(?:出于|基于)[^。！？\n，,]{1,30}[，,]\s*)?"
+        r"(?:我|本助手|本系统)(?:不能|无法|不会|不予|拒绝)"
+        r"(?:(?:为|向)(?:你|您|用户))?(?:直接)?(?:提供|回答|协助|给出)"
+    ),
+    re.compile(r"(?:^|[。！？\n])\s*(?:很)?抱歉[，,]\s*(?:不能|无法|不会|不予)(?:回答|提供|协助)"),
     re.compile(r"^\s*(?:不能|无法|不予)(?:直接)?(?:回答(?:这个|该)(?:问题|请求)|提供(?:违法|非法|具体操作)|协助(?:规避执法|违法))"),
     re.compile(r"(?:^|[。！？\n])\s*(?:我|本助手|本系统)拒绝(?:提供|回答|协助)"),
     re.compile(r"(?:这个问题|这个请求|该请求)(?:不属于|超出)当前.+(?:范围|能力)"),
@@ -155,9 +161,14 @@ def parse_structured_answer(answer: str | StructuredAnswer) -> StructuredAnswer:
     candidate = _strip_json_fence(raw)
     if candidate.startswith("{"):
         try:
-            payload = json.loads(candidate)
+            payload = json.loads(
+                candidate,
+                object_pairs_hook=reject_duplicate_object_pairs,
+            )
         except json.JSONDecodeError as exc:
             return _legacy_answer(raw, [f"invalid_json:{exc.msg}"])
+        except DuplicateJsonKeyError:
+            return _invalid_answer(["invalid_json:duplicate_key"])
         except RecursionError:
             return _invalid_answer(["invalid_json:nesting_too_deep"])
         except (ValueError, OverflowError):
@@ -207,13 +218,7 @@ def verify_answer(
     )
     valid_source_ids = set(catalog_source_ids)
     visible_source_ids = [f"S{rank}" for rank in CITATION_RE.findall(structured.answer_text)]
-    malformed_citation_tokens = _unique(
-        [
-            token
-            for token in CITATION_LIKE_RE.findall(structured.answer_text)
-            if CITATION_RE.fullmatch(token) is None
-        ]
-    )
+    malformed_citation_tokens = find_malformed_citation_tokens(structured.answer_text)
     claim_source_ids = [
         source_id
         for claim in structured.claims
@@ -435,6 +440,20 @@ def collect_source_ids(answer: StructuredAnswer) -> list[str]:
     for claim in answer.claims:
         source_ids.extend(claim.source_ids)
     return _unique(source_ids)
+
+
+def find_malformed_citation_tokens(text: str) -> list[str]:
+    """Return citation-like fragments that are not exact ASCII ``[S<n>]`` tokens."""
+
+    residual = CITATION_RE.sub("", text)
+    normalized = _normalize_security_text(residual).translate(
+        str.maketrans({"【": "[", "】": "]", "〔": "[", "〕": "]"})
+    )
+    fragments = re.findall(
+        r"\[\s*[sS][^\]\r\n]*(?:\]|(?=\r?\n)|$)",
+        normalized,
+    )
+    return _unique([fragment[:80] for fragment in fragments])
 
 
 def find_out_of_scope_citations(
@@ -796,7 +815,9 @@ def _text_for_refusal_detection(text: str) -> str:
     quoted text remains visible to the user and must be validated in full.
     """
 
-    body = _without_exact_trailing_disclaimer(text, STANDARD_DISCLAIMER)
+    body = _normalize_security_text(
+        _without_exact_trailing_disclaimer(text, STANDARD_DISCLAIMER)
+    )
 
     def replace_quote(match: re.Match[str]) -> str:
         quoted = next(group for group in match.groups() if group is not None)
@@ -840,6 +861,11 @@ def _text_for_refusal_detection(text: str) -> str:
         visible_behavior,
     )
     return visible_behavior
+
+
+def _normalize_security_text(text: str) -> str:
+    normalized = unicodedata.normalize("NFKC", text)
+    return re.sub(r"[\u200b-\u200d\u2060\ufeff]", "", normalized)
 
 
 def _without_exact_trailing_disclaimer(text: str, disclaimer: str = "") -> str:

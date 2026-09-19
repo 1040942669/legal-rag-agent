@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .models import SearchResult
+from .models import SearchResult, VerificationResult
 
 
 class JsonlTraceWriter:
@@ -34,6 +34,17 @@ def search_result_to_trace(result: SearchResult) -> dict[str, Any]:
         "chunk_metadata": chunk.metadata,
         "ranking_trace": result.trace,
     }
+
+
+def verification_result_to_trace(result: VerificationResult | None) -> dict[str, Any] | None:
+    """Serialize verifier diagnostics without copying rejected draft excerpts."""
+
+    if result is None:
+        return None
+    payload = result.to_dict()
+    unsupported_claims = payload.pop("unsupported_claims", [])
+    payload["unsupported_claim_count"] = len(unsupported_claims)
+    return payload
 
 
 def build_retrieval_trace_record(

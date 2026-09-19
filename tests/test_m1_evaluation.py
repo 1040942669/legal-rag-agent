@@ -111,6 +111,26 @@ class InvalidCitationAnswerClient:
         )
 
 
+class SecretRejectedDraftClient:
+    def complete(self, prompt: str) -> str:
+        return json.dumps(
+            {
+                "answer_text": "机密草稿令牌SECRET_DRAFT_123必须立即执行 [S999]。",
+                "answer_mode": "evidence_answer",
+                "claims": [
+                    {
+                        "claim_id": "C1",
+                        "text": "机密草稿令牌SECRET_DRAFT_123必须立即执行",
+                        "source_ids": ["S999"],
+                    }
+                ],
+                "limitations": [],
+                "clarification_question": None,
+            },
+            ensure_ascii=False,
+        )
+
+
 class NoGenerationAssistant:
     llm = None
     last_adaptive_result = None
@@ -352,6 +372,59 @@ class M1EvaluationTest(unittest.TestCase):
             trace["final_response"]["value"]["answer_mode"],
             "insufficient_evidence",
         )
+
+    def test_rejected_generation_draft_text_is_not_copied_into_trace(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            trace_path = Path(temp_dir) / "secret-fallback.jsonl"
+            writer = JsonlTraceWriter(trace_path, run_id="m1-secret-attempt")
+            assistant = LegalChatAssistant(
+                DeterministicRetriever(),
+                model="secret-invalid-citation-fake",
+            )
+            assistant.llm = SecretRejectedDraftClient()
+            record = evaluation.evaluate(
+                cases=[make_case("A")],
+                retriever=assistant.retriever,
+                chunk_strategy="article",
+                model="secret-invalid-citation-fake",
+                generate=True,
+                assistant=assistant,
+                trace_writer=writer,
+            )[0]
+            trace_text = trace_path.read_text(encoding="utf-8")
+
+        self.assertEqual(record.generation_attempt["status"], "rejected")
+        self.assertGreaterEqual(
+            record.generation_attempt["verification"]["unsupported_claim_count"],
+            1,
+        )
+        self.assertNotIn("unsupported_claims", record.generation_attempt["verification"])
+        self.assertNotIn("SECRET_DRAFT_123", trace_text)
+        self.assertNotIn(
+            "SECRET_DRAFT_123",
+            json.dumps(record.generation_attempt, ensure_ascii=False),
+        )
+
+    def test_service_exception_details_are_not_written_to_record_or_report(self) -> None:
+        class FailingRetriever:
+            name = "failing"
+
+            def retrieve(self, query: str, top_k: int = 5) -> list[SearchResult]:
+                raise RuntimeError("SECRET_RETRIEVER_TOKEN=do-not-report")
+
+        record = evaluation.evaluate(
+            cases=[make_case("A")],
+            retriever=FailingRetriever(),
+            chunk_strategy="article",
+            model="none",
+            generate=False,
+        )[0]
+        report = evaluation.render_eval_report([record])
+
+        self.assertEqual(record.error, "evaluation service failed")
+        self.assertEqual(record.execution["service"]["status"], "error")
+        self.assertNotIn("SECRET_RETRIEVER_TOKEN", record.error)
+        self.assertNotIn("SECRET_RETRIEVER_TOKEN", report)
 
     def test_canonical_citation_id_and_scope_metrics_remain_distinct(self) -> None:
         result = SearchResult(

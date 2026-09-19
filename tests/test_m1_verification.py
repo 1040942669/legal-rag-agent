@@ -147,6 +147,11 @@ class M1VerificationTest(unittest.TestCase):
             "（我不能直接给出具体案件策略 [S1]）",
             "🚫 我不能直接给出具体案件策略 [S1]",
             "提示：我不能直接给出具体案件策略 [S1]",
+            "很抱歉，我不能直接给出具体案件策略 [S1]",
+            "我不会提供具体案件策略 [S1]",
+            "出于安全原因，我无法提供具体案件策略 [S1]",
+            "我无法向您提供具体案件策略 [S1]",
+            "我\u200b不能直接给出具体案件策略 [S1]",
         )
 
         for text in visible_refusals:
@@ -375,23 +380,30 @@ class M1VerificationTest(unittest.TestCase):
         self.assertNotIn("[S999]", fallback)
 
     def test_malformed_visible_citation_token_fails_closed(self) -> None:
-        answer = self.make_answer(
-            f"经营者应当依法保护消费者权益 [S1][Sfake]。\n\n{LEGAL_DISCLAIMER}",
-            source_ids=["S1"],
-        )
+        malformed_tokens = ("[Sfake]", "[S-1]", "[S1a]", "【S999】", "［S999］", "[Ｓ999]", "[Sfake")
 
-        verification = verify_answer(
-            answer,
-            [self.make_result()],
-            expected_answer_mode="evidence_answer",
-            disclaimer=LEGAL_DISCLAIMER,
-        )
+        for malformed_token in malformed_tokens:
+            with self.subTest(malformed_token=malformed_token):
+                answer = self.make_answer(
+                    (
+                        "经营者应当依法保护消费者权益 [S1]"
+                        f"{malformed_token}。\n\n{LEGAL_DISCLAIMER}"
+                    ),
+                    source_ids=["S1"],
+                )
 
-        self.assertEqual(verification.visible_source_ids, ["S1"])
-        self.assertEqual(verification.malformed_citation_tokens, ["[Sfake]"])
-        self.assertFalse(verification.citation_ids_valid)
-        self.assertIn("citation_ids_invalid", verification.failure_reasons)
-        self.assertFalse(verification.passed)
+                verification = verify_answer(
+                    answer,
+                    [self.make_result()],
+                    expected_answer_mode="evidence_answer",
+                    disclaimer=LEGAL_DISCLAIMER,
+                )
+
+                self.assertEqual(verification.visible_source_ids, ["S1"])
+                self.assertTrue(verification.malformed_citation_tokens)
+                self.assertFalse(verification.citation_ids_valid)
+                self.assertIn("citation_ids_invalid", verification.failure_reasons)
+                self.assertFalse(verification.passed)
 
     def test_fallback_is_default_deny_for_any_failed_verification(self) -> None:
         original = f"UNSAFE [S1]。\n\n{LEGAL_DISCLAIMER}"
@@ -1112,6 +1124,20 @@ class M1VerificationTest(unittest.TestCase):
                 self.assertFalse(parsed.schema_valid)
                 self.assertFalse(verification.passed)
                 self.assertIn("schema_invalid", verification.failure_reasons)
+
+    def test_structured_parser_rejects_duplicate_json_keys(self) -> None:
+        raw = (
+            '{"answer_text":"经营者应当保护消费者权益 [S1]。",'
+            '"answer_mode":"out_of_scope","answer_mode":"evidence_answer",'
+            '"claims":[{"claim_id":"C1","text":"经营者应当保护消费者权益",'
+            '"source_ids":["S999"],"source_ids":["S1"]}],'
+            '"limitations":[],"clarification_question":null}'
+        )
+
+        parsed = parse_structured_answer(raw)
+
+        self.assertFalse(parsed.schema_valid)
+        self.assertIn("invalid_json:duplicate_key", parsed.parse_errors)
 
     def test_structured_parser_rejects_non_string_deep_and_oversized_inputs(self) -> None:
         deeply_nested = '{"x":' + "[" * 2000 + "0" + "]" * 2000 + "}"

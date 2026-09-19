@@ -37,7 +37,11 @@ from .rerank import (
     wrap_with_reranker,
 )
 from .retrieval import build_retriever
-from .tracing import JsonlTraceWriter, build_retrieval_trace_record
+from .tracing import (
+    JsonlTraceWriter,
+    build_retrieval_trace_record,
+    verification_result_to_trace,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -425,7 +429,7 @@ def build_chat_response_trace(
         ),
         "answer_mode": attempted_mode,
         "verification": (
-            pre_fallback_verification.to_dict()
+            verification_result_to_trace(pre_fallback_verification)
             if pre_fallback_verification is not None
             else None
         ),
@@ -434,7 +438,7 @@ def build_chat_response_trace(
     if final_mode is None and final_verification is not None:
         final_mode = getattr(final_verification, "actual_answer_mode", None)
     final_verification_payload = (
-        final_verification.to_dict() if final_verification is not None else None
+        verification_result_to_trace(final_verification)
     )
     final_response = {
         "value": {

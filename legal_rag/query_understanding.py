@@ -4,6 +4,7 @@ import json
 import re
 from typing import Protocol
 
+from .json_utils import reject_duplicate_object_pairs
 from .models import NormalizedQuery
 from .query import QueryAnalysis, analyze_query, should_use_adaptive
 
@@ -17,6 +18,7 @@ NORMALIZED_QUERY_FIELDS = {
     "risk_flags",
     "confidence",
 }
+MAX_NORMALIZER_RESPONSE_CHARS = 65_536
 
 LAW_KEYWORD_HINTS: list[tuple[list[str], str]] = [
     (["劳动", "用人单位", "工资", "解除合同", "试用期"], "中华人民共和国劳动合同法"),
@@ -70,7 +72,6 @@ def normalize_query(
     prompt = build_normalizer_prompt(query, analysis)
     attempts = max(1, min(max_retries + 1, 2))
     errors: list[str] = []
-    raw_response = ""
     for _ in range(attempts):
         try:
             raw_response = llm_client.complete(prompt)
@@ -81,14 +82,19 @@ def normalize_query(
             )
             return enrich_normalized_query(parsed, analysis)
         except Exception as exc:  # Normalizer must never block retrieval.
-            errors.append(str(exc))
+            error_code = (
+                "normalizer_invalid_response"
+                if isinstance(exc, (TypeError, ValueError, RecursionError, OverflowError))
+                else "normalizer_provider_error"
+            )
+            errors.append(error_code)
 
     return fallback_normalized_query(
         query,
         analysis,
         source="rules:llm_error",
         errors=errors,
-        raw_response=raw_response,
+        raw_response="",
     )
 
 
@@ -98,13 +104,19 @@ def parse_normalized_query_json(
     original_query: str,
     source: str = "llm",
 ) -> NormalizedQuery:
-    payload = json.loads(extract_json_object(raw_text))
+    payload = json.loads(
+        extract_json_object(raw_text),
+        object_pairs_hook=reject_duplicate_object_pairs,
+    )
     if not isinstance(payload, dict):
         raise ValueError("Normalizer JSON must be an object.")
 
     missing = sorted(field for field in NORMALIZED_QUERY_FIELDS if field not in payload)
     if missing:
         raise ValueError(f"Missing normalized query field(s): {', '.join(missing)}")
+    unknown = sorted(field for field in payload if field not in NORMALIZED_QUERY_FIELDS)
+    if unknown:
+        raise ValueError(f"Unknown normalized query field(s): {', '.join(unknown)}")
 
     legal_questions = require_string_list(payload, "legal_questions")
     missing_facts = require_string_list(payload, "missing_facts")
@@ -127,7 +139,7 @@ def parse_normalized_query_json(
         risk_flags=unique(risk_flags),
         confidence=confidence,
         source=source,
-        raw_response=raw_text,
+        raw_response="",
     )
 
 
@@ -203,6 +215,10 @@ def build_normalizer_prompt(query: str, analysis: QueryAnalysis) -> str:
 
 
 def extract_json_object(text: str) -> str:
+    if not isinstance(text, str):
+        raise TypeError("Normalizer response must be a string.")
+    if len(text) > MAX_NORMALIZER_RESPONSE_CHARS:
+        raise ValueError("Normalizer response exceeds the maximum accepted size.")
     stripped = text.strip()
     if stripped.startswith("```"):
         stripped = re.sub(r"^```(?:json)?", "", stripped, flags=re.IGNORECASE).strip()

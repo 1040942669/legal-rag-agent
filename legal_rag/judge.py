@@ -5,12 +5,20 @@ import math
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from .json_utils import DuplicateJsonKeyError, reject_duplicate_object_pairs
 from .models import SearchResult
 
 
 MAX_JUDGE_RESPONSE_CHARS = 65_536
 MAX_JSON_START_CANDIDATES = 32
 MAX_JUDGE_ERROR_CHARS = 200
+JUDGE_RESPONSE_FIELDS = {
+    "faithfulness",
+    "relevance",
+    "completeness",
+    "passed",
+    "comment",
+}
 
 
 class CompletionClient(Protocol):
@@ -89,7 +97,7 @@ def extract_json_object(text: str) -> dict[str, Any] | None:
     cleaned = text.strip()
     if len(cleaned) > MAX_JUDGE_RESPONSE_CHARS:
         return None
-    decoder = json.JSONDecoder()
+    decoder = json.JSONDecoder(object_pairs_hook=reject_duplicate_object_pairs)
     candidates_checked = 0
     for start, char in enumerate(cleaned):
         if char != "{":
@@ -99,6 +107,8 @@ def extract_json_object(text: str) -> dict[str, Any] | None:
             return None
         try:
             parsed, _ = decoder.raw_decode(cleaned[start:])
+        except DuplicateJsonKeyError:
+            return None
         except (ValueError, RecursionError, OverflowError):
             continue
         if isinstance(parsed, dict):
@@ -172,6 +182,12 @@ def judge_answer(
         return error_result(
             "judge response is not valid JSON",
             error_code="invalid_json",
+            raw_response=raw,
+        )
+    if set(parsed) != JUDGE_RESPONSE_FIELDS:
+        return error_result(
+            "judge response fields do not match the required schema",
+            error_code="invalid_schema",
             raw_response=raw,
         )
     scores = {

@@ -66,7 +66,7 @@ class QueryUnderstandingTest(unittest.TestCase):
 
             def complete(self, prompt: str) -> str:
                 self.calls += 1
-                return "not json"
+                return "SECRET_PROVIDER_RAW_BODY not json"
 
         client = BadClient()
         analysis = analyze_query("这个事情有没有依据？")
@@ -80,8 +80,34 @@ class QueryUnderstandingTest(unittest.TestCase):
 
         self.assertEqual(client.calls, 2)
         self.assertEqual(normalized.source, "rules:llm_error")
-        self.assertTrue(normalized.errors)
+        self.assertEqual(
+            normalized.errors,
+            ["normalizer_invalid_response", "normalizer_invalid_response"],
+        )
+        self.assertEqual(normalized.raw_response, "")
+        self.assertNotIn(
+            "SECRET_PROVIDER_RAW_BODY",
+            json.dumps(normalized.to_dict(), ensure_ascii=False),
+        )
         self.assertTrue(normalized.legal_questions)
+
+    def test_llm_normalizer_does_not_trace_provider_exception_details(self) -> None:
+        class FailingClient:
+            def complete(self, prompt: str) -> str:
+                raise RuntimeError("SECRET_PROVIDER_TOKEN=do-not-trace")
+
+        analysis = analyze_query("这个事情有没有依据？")
+        normalized = normalize_query(
+            analysis.original_query,
+            analysis=analysis,
+            llm_client=FailingClient(),
+            use_llm=True,
+        )
+        payload = json.dumps(normalized.to_dict(), ensure_ascii=False)
+
+        self.assertEqual(normalized.errors, ["normalizer_provider_error"])
+        self.assertEqual(normalized.raw_response, "")
+        self.assertNotIn("SECRET_PROVIDER_TOKEN", payload)
 
     def test_planner_limits_queries_and_adds_hints(self) -> None:
         normalized = NormalizedQuery(
