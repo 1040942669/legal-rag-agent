@@ -7,13 +7,13 @@
     "observed_default_branch": "master",
     "observed_baseline_commit": "4ed96ec921593ef81de61ce545513e3f1211b5db",
     "observed_on": "2026-09-19",
-    "workspace_head": "ded1ea6bbf07229a81f374359caa4375c0b11e95",
-    "workspace_head_note": "Last fully tested M1 module commit, covering the cumulative 17-check gate, CI artifact contract, and fail-closed offline model/dotenv controls. A metadata-only checkpoint commit records this state, so the branch tip may be one commit newer. Final candidate SHA is not frozen yet.",
+    "workspace_head": "b7c564a5471ef2671a8527da5c8fe8e646939abf",
+    "workspace_head_note": "Frozen M1 software candidate verified from a clean worktree with the cumulative 17-check gate, offline build, isolated wheel import, entry-point check, and archive review. A metadata-only checkpoint records this evidence, so the branch tip may be one commit newer.",
     "workspace_branch": "codex/m1-verification",
     "workspace_dirty": false,
     "remote_tags_checked": true
   },
-  "execution_status": "in_progress",
+  "execution_status": "ready_for_review",
   "active_milestone": "M1",
   "last_verified_release": {
     "milestone_id": "M0",
@@ -87,12 +87,12 @@
       "name": "验证与指标",
       "planned_version": "v0.2.0",
       "required": true,
-      "status": "in_progress",
+      "status": "ready_for_review",
       "branch": "codex/m1-verification",
       "issue_url": "https://github.com/1040942669/legal-rag-agent/issues/4",
       "milestone_url": "https://github.com/1040942669/legal-rag-agent/milestone/2",
       "pr_url": null,
-      "candidate_sha": null,
+      "candidate_sha": "b7c564a5471ef2671a8527da5c8fe8e646939abf",
       "release_target_sha": null,
       "tag": null,
       "release_url": null,
@@ -108,7 +108,11 @@
         "cumulative_mandatory_checks_passed": 17,
         "cumulative_mandatory_checks_total": 17,
         "quality_gate_status": "passed",
-        "report_path": null
+        "candidate_verified_sha": "b7c564a5471ef2671a8527da5c8fe8e646939abf",
+        "package_version": "0.2.0",
+        "wheel_sha256": "db0f71813721db1b65c24599dc0d561cb39f3a8a76fd341fcb237e1e051c56e7",
+        "sdist_sha256": "2f4ed893075b3364dddaf7c64dcfcab790e941233ed6b4f050d44682ac50b51f",
+        "report_path": "reports/refactor/M1.md"
       },
       "blockers": []
     },
@@ -257,5 +261,5 @@
       "blockers": []
     }
   ],
-  "next_action": "Write the M1 acceptance report, bump and build v0.2.0, then freeze the release candidate for PR review."
+  "next_action": "Create the M1 pull request to master, wait for the exact PR head CI, and record its URL and result before merge."
 }

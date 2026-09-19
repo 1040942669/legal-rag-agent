@@ -8,8 +8,8 @@
 - 软件 PR：[PR #2](https://github.com/1040942669/legal-rag-agent/pull/2)，于 `2026-09-19T07:02:14Z` 以普通 merge commit 合并，保留任务开始前已有的 Phase 4B 提交 `66da8e3056f8287997088d9f503846fd88c9b038`。
 - Tag / Release：`v0.1.1` / [GitHub Release](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.1.1)，发布时间 `2026-09-19T07:05:12Z`。
 - 当前工作分支：`codex/m1-verification`，从上述最新 `origin/master` 创建；工作区在启动时干净。
-- M1 已明确由用户授权连续推进，状态为 `in_progress`；[Issue #4](https://github.com/1040942669/legal-rag-agent/issues/4) 与 [Milestone 2](https://github.com/1040942669/legal-rag-agent/milestone/2) 已创建。
-- M1 最近一个完整测试的模块提交为 `ded1ea6bbf07229a81f374359caa4375c0b11e95`。结构化验证核心、范围过滤、评测 schema v2、指标合同、合成样例、canonical metrics 映射，以及 M0+M1 累积门禁/CI 均已提交；随后仅用 metadata checkpoint 提交同步本交接记录。尚未创建 PR、Tag 或 Release。
+- M1 已明确由用户授权连续推进，状态为 `ready_for_review`；[Issue #4](https://github.com/1040942669/legal-rag-agent/issues/4) 与 [Milestone 2](https://github.com/1040942669/legal-rag-agent/milestone/2) 已创建。
+- M1 冻结软件候选为 `b7c564a5471ef2671a8527da5c8fe8e646939abf`。结构化验证核心、范围过滤、评测 schema v2、指标合同、合成样例、canonical metrics 映射、M0+M1 累积门禁/CI，以及 `0.2.0` 版本与验收报告均已提交；随后仅用 metadata checkpoint 同步本交接记录。尚未创建 PR、Tag 或 Release。
 - M2-M7 尚未开始；每个阶段仍独立测试、PR、合并、Tag、Release 和回执。
 
 ## M1 启动边界
@@ -38,6 +38,7 @@
 15. M1 累积门禁已覆盖 7 个 M0 必需检查和 `M1-T01` 至 `M1-T10`，共 17 个唯一检查；mandatory pytest 遇到零测试、skip、xfail、JUnit 缺失或解析失败都会失败关闭。
 16. GitHub Actions 已改为运行 M1 累积门禁并始终上传机器可读 JSON；产物名含 commit SHA 与 run attempt，Action 固定完整 SHA，权限仍为只读。
 17. 离线门禁子进程同时设置 `ALLOW_LIVE_MODEL_CALLS=false` 与 `LEGAL_RAG_DISABLE_DOTENV=1`；Ollama、SiliconFlow、SentenceTransformer 和远程 embedding 入口会在初始化或调用前失败关闭。本次未读取或暂存被忽略的本地 `.env`。
+18. `b7c564a5471ef2671a8527da5c8fe8e646939abf` 已作为 clean 软件候选通过 `0.2.0` sdist/wheel 构建；全新 Python 3.12.13 venv 离线安装后，distribution/module/console entry point 和模块来源均核对正确，归档未包含 `.env`、语料或 artifacts 路径。
 
 ## 真实验证结果
 
@@ -49,14 +50,16 @@
 - 验收报告：`reports/refactor/M0.md`；机器可读回执：`docs/refactor/receipts/M0.json`。
 - M1 累积门禁：17/17 必需检查通过；全量 `155 passed, 64 subtests passed`，JUnit 汇总 `219 tests, 0 failures, 0 errors, 0 skipped`；合成 smoke 与 `M1-T01` 至 `M1-T10` 均独立通过。
 - M1 环境与工作流：workflow YAML 可解析，`uv lock --check` 与 `uv sync --check --offline --frozen` 均通过；未知 milestone/mode 生成配置错误报告并返回逻辑退出码 2。
+- M1 clean 候选包：wheel `legal_rag_assistant-0.2.0-py3-none-any.whl`，95,545 bytes，SHA-256 `db0f71813721db1b65c24599dc0d561cb39f3a8a76fd341fcb237e1e051c56e7`；sdist `legal_rag_assistant-0.2.0.tar.gz`，126,096 bytes，SHA-256 `2f4ed893075b3364dddaf7c64dcfcab790e941233ed6b4f050d44682ac50b51f`。
+- M1 验收报告：`reports/refactor/M1.md`；当前只含本地候选证据，PR/master CI 与发布后回执仍待真实执行。
 
 ## 没有做的事情
 
 - 没有运行在线或本地生成模型、Embedding、reranker、LLM judge、真实法律语料实验或付费调用。
 - 没有读取/上传 `.env` 值、完整语料、Embedding cache、私人课程/简历/面试材料或大型产物。
 - 没有引入数据库、FastAPI、LangGraph、Redis/Celery，没有部署生产。
-- M1 尚未创建 PR、合并、打 Tag 或发布；`v0.2.0` 仍是计划版本，最新已核验 Release 仍为 `v0.1.1`。
-- M1 尚未生成最终验收报告、冻结 `v0.2.0` 候选或执行 PR CI；当前门禁的机器可读 JSON 仅保存在被忽略的本地 `.tmp`，等待候选 PR 由 CI 上传正式产物。
+- M1 尚未创建 PR、执行 PR CI、合并、打 Tag 或发布；`0.2.0` 目前只是已验证候选，最新已核验 Release 仍为 `v0.1.1`。
+- 当前门禁 JSON 与包构建物只保存在被忽略的本地 `.tmp`；它们没有进入 Git 或 Release 附件，等待 PR CI 重新生成正式机器可读产物。
 - 没有把历史 203 部法律或模型质量数字冒充 M0 新实测。
 
 ## 已知限制
@@ -70,7 +73,7 @@
 
 ## 回滚
 
-- 代码：通过新的 revert PR 回滚 `cb7e01982ca6fb95cebde1e5d707527fd36a250c`，不强推、不重写历史。
+- 代码：M1 发布前可关闭 PR 而不触碰 `master`；发布后通过新的 revert PR 回滚实际 M1 merge commit，不强推、不重写历史。
 - 数据：本版没有数据库或语料迁移，无数据回滚动作。
 - 任务/服务：本版没有队列、后台任务或生产部署，无运行中任务需要恢复。
 - 版本：已发布 `v0.1.1` 不移动、不复用；修复使用后续版本。
@@ -85,16 +88,17 @@
 
 | 项目 | 当前值 |
 |---|---|
-| 当前里程碑 | M1 / `in_progress`（M0 已 `released`） |
+| 当前里程碑 | M1 / `ready_for_review`（M0 已 `released`） |
 | 当前工作分支 | `codex/m1-verification` |
-| M1 最近完整测试的模块提交 | `ded1ea6bbf07229a81f374359caa4375c0b11e95`；随后 metadata checkpoint 不改变运行时 |
+| M1 冻结软件候选 | `b7c564a5471ef2671a8527da5c8fe8e646939abf`；随后 metadata checkpoint 不改变软件运行时 |
 | M1 PR / Tag / Release | not_created / not_created / not_created |
 | 上一已发布版本 | `v0.1.1` / [Release](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.1.1) / target `cb7e01982ca6fb95cebde1e5d707527fd36a250c` |
 | M1 本地测试 | 155 passed，64 subtests passed；JUnit 219/0 failures/0 errors/0 skipped；无真实模型或语料调用 |
 | M1 累积门禁 | 17/17 passed（含 M0 7 项 + M1 10 项）；CI 已配置上传机器可读报告 |
+| M1 package | `0.2.0` clean build + Python 3.12.13 isolated install/import passed；hash 见上文 |
 | M1 Issue / Milestone | [#4](https://github.com/1040942669/legal-rag-agent/issues/4) / [Milestone 2](https://github.com/1040942669/legal-rag-agent/milestone/2) |
 | 阻塞 | 无 |
-| 下一条可执行动作 | 编写 M1 验收报告、升级并构建 `v0.2.0`，再冻结发布候选进入 PR review |
+| 下一条可执行动作 | 创建 M1 PR，等待精确 PR head 的累计门禁 CI，并记录 URL/结果后再判断合并 |
 
 ## 完成说明
 
