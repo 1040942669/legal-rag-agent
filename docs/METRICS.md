@@ -66,7 +66,7 @@ schema v2 的每个指标统一表示为：
 | `source_ids_exist` | 执行 verifier | 证据目录有效，且正文/claim 引用的全部 ID 都存在于该目录 |
 | `citation_ids_valid` | 执行 verifier | 兼容复合结构门禁：目录与 ID 存在性通过、claim 引用可见；`evidence_answer` 还必须同时有结果、正文引用和 claim 引用 |
 | `citation_alignment_valid` | 执行 verifier | 正文可见引用与 claim 绑定引用是否满足当前对齐规则 |
-| `evidence_scope_valid` | 配置快照或权限范围检查 | 引用证据是否属于允许快照/范围；未配置时为 `null + scope_check_not_configured` |
+| `evidence_scope_valid` | 可信调用方显式注入 `VerificationContext` | 引用证据是否属于允许 snapshot/scope；未配置时为 `null + scope_check_not_configured`。当前 CLI 不自行建立认证身份、租户或默认 active snapshot |
 | `citation_valid` | 执行 verifier | 旧兼容聚合：`citation_ids_valid=true` 且 `evidence_scope_valid` 不为 false；不包含语义支持判断 |
 | `disclaimer_present` | 执行 verifier | 配置要求的免责声明是否位于响应末尾 |
 | `response_mode_valid` | 执行 verifier | 最终文本、引用和澄清字段是否符合运行时预期模式 |
@@ -76,7 +76,9 @@ schema v2 的每个指标统一表示为：
 
 `citation_ids_valid=true` 不表示证据支持 claim。仅运行词面启发式时，语义层只能给出 `uncertain` 或 `not_checked`，不能因为没有发现问题就标为 `supported`。`verifier_pass` 不表示法律正确性。
 
-`generation_attempt` 与最终响应分开保存。若草稿含伪造来源或其他结构/行为错误，Trace 记录被拒绝草稿的验证结果；回答指标只统计重新验证后的最终交付响应。
+`generation_attempt` 与最终响应分开保存。若草稿含伪造来源或其他结构/行为错误，Trace 记录被拒绝草稿的安全验证状态与计数；不保存草稿正文、schema 错误详情、畸形引用片段或生成 source ID 列表。回答指标只统计重新验证后的最终交付响应。该边界不表示全链路脱敏：Trace 仍记录用户 query、派生查询和检索 metadata；评测记录仍保存最终回答和成功 Judge comment。
+
+`VerificationResult.malformed_citation_tokens` 可在进程内保留具体诊断，但普通 Trace 只落 `malformed_citation_token_count`；合法引用只接受精确 ASCII `[S正整数]`。
 
 ## 行为指标及分母
 
@@ -127,6 +129,8 @@ schema v2 的每个指标统一表示为：
 ## Judge
 
 Judge 成功结果包含 `judge_faithfulness`、`judge_relevance`、`judge_completeness` 和重新计算的 `judge_pass`。超时、传输错误、无效 JSON 或字段 contract 错误分别归因，并将四项质量值保存为 `null + error_code`。报告同时列出成功、失败和未执行数量；均值只使用成功集合。
+
+Judge 输出必须且只能包含 `faithfulness`、`relevance`、`completeness`、`passed`、`comment` 五个字段。三个分数必须是 `[0, 1]` 内的有限 JSON number，不能是布尔值或字符串；`passed` 必须是布尔值但最终值由本地阈值重新计算。Judge、Normalizer 与结构化回答解析均拒绝重复 key、`NaN`/`Infinity`、孤立 UTF-16 surrogate、超深或超大输入；provider 异常使用稳定分类，不把异常原文写入普通评测记录。
 
 ## 输出与历史兼容
 

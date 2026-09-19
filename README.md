@@ -2,7 +2,7 @@
 
 一个面向指定中国法律文本快照的可复现 RAG 工程项目。它不是把大模型接到向量库后的演示，而是围绕法律场景中的三个核心问题展开：**如何稳定召回正确法条、如何证明一次优化真的有效、如何在证据不足时安全停止生成**。
 
-仓库已经实现旧 Phase 路线中的规则型工程链路，包括数据画像、分块实验、混合检索、受控查询理解、证据覆盖启发式、引用编号检查、缓存契约和自动实验矩阵。默认链路保持保守：清晰问题直接检索，复杂问题才进入有边界的 adaptive lane；reranker 默认关闭，任何检索或生成增强都必须通过固定评测集、trace、质量与成本指标证明价值。当前 M1 候选已经把结构检查、行为检查和未知语义状态拆开，并修正回答、拒答和 Judge 的分母；它已通过本地离线验收但尚未发布，最新已发布版本仍是 v0.1.1。
+仓库已经实现旧 Phase 路线中的规则型工程链路，包括数据画像、分块实验、混合检索、受控查询理解、证据覆盖启发式、引用编号检查、缓存契约和自动实验矩阵。默认链路保持保守：清晰问题直接检索，复杂问题才进入有边界的 adaptive lane；reranker 默认关闭，任何检索或生成增强都必须通过固定评测集、trace、质量与成本指标证明价值。当前 M1 候选已经把结构检查、行为检查和未知语义状态拆开，并修正回答、拒答和 Judge 的分母；冻结软件候选已通过精确 PR-head 离线验收和包验证，但尚未合并或发布，最新已发布版本仍是 v0.1.1。
 
 > 本项目仅用于检索与工程研究，不提供个案法律意见。仓库不随附完整法律语料，历史快照的内容截止日期为 2025-01-01；因此本文不声称覆盖全部当前有效法律。数据来源及复现边界见下文。
 
@@ -15,7 +15,7 @@
 | 受控 Agent 能力 | 规则 Query Analyzer、严格 JSON normalizer、有限 multi-query planner、证据合并、最多一轮补检索 |
 | 生成边界 | 高风险请求预拒答、证据充分性检查、结构化回答兼容层、引用/范围/行为检查、资料不足或澄清模板、最终交付前复核 |
 | 评测体系 | 120 条分层评测集、30 条固定生成子集、bootstrap 95% CI、显式行为分母、answer/retrieval/Judge N/A、自动五维实验矩阵 |
-| 工程质量 | M1 当前候选 155 个离线测试、64 个子测试；embedding cache v2 契约；17 项累计 JSON 质量门禁与 PR/master CI；CLI、manifest、JSONL trace、CSV/JSON/Markdown 报告 |
+| 工程质量 | M1 当前候选 186 个离线测试、148 个子测试；embedding cache v2 契约；17 项累计 JSON 质量门禁与精确 PR-head CI；CLI、manifest、JSONL trace、CSV/JSON/Markdown 报告 |
 
 历史实验中，`Qwen3-Embedding-4B` dense 的 Hit@5 达到 **0.981 [0.954, 1.000]**，无外部 API 的自研 BM25 baseline 为 **0.704 [0.611, 0.787]**。这些数字来自 2026-06 的固定本地语料快照和当时模型版本，不是跨语料、跨时间的效果承诺。完整实验条件见 [结果摘要](reports/RESULTS_SUMMARY.md)。
 
@@ -76,7 +76,7 @@ Adaptive lane 不是自由 Agent loop。只有规则分析器识别到模糊、�
 
 ### 4. 生成前后双重校验
 
-生成前检查法律名、条号和问题覆盖是否充分，并在允许范围内筛选证据。生成后分别检查结构、引用 ID、claim 与可见引用对齐、快照/权限范围、回答模式和免责声明。伪造引用或无效模式会进入有界的受限响应，最终交付响应再次验证；被拒绝的草稿与最终响应在 Trace 中分开保存。
+生成前检查法律名、条号和问题覆盖是否充分。只有可信调用方显式注入 `VerificationContext` 时，证据才会在进入生成提示和返回 sources 前按 snapshot/scope 过滤，verifier 也会检查该范围；当前 CLI 没有认证身份、租户隔离或默认 active snapshot。生成后分别检查结构、引用 ID、claim 与可见引用对齐、可选范围、回答模式和免责声明。伪造引用或无效模式会进入有界的受限响应，最终交付响应再次验证；被拒绝草稿的正文与内容型诊断不会写入普通 Trace，只保留稳定状态和计数。
 
 当前 verifier 仍是规则与启发式防线，不是语义支持或法律正确性证明。`source_ids_exist` 只说明编号属于本次结果目录；`citation_ids_valid` 还组合了当前可见引用/claim 对齐要求，快照与权限范围则由独立的 `evidence_scope_valid` 表示。没有启用经过校准的语义评审时，支持状态保持 `uncertain` 或 `not_checked`。免责声明不再等同拒答，普通法律文本中的“不得”“不能”也不会单独触发拒答。详细口径见[评测指标字典](docs/METRICS.md)。
 
@@ -255,11 +255,11 @@ uv run python -m legal_rag.cli evaluate `
 uv run --offline --frozen --no-sync python scripts/quality_gate.py --milestone M1 --mode offline
 ```
 
-该 M1 门禁不需要完整语料或模型 Key，会累积运行 M0 工程基线与 `M1-T01` 至 `M1-T10`：全量测试、明确禁止 socket 访问的合成 BM25 smoke、包版本导入、CLI help、Markdown 相对链接、STATE/manifest JSON、候选文件凭证风险检查，以及 M1 的结构/行为/指标边界。离线子进程会禁用 dotenv 加载并在项目 provider 边界拒绝真实模型调用；mandatory pytest 出现零测试、skip、xfail 或无效 JUnit 也不会假绿。当前本地候选为 `155 passed, 64 subtests passed`，累计 17/17 必需检查通过；这仍不是 OS 级 air-gap，也不代表真实法律质量已经验证。
+该 M1 门禁不需要完整语料或模型 Key，会累积运行 M0 工程基线与 `M1-T01` 至 `M1-T10`：全量测试、明确禁止 socket 访问的合成 BM25 smoke、包版本导入、CLI help、Markdown 相对链接、STATE/manifest JSON、候选文件凭证风险检查，以及 M1 的结构/行为/指标边界。离线子进程会禁用 dotenv 加载并在项目 provider 边界拒绝真实模型调用；mandatory pytest 出现零测试、skip、xfail 或无效 JUnit 也不会假绿。冻结软件候选 `647c0238674abe603fdf33e80191c19eb6de3dd9` 的精确 Linux PR-head CI 为 `186 passed, 148 subtests passed`、JUnit 334/0/0/0，累计 17/17 必需检查通过；这仍不是 OS 级 air-gap，也不代表真实法律质量已经验证。
 
 需要明确区分三类可复现性：
 
-1. 代码与离线逻辑：M0 发布时由 89 个测试提供基线；当前 M1 候选由 155 个测试、64 个子测试、17 项累计门禁和 BM25 CLI 提供回归证据。这不等于法律正确性保证。
+1. 代码与离线逻辑：M0 发布时由 89 个测试提供基线；当前 M1 候选由 186 个测试、148 个子测试、17 项累计门禁和 BM25 CLI 提供回归证据。这不等于法律正确性保证。
 2. 历史检索数字：依赖 2026-06 的 203 部法律快照及对应 embedding cache。
 3. API 生成分数：还依赖外部模型版本、服务状态和 judge 偏差，不能视为永久固定值。
 
@@ -292,7 +292,7 @@ ARCHITECTURE_DECISION_LOG.md       关键架构决策和反例
 
 截至 2026-09-18，旧 Phase 0-4B 路线实现了可复现 baseline、检索诊断与 trace、受控查询理解、最多一轮补检索、规则 verifier、v3 评测集、reranker adapter、embedding cache v2 和自动实验矩阵。旧 Phase 编号与当前 M0-M7 里程碑不一一对应；旧路线的 reranker/cache A/B 仍是未完成的实验项，不代表当前发布主线的下一步。
 
-当前 M0-M7 主线以 [MASTER_PLAN](docs/refactor/MASTER_PLAN.md)、[STATE](docs/refactor/STATE.json) 和 [HANDOFF](docs/refactor/HANDOFF.md) 为权威来源。M0 已于 2026-09-19 作为 [v0.1.1](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.1.1) 发布并远端核验。M1 已在 `codex/m1-verification` 上完成本地离线验收并准备 `v0.2.0` 候选，但尚未合并、打 Tag 或发布；M2-M7 尚未开始。
+当前 M0-M7 主线以 [MASTER_PLAN](docs/refactor/MASTER_PLAN.md)、[STATE](docs/refactor/STATE.json) 和 [HANDOFF](docs/refactor/HANDOFF.md) 为权威来源。M0 已于 2026-09-19 作为 [v0.1.1](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.1.1) 发布并远端核验。M1 的 `0.2.0` 软件候选已在 `codex/m1-verification` 上完成包验证和精确 PR-head CI，状态为发布就绪；在 PR 正常合并、master CI、Tag 与 Release 真实完成前仍不称为已发布。M2-M7 尚未开始。
 
 ## 文档导航
 
