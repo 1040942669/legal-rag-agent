@@ -7,14 +7,22 @@
     "observed_default_branch": "master",
     "observed_baseline_commit": "4ed96ec921593ef81de61ce545513e3f1211b5db",
     "observed_on": "2026-09-19",
-    "workspace_head": "98db5d72f146dce163314050a9968764de2d14e0",
-    "workspace_branch": "codex/m0-baseline",
+    "workspace_head": "cb7e01982ca6fb95cebde1e5d707527fd36a250c",
+    "workspace_branch": "codex/m0-release-receipt",
     "workspace_dirty": false,
     "remote_tags_checked": true
   },
-  "execution_status": "ready_for_release",
+  "execution_status": "released_receipt_pending",
   "active_milestone": "M0",
-  "last_verified_release": null,
+  "last_verified_release": {
+    "milestone_id": "M0",
+    "version": "v0.1.1",
+    "tag": "v0.1.1",
+    "target_sha": "cb7e01982ca6fb95cebde1e5d707527fd36a250c",
+    "release_url": "https://github.com/1040942669/legal-rag-agent/releases/tag/v0.1.1",
+    "published_at": "2026-09-19T07:05:12Z",
+    "verified_at": "2026-09-19T07:05:42Z"
+  },
   "authorization": {
     "document_only_until_user_starts": false,
     "allow_live_model_calls": false,
@@ -40,16 +48,17 @@
       "name": "基线与门禁",
       "planned_version": "v0.1.1",
       "required": true,
-      "status": "ready_for_release",
+      "status": "released_receipt_pending",
       "branch": "codex/m0-baseline",
+      "receipt_branch": "codex/m0-release-receipt",
       "issue_url": "https://github.com/1040942669/legal-rag-agent/issues/1",
       "milestone_url": "https://github.com/1040942669/legal-rag-agent/milestone/1",
       "pr_url": "https://github.com/1040942669/legal-rag-agent/pull/2",
       "candidate_sha": "98db5d72f146dce163314050a9968764de2d14e0",
-      "release_target_sha": null,
-      "tag": null,
-      "release_url": null,
-      "remote_release_verified": false,
+      "release_target_sha": "cb7e01982ca6fb95cebde1e5d707527fd36a250c",
+      "tag": "v0.1.1",
+      "release_url": "https://github.com/1040942669/legal-rag-agent/releases/tag/v0.1.1",
+      "remote_release_verified": true,
       "tests": {
         "status": "passed",
         "passed": 89,
@@ -59,7 +68,11 @@
         "mandatory_checks_total": 7,
         "report_path": "reports/refactor/M0.md",
         "ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/35427914463",
-        "ci_sha": "98db5d72f146dce163314050a9968764de2d14e0"
+        "ci_sha": "98db5d72f146dce163314050a9968764de2d14e0",
+        "final_pr_head": "e426424b892bedd3bc1c5c13a34e94e7f1496c2f",
+        "final_pr_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/35428009054",
+        "master_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/35428226839",
+        "master_ci_sha": "cb7e01982ca6fb95cebde1e5d707527fd36a250c"
       },
       "blockers": []
     },
@@ -232,5 +245,5 @@
       "blockers": []
     }
   ],
-  "next_action": "Push this metadata-only ready_for_release record, require a successful CI run for the latest PR head, then review/merge, verify master CI, publish v0.1.1, and write the post-release receipt; do not start M1."
+  "next_action": "Commit and push the verified M0 release receipt, create its documentation PR, record that PR URL, pass CI, merge it, close Milestone 1, and stop without starting M1."
 }

@@ -292,7 +292,7 @@ ARCHITECTURE_DECISION_LOG.md       关键架构决策和反例
 
 截至 2026-09-18，旧 Phase 0-4B 路线实现了可复现 baseline、检索诊断与 trace、受控查询理解、最多一轮补检索、规则 verifier、v3 评测集、reranker adapter、embedding cache v2 和自动实验矩阵。旧 Phase 编号与当前 M0-M7 里程碑不一一对应；旧路线的 reranker/cache A/B 仍是未完成的实验项，不代表当前发布主线的下一步。
 
-当前 M0-M7 主线以 [MASTER_PLAN](docs/refactor/MASTER_PLAN.md)、[STATE](docs/refactor/STATE.json) 和 [HANDOFF](docs/refactor/HANDOFF.md) 为权威来源。M0 正在建立可信基线、离线质量门禁、CI 和首个可发布版本；M1-M7 尚未开始。只有 PR、候选提交 CI、Tag 和 GitHub Release 均真实完成并经远端核验后，M0 才会在状态文件中标记为 `released`。
+当前 M0-M7 主线以 [MASTER_PLAN](docs/refactor/MASTER_PLAN.md)、[STATE](docs/refactor/STATE.json) 和 [HANDOFF](docs/refactor/HANDOFF.md) 为权威来源。M0 已于 2026-09-19 作为 [v0.1.1](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.1.1) 发布：PR、候选 CI、merge SHA 的 `master` CI、annotated Tag 和 Release 均已远端核验；发布回执通过独立文档 PR 落库，不移动软件 Tag。M1-M7 尚未开始。
 
 ## 文档导航
 
