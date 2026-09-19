@@ -5,16 +5,16 @@
   "repository": {
     "full_name": "1040942669/legal-rag-agent",
     "observed_default_branch": "master",
-    "observed_baseline_commit": "52714d5f84634f008a5860f6bf4f5aa199ae3261",
+    "observed_baseline_commit": "00ec3ad5b193a7442e427486e8bfade2dbabd482",
     "observed_on": "2026-09-20",
-    "workspace_head": "fee92b4457dc68edc413608fb3a0d263af740922",
-    "workspace_head_note": "This is the verified M1 receipt merge on master. The release-finalization metadata branch is documentation only and does not move the v0.2.0 tag.",
-    "workspace_branch": "codex/m1-release-finalize",
+    "workspace_head": "00ec3ad5b193a7442e427486e8bfade2dbabd482",
+    "workspace_head_note": "M2 started from the verified M1 release-finalization merge on origin/master. The v0.2.0 tag remains pinned to the M1 software release target.",
+    "workspace_branch": "codex/m2-experiment-lifecycle",
     "workspace_dirty": false,
     "remote_tags_checked": true
   },
-  "execution_status": "released",
-  "active_milestone": "M1",
+  "execution_status": "in_progress",
+  "active_milestone": "M2",
   "last_verified_release": {
     "milestone_id": "M1",
     "version": "v0.2.0",
@@ -154,10 +154,10 @@
       "name": "分层实验与回放",
       "planned_version": "v0.3.0",
       "required": true,
-      "status": "not_started",
-      "branch": null,
-      "issue_url": null,
-      "milestone_url": null,
+      "status": "in_progress",
+      "branch": "codex/m2-experiment-lifecycle",
+      "issue_url": "https://github.com/1040942669/legal-rag-agent/issues/8",
+      "milestone_url": "https://github.com/1040942669/legal-rag-agent/milestone/3",
       "pr_url": null,
       "candidate_sha": null,
       "release_target_sha": null,
@@ -294,5 +294,5 @@
       "blockers": []
     }
   ],
-  "next_action": "M1 is complete. Stop without starting M2; M2 remains not_started until a later explicit milestone start."
+  "next_action": "Implement the first M2 test-driven subtask on codex/m2-experiment-lifecycle: experiment plan/manifest identity, exact cache contracts, and the corresponding M2-T01/M2-T02 coverage; keep all live model calls disabled."
 }

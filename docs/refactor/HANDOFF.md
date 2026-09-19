@@ -2,14 +2,24 @@
 
 ## 当前真实状态
 
+- M2 已按用户连续执行指令启动，状态为 `in_progress`；基线为已验证的 `origin/master` `00ec3ad5b193a7442e427486e8bfade2dbabd482`，工作分支为 `codex/m2-experiment-lifecycle`。
+- M2 使用 [Issue #8](https://github.com/1040942669/legal-rag-agent/issues/8) 与 [Milestone 3](https://github.com/1040942669/legal-rag-agent/milestone/3) 跟踪；计划版本为 `v0.3.0`。当前尚未创建 M2 PR、Tag 或 Release，也未运行真实模型或付费调用。
 - M0 软件版本已经发布并远端核验；终态为 `released`。发布回执 [PR #3](https://github.com/1040942669/legal-rag-agent/pull/3) 已于 `2026-09-19T07:13:37Z` 合并，`master` merge commit `52714d5f84634f008a5860f6bf4f5aa199ae3261` 的 [CI 35428743968](https://github.com/1040942669/legal-rag-agent/actions/runs/35428743968) 成功，Milestone 1 已关闭。
 - 目标仓库：`1040942669/legal-rag-agent`；远端默认分支为 `master`。M1 工作基线为 `52714d5f84634f008a5860f6bf4f5aa199ae3261`。
 - M1 软件 [PR #5](https://github.com/1040942669/legal-rag-agent/pull/5) 已于 `2026-09-19T18:56:38Z` 普通合并；最终 PR head 为 `d2fa34776cd188197954eff9a0092c207f309b97`，release target / merge commit 为 `d51ed481f986dde807163f4b5583b07bc9ef6750`。
 - release target 的 [master CI 35462786212](https://github.com/1040942669/legal-rag-agent/actions/runs/35462786212) 成功。远端 annotated tag object `546b0207eaf7dd46f1303baec9b279c14e41592c` peeled 到同一 target。
 - Tag / Release：`v0.2.0` / [GitHub Release](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.2.0)，发布时间 `2026-09-19T18:59:07Z`；非 draft、非 prerelease、无附件。
-- 当前回执分支：`codex/m1-release-receipt`，从已发布的 `origin/master` 创建；软件 Tag 不包含也不需要包含后续回执提交。
+- M1 回执分支为 `codex/m1-release-receipt`，从已发布的 `origin/master` 创建；软件 Tag 不包含也不需要包含后续回执提交。
 - M1 终态为 `released`；机器可读回执 [PR #6](https://github.com/1040942669/legal-rag-agent/pull/6) 已于 `2026-09-19T19:16:26Z` 普通合并，merge `fee92b4457dc68edc413608fb3a0d263af740922` 的 [master CI 35463832520](https://github.com/1040942669/legal-rag-agent/actions/runs/35463832520) 成功。Issue #4 和 Milestone 2 均已关闭。
-- M2-M7 尚未开始；每个阶段仍独立测试、PR、合并、Tag、Release 和回执。
+- M2 已开始；M3-M7 尚未开始。每个阶段仍独立测试、PR、合并、Tag、Release 和回执。
+
+## M2 启动边界
+
+- 只实现实验分层、精确复用、回放、逐 case 原子结果、断点续评、并发 fake 隔离、分层计时与 `M2-T01` 至 `M2-T08`。
+- 复用 v3 120 条评测集与固定 30 条生成子集；它们标记为 `legacy_regression`，不冒充新的盲测集。
+- 默认离线、并发 1、真实模型调用关闭；dense query embedding 或 adaptive normalizer 是否产生外部调用必须由 manifest 与调用账本显式记录，不能笼统写成 retrieval-only 永远零调用。
+- 本阶段不引入 PostgreSQL/pgvector、FastAPI、LangGraph、Redis/Celery、UI 或生产部署；这些仍属于 M3-M7。
+- 发布前必须累计通过 M0、M1 和 M2 门禁；发布 `v0.3.0` 后另以文档回执记录真实远端状态，不移动软件 Tag。
 
 ## M1 启动边界
 
@@ -98,7 +108,10 @@
 
 | 项目 | 当前值 |
 |---|---|
-| 当前里程碑 | M1 / `released`（软件 Release 已远端核验） |
+| 当前里程碑 | M2 / `in_progress`（从已验证的 M1 最终 master 基线启动） |
+| M2 branch / base | `codex/m2-experiment-lifecycle` / `00ec3ad5b193a7442e427486e8bfade2dbabd482` |
+| M2 Issue / Milestone | [#8](https://github.com/1040942669/legal-rag-agent/issues/8) / [Milestone 3](https://github.com/1040942669/legal-rag-agent/milestone/3) |
+| M2 PR / Tag / Release | not_created / not_created / not_created |
 | 软件分支 / 回执分支 | `codex/m1-verification` / `codex/m1-release-receipt` |
 | 最终 PR head / release target | `d2fa34776cd188197954eff9a0092c207f309b97` / `d51ed481f986dde807163f4b5583b07bc9ef6750` |
 | M1 PR / Tag / Release | [PR #5](https://github.com/1040942669/legal-rag-agent/pull/5) / `v0.2.0` / [published](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.2.0) |
@@ -109,8 +122,8 @@
 | M1 PR / master CI | [run 35462691374](https://github.com/1040942669/legal-rag-agent/actions/runs/35462691374) / [run 35462786212](https://github.com/1040942669/legal-rag-agent/actions/runs/35462786212) / success |
 | M1 Issue / Milestone | [#4](https://github.com/1040942669/legal-rag-agent/issues/4) / [Milestone 2](https://github.com/1040942669/legal-rag-agent/milestone/2) |
 | 阻塞 | 无 |
-| 下一条可执行动作 | 停止；M2 保持 `not_started`，只有后续明确启动里程碑时才继续 |
+| 下一条可执行动作 | 测试驱动实现 M2 的 experiment plan/manifest identity、精确缓存契约与 `M2-T01/M2-T02`；完成后测试、commit 并 push 工作分支 |
 
 ## 完成说明
 
-`v0.2.0` 的 `release_target_sha` 始终保持 `d51ed481f986dde807163f4b5583b07bc9ef6750`，即使 `master` 已因回执提交前进到 `fee92b4457dc68edc413608fb3a0d263af740922`。回执 PR 不属于新的软件版本。M1 已完成并停止，M2 未开始。
+`v0.2.0` 的 `release_target_sha` 始终保持 `d51ed481f986dde807163f4b5583b07bc9ef6750`，即使 `master` 已因回执与最终文档收口前进到 `00ec3ad5b193a7442e427486e8bfade2dbabd482`。回执 PR 不属于新的软件版本。M1 已完成；M2 已从该最终 master 基线独立启动，尚未发布。
