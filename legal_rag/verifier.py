@@ -19,6 +19,8 @@ from .models import (
 
 CITATION_RE = re.compile(r"\[S(\d+)\]")
 SOURCE_ID_RE = re.compile(r"S([1-9]\d*)$")
+MAX_STRUCTURED_ANSWER_CHARS = 65_536
+STANDARD_DISCLAIMER = "仅供课程学习和法律文本检索参考，不构成法律意见。"
 LEGAL_CLAIM_WORDS = ["应当", "不得", "可以", "必须", "承担", "规定", "禁止", "权利", "义务"]
 HIGH_RISK_FLAGS = {"case_strategy", "illegal_help", "medical_financial_advice", "non_legal"}
 STRUCTURED_ANSWER_FIELDS = {
@@ -54,15 +56,30 @@ INSUFFICIENT_RESPONSE_TEXTS = frozenset(
     }
 )
 CLARIFICATION_PREAMBLE = "当前信息不足，需要补充关键事实后再检索。"
-CLARIFICATION_QUESTION_PREFIXES = ("请补充", "请说明", "请明确", "是否", "何时", "哪些")
-BOUNDED_REFUSAL_SENTENCE_PATTERNS = (
-    re.compile(r"(?:抱歉[，,])?(?:我|本助手|本系统)(?:不能|无法|不予)(?:为(?:你|您|用户))?(?:直接)?提供(?:违法帮助、规避执法或相关操作方案|违法操作方案|具体操作方案|具体案件策略、胜诉判断或个性化法律意见|医疗、金融或投资等专业建议|具体策略)"),
-    re.compile(r"(?:抱歉[，,])?(?:我|本助手|本系统)(?:不能|无法|不予)(?:直接)?(?:回答|协助|给出)(?:这一问题|这个问题|该问题|该请求|具体案件策略、胜诉判断或个性化法律意见)"),
-    re.compile(r"(?:抱歉[，,])?(?:不能|无法|不予)(?:直接)?(?:回答(?:这一|这个|该)(?:问题|请求)|提供(?:违法操作方案|非法操作方案|具体操作方案)|协助(?:规避执法|违法行为))"),
-    re.compile(r"(?:这个问题|这个请求|该请求)(?:不属于|超出)当前[^，,。！？\n]{1,50}(?:范围|能力)(?:，(?:我|本助手|本系统)(?:不能|无法|不予)(?:直接)?提供具体操作方案)?"),
+SAFE_CLARIFICATION_QUESTION = "请补充作答所需的关键事实。"
+SAFE_CLARIFICATION_RESPONSE = (
+    f"{CLARIFICATION_PREAMBLE}\n\n{SAFE_CLARIFICATION_QUESTION}"
 )
-ALLOWED_SCOPE_HELP_SENTENCE = re.compile(
-    r"我可以帮助检索相关法律条文或解释公开法律文本"
+OUT_OF_SCOPE_RESPONSE_TEXTS = frozenset(
+    {
+        (
+            "我不能提供违法帮助、规避执法或相关操作方案。\n\n"
+            "我可以帮助检索相关法律条文或解释公开法律文本。"
+        ),
+        (
+            "我不能直接给出具体案件策略、胜诉判断或个性化法律意见。\n\n"
+            "我可以帮助检索相关法律条文或解释公开法律文本。"
+        ),
+        (
+            "我不能提供医疗、金融或投资等专业建议。\n\n"
+            "我可以帮助检索相关法律条文或解释公开法律文本。"
+        ),
+        (
+            "这个问题不属于当前中国现行法律文本检索范围。\n\n"
+            "我可以帮助检索相关法律条文或解释公开法律文本。"
+        ),
+        "这个请求超出当前法律文本学习助手的范围，我不能提供具体操作方案。",
+    }
 )
 
 
@@ -117,6 +134,11 @@ def parse_structured_answer(answer: str | StructuredAnswer) -> StructuredAnswer:
             ),
         )
 
+    if not isinstance(answer, str):
+        return _invalid_answer(["input_must_be_string_or_structured_answer"])
+    if len(answer) > MAX_STRUCTURED_ANSWER_CHARS:
+        return _invalid_answer(["input_too_large"])
+
     raw = answer.strip()
     candidate = _strip_json_fence(raw)
     if candidate.startswith("{"):
@@ -124,6 +146,10 @@ def parse_structured_answer(answer: str | StructuredAnswer) -> StructuredAnswer:
             payload = json.loads(candidate)
         except json.JSONDecodeError as exc:
             return _legacy_answer(raw, [f"invalid_json:{exc.msg}"])
+        except RecursionError:
+            return _invalid_answer(["invalid_json:nesting_too_deep"])
+        except TypeError:
+            return _invalid_answer(["invalid_json:unsupported_input_type"])
         parsed, errors = _answer_from_payload(payload)
         if parsed is not None and not errors:
             return parsed
@@ -172,7 +198,10 @@ def verify_answer(
     claim_source_ids = _unique(claim_source_ids)
     cited_source_ids = _unique([*visible_source_ids, *claim_source_ids])
     missing_source_ids = [source_id for source_id in cited_source_ids if source_id not in valid_source_ids]
-    citation_alignment_valid = set(claim_source_ids).issubset(visible_source_ids)
+    citation_alignment_valid = _claims_align_with_visible_text(
+        structured,
+        disclaimer=disclaimer,
+    )
 
     citation_required = structured.answer_mode == "evidence_answer"
     citation_ids_valid = (
@@ -214,6 +243,7 @@ def verify_answer(
         expected_mode=expected_mode,
         refusal_present=refusal_present,
         cited_source_ids=cited_source_ids,
+        disclaimer=disclaimer,
     )
     refusal_correct = response_mode_valid if refusal_required else None
 
@@ -301,7 +331,7 @@ def build_verifier_fallback_answer(
 
 
 def contains_refusal(answer: str) -> bool:
-    text = _without_disclaimer_sentences(answer)
+    text = _text_for_refusal_detection(answer)
     return any(pattern.search(text) for pattern in EXPLICIT_REFUSAL_PATTERNS)
 
 
@@ -311,6 +341,7 @@ def validate_response_mode(
     expected_mode: str | None,
     refusal_present: bool,
     cited_source_ids: list[str],
+    disclaimer: str = "",
 ) -> bool:
     if not isinstance(answer.answer_mode, str) or answer.answer_mode not in ANSWER_MODES:
         return False
@@ -323,14 +354,18 @@ def validate_response_mode(
             not answer.claims
             and not cited_source_ids
             and not answer.clarification_question
-            and bounded_insufficient_response(answer.answer_text)
+            and bounded_insufficient_response(answer.answer_text, disclaimer=disclaimer)
             and not refusal_present
         )
     if answer.answer_mode == "needs_clarification":
         question = answer.clarification_question or ""
         return (
             bool(question.strip())
-            and bounded_clarification_response(answer.answer_text, question.strip())
+            and bounded_clarification_response(
+                answer.answer_text,
+                question.strip(),
+                disclaimer=disclaimer,
+            )
             and not answer.claims
             and not cited_source_ids
             and not refusal_present
@@ -340,40 +375,30 @@ def validate_response_mode(
         and not cited_source_ids
         and not answer.clarification_question
         and refusal_present
-        and bounded_out_of_scope_response(answer.answer_text)
+        and bounded_out_of_scope_response(answer.answer_text, disclaimer=disclaimer)
     )
 
 
-def bounded_insufficient_response(answer_text: str) -> bool:
-    body = _without_disclaimer_sentences(answer_text).strip()
+def bounded_insufficient_response(answer_text: str, *, disclaimer: str = "") -> bool:
+    body = _without_exact_trailing_disclaimer(answer_text, disclaimer).strip()
     return body in INSUFFICIENT_RESPONSE_TEXTS
 
 
-def bounded_clarification_response(answer_text: str, question: str) -> bool:
-    if (
-        not question
-        or len(question) > 200
-        or "\n" in question
-        or not question.startswith(CLARIFICATION_QUESTION_PREFIXES)
-    ):
+def bounded_clarification_response(
+    answer_text: str,
+    question: str,
+    *,
+    disclaimer: str = "",
+) -> bool:
+    if question != SAFE_CLARIFICATION_QUESTION:
         return False
-    body = _without_disclaimer_sentences(answer_text).strip()
-    return body == f"{CLARIFICATION_PREAMBLE}\n\n{question}"
+    body = _without_exact_trailing_disclaimer(answer_text, disclaimer).strip()
+    return body == SAFE_CLARIFICATION_RESPONSE
 
 
-def bounded_out_of_scope_response(answer_text: str) -> bool:
-    sentences = split_sentences(_without_disclaimer_sentences(answer_text))
-    if not sentences or len(sentences) > 3:
-        return False
-    refusal_count = 0
-    for sentence in sentences:
-        if any(pattern.fullmatch(sentence) for pattern in BOUNDED_REFUSAL_SENTENCE_PATTERNS):
-            refusal_count += 1
-            continue
-        if ALLOWED_SCOPE_HELP_SENTENCE.fullmatch(sentence):
-            continue
-        return False
-    return refusal_count == 1
+def bounded_out_of_scope_response(answer_text: str, *, disclaimer: str = "") -> bool:
+    body = _without_exact_trailing_disclaimer(answer_text, disclaimer).strip()
+    return body in OUT_OF_SCOPE_RESPONSE_TEXTS
 
 
 def collect_source_ids(answer: StructuredAnswer) -> list[str]:
@@ -668,6 +693,19 @@ def _legacy_answer(text: str, errors: list[str]) -> StructuredAnswer:
     )
 
 
+def _invalid_answer(errors: list[str]) -> StructuredAnswer:
+    return StructuredAnswer(
+        answer_text="",
+        answer_mode="invalid",
+        claims=[],
+        limitations=[],
+        clarification_question=None,
+        schema_valid=False,
+        adapter_source="invalid",
+        parse_errors=errors,
+    )
+
+
 def infer_legacy_answer_mode(text: str) -> str:
     if contains_refusal(text):
         return "out_of_scope"
@@ -703,13 +741,66 @@ def _strip_json_fence(text: str) -> str:
     return match.group(1).strip() if match else text
 
 
-def _without_disclaimer_sentences(text: str) -> str:
-    without_disclaimer = text.replace(
-        "仅供课程学习和法律文本检索参考，不构成法律意见。",
-        "",
-    )
+def _text_for_refusal_detection(text: str) -> str:
+    """Ignore quoted examples only for refusal classification.
+
+    Limited-mode validation deliberately does not call this helper because
+    quoted text remains visible to the user and must be validated in full.
+    """
+
+    without_disclaimer = _without_exact_trailing_disclaimer(text, STANDARD_DISCLAIMER)
     without_quotes = re.sub(r"“[^”]*”|\"[^\"]*\"", "", without_disclaimer)
     return without_quotes
+
+
+def _without_exact_trailing_disclaimer(text: str, disclaimer: str = "") -> str:
+    stripped = text.rstrip()
+    exact_disclaimer = disclaimer or STANDARD_DISCLAIMER
+    if exact_disclaimer and stripped.endswith(exact_disclaimer):
+        return stripped[: -len(exact_disclaimer)].rstrip()
+    return stripped
+
+
+def _claims_align_with_visible_text(
+    answer: StructuredAnswer,
+    *,
+    disclaimer: str = "",
+) -> bool:
+    """Check claim presence and citation locality, not semantic entailment."""
+
+    if not answer.claims:
+        return True
+    body = _without_exact_trailing_disclaimer(answer.answer_text, disclaimer)
+    segments = [
+        segment.strip()
+        for segment in re.split(r"[。！？!?]+|\n+", body)
+        if segment.strip()
+    ]
+    normalized_segments = [
+        (
+            _normalize_claim_text(segment, disclaimer=disclaimer),
+            {f"S{rank}" for rank in CITATION_RE.findall(segment)},
+        )
+        for segment in segments
+    ]
+    for claim in answer.claims:
+        normalized_claim = _normalize_claim_text(claim.text, disclaimer=disclaimer)
+        if not normalized_claim:
+            return False
+        required_sources = set(claim.source_ids)
+        if not any(
+            normalized_claim in normalized_segment
+            and required_sources.issubset(local_sources)
+            for normalized_segment, local_sources in normalized_segments
+        ):
+            return False
+    return True
+
+
+def _normalize_claim_text(text: str, *, disclaimer: str = "") -> str:
+    body = _without_exact_trailing_disclaimer(text, disclaimer)
+    without_citations = CITATION_RE.sub("", body)
+    return re.sub(r"[\W_]+", "", without_citations).casefold()
 
 
 def _unique(values: list[str]) -> list[str]:

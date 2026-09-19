@@ -17,6 +17,9 @@ from .models import (
 from .query import analyze_query, extract_article_numbers, extract_law_names
 from .retrieval import Retriever, format_sources
 from .verifier import (
+    SAFE_CLARIFICATION_QUESTION,
+    SAFE_CLARIFICATION_RESPONSE,
+    STANDARD_DISCLAIMER,
     build_verifier_fallback_answer,
     filter_results_to_context,
     parse_structured_answer,
@@ -24,7 +27,7 @@ from .verifier import (
 )
 
 
-LEGAL_DISCLAIMER = "仅供课程学习和法律文本检索参考，不构成法律意见。"
+LEGAL_DISCLAIMER = STANDARD_DISCLAIMER
 PRE_RETRIEVAL_REFUSAL_FLAGS = {
     "case_strategy",
     "illegal_help",
@@ -458,9 +461,9 @@ def safe_terminal_answer(answer_mode: str) -> StructuredAnswer:
             limitations=["请求超出允许范围。"],
         )
     if answer_mode == "needs_clarification":
-        question = "请补充作答所需的关键事实。"
+        question = SAFE_CLARIFICATION_QUESTION
         return programmatic_answer(
-            "当前信息不足，需要补充关键事实后再检索。\n\n" + question,
+            SAFE_CLARIFICATION_RESPONSE,
             answer_mode="needs_clarification",
             limitations=["缺少作答所需的关键事实。"],
             clarification_question=question,
@@ -485,12 +488,11 @@ def build_limited_structured_answer(check: EvidenceCheck) -> StructuredAnswer:
         *check.low_coverage,
     ]
     if check.missing_facts:
-        clarification = "请补充这些事实信息：" + "、".join(check.missing_facts) + "？"
         return programmatic_answer(
-            "当前信息不足，需要补充关键事实后再检索。\n\n" + clarification,
+            SAFE_CLARIFICATION_RESPONSE,
             answer_mode="needs_clarification",
             limitations=limitations,
-            clarification_question=clarification,
+            clarification_question=SAFE_CLARIFICATION_QUESTION,
         )
     return programmatic_answer(
         (
