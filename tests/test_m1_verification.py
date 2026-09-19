@@ -137,6 +137,36 @@ class M1VerificationTest(unittest.TestCase):
             )
         )
 
+    def test_refusal_detection_cannot_be_hidden_by_visible_formatting(self) -> None:
+        visible_refusals = (
+            "“我不能直接给出具体案件策略 [S1]”",
+            "'我不能直接给出具体案件策略 [S1]'",
+            "「我不能直接给出具体案件策略 [S1]」",
+            "- 我不能直接给出具体案件策略 [S1]",
+            "**我不能直接给出具体案件策略 [S1]**",
+            "（我不能直接给出具体案件策略 [S1]）",
+            "🚫 我不能直接给出具体案件策略 [S1]",
+            "提示：我不能直接给出具体案件策略 [S1]",
+        )
+
+        for text in visible_refusals:
+            with self.subTest(text=text):
+                answer = self.make_answer(
+                    f"{text}\n\n{LEGAL_DISCLAIMER}",
+                    source_ids=["S1"],
+                )
+                verification = verify_answer(
+                    answer,
+                    [self.make_result()],
+                    expected_answer_mode="evidence_answer",
+                    disclaimer=LEGAL_DISCLAIMER,
+                )
+
+                self.assertTrue(contains_refusal(answer.answer_text))
+                self.assertTrue(verification.refusal_present)
+                self.assertFalse(verification.response_mode_valid)
+                self.assertFalse(verification.passed)
+
     def test_each_programmatic_risk_route_has_a_verified_refusal_mode(self) -> None:
         for risk_flag in (
             "illegal_help",
@@ -344,6 +374,25 @@ class M1VerificationTest(unittest.TestCase):
         self.assertIn("资料不足", fallback)
         self.assertNotIn("[S999]", fallback)
 
+    def test_malformed_visible_citation_token_fails_closed(self) -> None:
+        answer = self.make_answer(
+            f"经营者应当依法保护消费者权益 [S1][Sfake]。\n\n{LEGAL_DISCLAIMER}",
+            source_ids=["S1"],
+        )
+
+        verification = verify_answer(
+            answer,
+            [self.make_result()],
+            expected_answer_mode="evidence_answer",
+            disclaimer=LEGAL_DISCLAIMER,
+        )
+
+        self.assertEqual(verification.visible_source_ids, ["S1"])
+        self.assertEqual(verification.malformed_citation_tokens, ["[Sfake]"])
+        self.assertFalse(verification.citation_ids_valid)
+        self.assertIn("citation_ids_invalid", verification.failure_reasons)
+        self.assertFalse(verification.passed)
+
     def test_fallback_is_default_deny_for_any_failed_verification(self) -> None:
         original = f"UNSAFE [S1]。\n\n{LEGAL_DISCLAIMER}"
         answer = self.make_answer(original, source_ids=["S1"])
@@ -550,6 +599,33 @@ class M1VerificationTest(unittest.TestCase):
                 )
 
                 self.assertFalse(verification.evidence_scope_valid)
+                self.assertFalse(verification.passed)
+
+    def test_scope_check_fails_closed_on_malformed_context_ids(self) -> None:
+        answer = self.make_answer(
+            f"合成示例结论 [S1]。\n\n{LEGAL_DISCLAIMER}",
+            source_ids=["S1"],
+        )
+        malformed_contexts = (
+            VerificationContext(snapshot_id=123),  # type: ignore[arg-type]
+            VerificationContext(snapshot_id=""),
+            VerificationContext(snapshot_id=" snapshot-a "),
+            VerificationContext(allowed_scope_ids=["   "]),
+            VerificationContext(allowed_scope_ids=[" public "]),
+        )
+
+        for context in malformed_contexts:
+            with self.subTest(context=context):
+                verification = verify_answer(
+                    answer,
+                    [self.make_result()],
+                    expected_answer_mode="evidence_answer",
+                    context=context,
+                    disclaimer=LEGAL_DISCLAIMER,
+                )
+
+                self.assertFalse(verification.evidence_scope_valid)
+                self.assertEqual(verification.invalid_scope_citations, ["S1"])
                 self.assertFalse(verification.passed)
 
     def test_duplicate_or_nonpositive_result_ranks_fail_catalog_validation(self) -> None:
@@ -797,6 +873,37 @@ class M1VerificationTest(unittest.TestCase):
                 self.assertFalse(verification.citation_ids_valid)
                 self.assertFalse(verification.passed)
 
+    def test_sentence_delimiters_cannot_turn_a_bibliography_into_local_support(self) -> None:
+        for delimiter in (".", ";", "；", "．", "｡", "…", "……"):
+            with self.subTest(delimiter=delimiter):
+                answer = StructuredAnswer(
+                    answer_text=(
+                        f"雇主必须提供住房{delimiter} 参考来源 [S1]。"
+                        f"\n\n{LEGAL_DISCLAIMER}"
+                    ),
+                    answer_mode="evidence_answer",
+                    claims=[
+                        AnswerClaim(
+                            claim_id="C1",
+                            text="雇主必须提供住房",
+                            source_ids=["S1"],
+                        )
+                    ],
+                    limitations=[],
+                    clarification_question=None,
+                )
+
+                verification = verify_answer(
+                    answer,
+                    [self.make_result()],
+                    expected_answer_mode="evidence_answer",
+                    disclaimer=LEGAL_DISCLAIMER,
+                )
+
+                self.assertFalse(verification.citation_alignment_valid)
+                self.assertFalse(verification.citation_ids_valid)
+                self.assertFalse(verification.passed)
+
     def test_each_visible_claim_accepts_only_its_locally_attached_sources(self) -> None:
         answer = StructuredAnswer(
             answer_text=(
@@ -911,6 +1018,69 @@ class M1VerificationTest(unittest.TestCase):
 
         self.assertFalse(parsed.schema_valid)
         self.assertTrue(parsed.parse_errors)
+
+    def test_structured_json_adapter_rejects_noncanonical_or_blank_claim_fields(self) -> None:
+        baseline_claim = {
+            "claim_id": "C1",
+            "text": "经营者应当保护消费者权益",
+            "source_ids": ["S1"],
+        }
+        baseline = {
+            "answer_text": f"经营者应当保护消费者权益 [S1]。\n\n{LEGAL_DISCLAIMER}",
+            "answer_mode": "evidence_answer",
+            "claims": [baseline_claim],
+            "limitations": [],
+            "clarification_question": None,
+        }
+
+        malformed_fields = (
+            ("claim_id", "   "),
+            ("claim_id", " C1 "),
+            ("text", "   "),
+        )
+        for field_name, malformed_value in malformed_fields:
+            with self.subTest(field_name=field_name, malformed_value=malformed_value):
+                payload = {
+                    **baseline,
+                    "claims": [{**baseline_claim, field_name: malformed_value}],
+                }
+                parsed = parse_structured_answer(json.dumps(payload, ensure_ascii=False))
+                verification = verify_answer(
+                    parsed,
+                    [self.make_result()],
+                    disclaimer=LEGAL_DISCLAIMER,
+                )
+
+                self.assertFalse(parsed.schema_valid)
+                self.assertIn(f"claims[0].{field_name}_invalid", parsed.parse_errors)
+                self.assertFalse(verification.passed)
+                self.assertIn("schema_invalid", verification.failure_reasons)
+
+    def test_direct_structured_answer_rejects_noncanonical_claim_id(self) -> None:
+        answer = StructuredAnswer(
+            answer_text=f"经营者应当保护消费者权益 [S1]。\n\n{LEGAL_DISCLAIMER}",
+            answer_mode="evidence_answer",
+            claims=[
+                AnswerClaim(
+                    claim_id=" C1 ",
+                    text="经营者应当保护消费者权益",
+                    source_ids=["S1"],
+                )
+            ],
+            limitations=[],
+            clarification_question=None,
+        )
+
+        verification = verify_answer(
+            answer,
+            [self.make_result()],
+            expected_answer_mode="evidence_answer",
+            disclaimer=LEGAL_DISCLAIMER,
+        )
+
+        self.assertFalse(verification.schema_valid)
+        self.assertIn("claims[0].claim_id_invalid", verification.schema_errors)
+        self.assertFalse(verification.passed)
 
     def test_all_malformed_json_root_types_fail_closed(self) -> None:
         baseline = {

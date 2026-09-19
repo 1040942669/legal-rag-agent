@@ -17,7 +17,8 @@ from .models import (
 )
 
 
-CITATION_RE = re.compile(r"\[S(\d+)\]")
+CITATION_RE = re.compile(r"\[S([1-9]\d*)\]")
+CITATION_LIKE_RE = re.compile(r"\[\s*[sS][^\]\r\n]*\]")
 SOURCE_ID_RE = re.compile(r"S([1-9]\d*)$")
 MAX_STRUCTURED_ANSWER_CHARS = 65_536
 STANDARD_DISCLAIMER = "仅供课程学习和法律文本检索参考，不构成法律意见。"
@@ -36,6 +37,17 @@ EXPLICIT_REFUSAL_PATTERNS = (
     re.compile(r"^\s*(?:不能|无法|不予)(?:直接)?(?:回答(?:这个|该)(?:问题|请求)|提供(?:违法|非法|具体操作)|协助(?:规避执法|违法))"),
     re.compile(r"(?:^|[。！？\n])\s*(?:我|本助手|本系统)拒绝(?:提供|回答|协助)"),
     re.compile(r"(?:这个问题|这个请求|该请求)(?:不属于|超出)当前.+(?:范围|能力)"),
+)
+QUOTED_TEXT_RE = re.compile(
+    r"“([^”]*)”|\"([^\"]*)\"|‘([^’]*)’|'([^']*)'|「([^」]*)」|『([^』]*)』"
+)
+QUOTED_ATTRIBUTION_BEFORE_RE = re.compile(
+    r"(?:示例|提示语|引述|引用|原文|当事人|用户|第三方|对方|证人|他说|她说|其表示)"
+    r"(?:中|称|表示|写道|写明|写着|为)?\s*[，,:：]?\s*$"
+)
+QUOTED_ATTRIBUTION_AFTER_RE = re.compile(
+    r"^\s*(?:是|属于|作为|仅为|只是)?\s*(?:一段)?\s*"
+    r"(?:示例|提示语|引述|引用|原文|当事人陈述|用户陈述)"
 )
 INSUFFICIENT_MARKERS = (
     "资料不足",
@@ -195,6 +207,13 @@ def verify_answer(
     )
     valid_source_ids = set(catalog_source_ids)
     visible_source_ids = [f"S{rank}" for rank in CITATION_RE.findall(structured.answer_text)]
+    malformed_citation_tokens = _unique(
+        [
+            token
+            for token in CITATION_LIKE_RE.findall(structured.answer_text)
+            if CITATION_RE.fullmatch(token) is None
+        ]
+    )
     claim_source_ids = [
         source_id
         for claim in structured.claims
@@ -211,7 +230,10 @@ def verify_answer(
 
     citation_required = structured.answer_mode == "evidence_answer"
     citation_ids_valid = (
-        evidence_catalog_valid and not missing_source_ids and citation_alignment_valid
+        evidence_catalog_valid
+        and not missing_source_ids
+        and not malformed_citation_tokens
+        and citation_alignment_valid
     )
     if citation_required:
         citation_ids_valid = (
@@ -305,6 +327,7 @@ def verify_answer(
         ],
         duplicate_source_ids=duplicate_source_ids,
         missing_source_ids=missing_source_ids,
+        malformed_citation_tokens=malformed_citation_tokens,
         invalid_scope_citations=invalid_scope_citations,
         cited_source_ids=cited_source_ids,
         visible_source_ids=visible_source_ids,
@@ -492,26 +515,37 @@ def evidence_result_in_context(
     metadata = result.chunk.metadata
     if not isinstance(metadata, dict):
         return False
-    if context.snapshot_id is not None and metadata.get("snapshot_id") != context.snapshot_id:
-        return False
+    if context.snapshot_id is not None:
+        if not _is_canonical_boundary_id(context.snapshot_id):
+            return False
+        metadata_snapshot_id = metadata.get("snapshot_id")
+        if (
+            not _is_canonical_boundary_id(metadata_snapshot_id)
+            or metadata_snapshot_id != context.snapshot_id
+        ):
+            return False
     if context.allowed_scope_ids is None:
         return True
     if not isinstance(context.allowed_scope_ids, list) or not all(
-        isinstance(scope_id, str) and scope_id
+        _is_canonical_boundary_id(scope_id)
         for scope_id in context.allowed_scope_ids
     ):
         return False
     raw_scope_ids = metadata.get("access_scope_ids")
     if raw_scope_ids is None:
         scope_id = metadata.get("scope_id")
-        raw_scope_ids = [scope_id] if isinstance(scope_id, str) and scope_id else []
+        raw_scope_ids = [scope_id] if _is_canonical_boundary_id(scope_id) else []
     if not isinstance(raw_scope_ids, list) or not all(
-        isinstance(scope_id, str) and scope_id for scope_id in raw_scope_ids
+        _is_canonical_boundary_id(scope_id) for scope_id in raw_scope_ids
     ):
         return False
     return bool(
         set(raw_scope_ids) & set(context.allowed_scope_ids)
     )
+
+
+def _is_canonical_boundary_id(value: Any) -> bool:
+    return isinstance(value, str) and bool(value) and value == value.strip()
 
 
 def unsupported_legal_claims(
@@ -562,7 +596,11 @@ def validate_structured_answer(answer: StructuredAnswer) -> list[str]:
             if not isinstance(claim, AnswerClaim):
                 errors.append(f"claims[{index}]_invalid")
                 continue
-            claim_id_valid = isinstance(claim.claim_id, str) and bool(claim.claim_id.strip())
+            claim_id_valid = (
+                isinstance(claim.claim_id, str)
+                and bool(claim.claim_id)
+                and claim.claim_id == claim.claim_id.strip()
+            )
             claim_text_valid = isinstance(claim.text, str) and bool(claim.text.strip())
             if not claim_id_valid:
                 errors.append(f"claims[{index}].claim_id_invalid")
@@ -658,9 +696,13 @@ def _claim_from_payload(payload: Any, index: int) -> tuple[AnswerClaim | None, l
     claim_id = payload.get("claim_id")
     text = payload.get("text")
     source_ids = payload.get("source_ids")
-    if not isinstance(claim_id, str) or not claim_id:
+    if (
+        not isinstance(claim_id, str)
+        or not claim_id
+        or claim_id != claim_id.strip()
+    ):
         errors.append(f"claims[{index}].claim_id_invalid")
-    if not isinstance(text, str) or not text:
+    if not isinstance(text, str) or not text.strip():
         errors.append(f"claims[{index}].text_invalid")
     if not isinstance(source_ids, list) or not source_ids or not all(
         isinstance(source_id, str) and SOURCE_ID_RE.fullmatch(source_id)
@@ -748,15 +790,56 @@ def _strip_json_fence(text: str) -> str:
 
 
 def _text_for_refusal_detection(text: str) -> str:
-    """Ignore quoted examples only for refusal classification.
+    """Ignore clearly attributed examples while preserving visible refusals.
 
     Limited-mode validation deliberately does not call this helper because
     quoted text remains visible to the user and must be validated in full.
     """
 
-    without_disclaimer = _without_exact_trailing_disclaimer(text, STANDARD_DISCLAIMER)
-    without_quotes = re.sub(r"“[^”]*”|\"[^\"]*\"", "", without_disclaimer)
-    return without_quotes
+    body = _without_exact_trailing_disclaimer(text, STANDARD_DISCLAIMER)
+
+    def replace_quote(match: re.Match[str]) -> str:
+        quoted = next(group for group in match.groups() if group is not None)
+        before = body[: match.start()]
+        after = body[match.end() :]
+        clearly_attributed = bool(
+            QUOTED_ATTRIBUTION_BEFORE_RE.search(before)
+            or QUOTED_ATTRIBUTION_AFTER_RE.search(after)
+        )
+        return "" if clearly_attributed else quoted
+
+    visible_behavior = QUOTED_TEXT_RE.sub(replace_quote, body)
+    visible_behavior = re.sub(r"[*_`]+", "", visible_behavior)
+    visible_behavior = re.sub(
+        r"(?m)^\s*(?:(?:[-+>#•]|\d+[.)、])\s*)+",
+        "",
+        visible_behavior,
+    )
+    visible_behavior = re.sub(
+        r"(?m)(^|[。！？!?\n])\s*[（(【\[]+\s*",
+        r"\1",
+        visible_behavior,
+    )
+    # Presentation wrappers must not change behavioral classification.  This
+    # removes only non-word decoration at a sentence/line boundary, then a
+    # small set of assistant-authored headings.  Attribution words such as
+    # "示例" and "当事人表示" are intentionally not headings here.
+    visible_behavior = re.sub(
+        r"(?m)(^|[。！？!?\n])\s*[^\w\u4e00-\u9fff]*",
+        r"\1",
+        visible_behavior,
+    )
+    visible_behavior = re.sub(
+        r"(?m)(^|[。！？!?\n])\s*(?:提示|回答|答复|结论|说明)\s*[：:]\s*",
+        r"\1",
+        visible_behavior,
+    )
+    visible_behavior = re.sub(
+        r"(?m)(^|[。！？!?\n])\s*[^\w\u4e00-\u9fff]*",
+        r"\1",
+        visible_behavior,
+    )
+    return visible_behavior
 
 
 def _without_exact_trailing_disclaimer(text: str, disclaimer: str = "") -> str:
@@ -779,7 +862,7 @@ def _claims_align_with_visible_text(
     body = _without_exact_trailing_disclaimer(answer.answer_text, disclaimer)
     segments = [
         segment.strip()
-        for segment in re.split(r"[。！？!?]+|\n+", body)
+        for segment in re.split(r"[。．｡！？!?；;…]+|(?<!\d)\.(?!\d)|\n+", body)
         if segment.strip()
     ]
     normalized_segments = [

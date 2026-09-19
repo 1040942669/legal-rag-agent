@@ -10,6 +10,7 @@ from .models import SearchResult
 
 MAX_JUDGE_RESPONSE_CHARS = 65_536
 MAX_JSON_START_CANDIDATES = 32
+MAX_JUDGE_ERROR_CHARS = 200
 
 
 class CompletionClient(Protocol):
@@ -106,11 +107,11 @@ def extract_json_object(text: str) -> dict[str, Any] | None:
 
 
 def parse_score(value: Any) -> float | None:
-    if isinstance(value, bool):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     try:
         score = float(value)
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
         return None
     if not math.isfinite(score) or not 0.0 <= score <= 1.0:
         return None
@@ -130,7 +131,7 @@ def error_result(
         passed=None,
         comment="",
         source="error",
-        error=message,
+        error=message[:MAX_JUDGE_ERROR_CHARS],
         raw_response=raw_response[:500],
         status="error",
         error_code=error_code,
@@ -154,7 +155,11 @@ def judge_answer(
             if isinstance(exc, TimeoutError) or "timeout" in exception_name
             else "transport_error"
         )
-        message = str(exc).strip() or type(exc).__name__
+        message = (
+            "judge request timed out"
+            if error_code == "timeout"
+            else "judge provider request failed"
+        )
         return error_result(message, error_code=error_code)
     if len(raw) > MAX_JUDGE_RESPONSE_CHARS:
         return error_result(

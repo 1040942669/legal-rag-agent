@@ -202,13 +202,16 @@ class JudgeTest(unittest.TestCase):
     def test_judge_handles_client_exception(self):
         class FailingClient:
             def complete(self, prompt: str) -> str:
-                raise ValueError("transport failed")
+                raise ValueError("SECRET_PROVIDER_DETAIL_" + "x" * 100_000)
 
         result = judge_answer(
             FailingClient(), question="q", answer="a", results=self.make_results()
         )
         self.assertEqual(result.source, "error")
-        self.assertIn("transport failed", result.error)
+        self.assertEqual(result.error_code, "transport_error")
+        self.assertEqual(result.error, "judge provider request failed")
+        self.assertNotIn("SECRET_PROVIDER_DETAIL", result.error)
+        self.assertLessEqual(len(result.error), 200)
 
     def test_judge_recomputes_inconsistent_pass_flag(self):
         client = StubJudgeClient(
@@ -229,6 +232,19 @@ class JudgeTest(unittest.TestCase):
         )
         result = judge_answer(out_of_range, question="q", answer="a", results=self.make_results())
         self.assertEqual(result.source, "error")
+
+    def test_judge_rejects_numeric_strings_as_schema_invalid(self):
+        client = StubJudgeClient(
+            '{"faithfulness": "0.9", "relevance": "0.8", '
+            '"completeness": "0.7", "passed": true, "comment": "ok"}'
+        )
+
+        result = judge_answer(client, question="q", answer="a", results=self.make_results())
+
+        self.assertEqual(result.status, "error")
+        self.assertEqual(result.error_code, "invalid_schema")
+        self.assertIsNone(result.faithfulness)
+        self.assertIsNone(result.passed)
 
     def test_extract_json_object_plain(self):
         self.assertEqual(extract_json_object('前缀 {"a": 1} 后缀'), {"a": 1})

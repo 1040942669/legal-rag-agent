@@ -207,6 +207,7 @@ class VerificationResult:
     required_checks: list[str]
     duplicate_source_ids: list[str]
     missing_source_ids: list[str]
+    malformed_citation_tokens: list[str]
     invalid_scope_citations: list[str]
     cited_source_ids: list[str]
     visible_source_ids: list[str]
@@ -248,6 +249,7 @@ class VerificationResult:
             "required_checks": self.required_checks,
             "duplicate_source_ids": self.duplicate_source_ids,
             "missing_source_ids": self.missing_source_ids,
+            "malformed_citation_tokens": self.malformed_citation_tokens,
             "missing_citations": self.missing_citations,
             "invalid_scope_citations": self.invalid_scope_citations,
             "cited_source_ids": self.cited_source_ids,
