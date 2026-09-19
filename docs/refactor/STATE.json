@@ -7,12 +7,12 @@
     "observed_default_branch": "master",
     "observed_baseline_commit": "4ed96ec921593ef81de61ce545513e3f1211b5db",
     "observed_on": "2026-09-19",
-    "workspace_head": "b3a2b4605a66c66f76ac6f199552c613e623f44d",
+    "workspace_head": "98db5d72f146dce163314050a9968764de2d14e0",
     "workspace_branch": "codex/m0-baseline",
     "workspace_dirty": false,
     "remote_tags_checked": true
   },
-  "execution_status": "ready_for_review",
+  "execution_status": "ready_for_release",
   "active_milestone": "M0",
   "last_verified_release": null,
   "authorization": {
@@ -40,12 +40,12 @@
       "name": "基线与门禁",
       "planned_version": "v0.1.1",
       "required": true,
-      "status": "ready_for_review",
+      "status": "ready_for_release",
       "branch": "codex/m0-baseline",
       "issue_url": "https://github.com/1040942669/legal-rag-agent/issues/1",
       "milestone_url": "https://github.com/1040942669/legal-rag-agent/milestone/1",
       "pr_url": "https://github.com/1040942669/legal-rag-agent/pull/2",
-      "candidate_sha": "b3a2b4605a66c66f76ac6f199552c613e623f44d",
+      "candidate_sha": "98db5d72f146dce163314050a9968764de2d14e0",
       "release_target_sha": null,
       "tag": null,
       "release_url": null,
@@ -58,8 +58,8 @@
         "mandatory_checks_passed": 7,
         "mandatory_checks_total": 7,
         "report_path": "reports/refactor/M0.md",
-        "ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/35427519552",
-        "ci_sha": "b3a2b4605a66c66f76ac6f199552c613e623f44d"
+        "ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/35427914463",
+        "ci_sha": "98db5d72f146dce163314050a9968764de2d14e0"
       },
       "blockers": []
     },
@@ -232,5 +232,5 @@
       "blockers": []
     }
   ],
-  "next_action": "Push the M0 acceptance-document commit and require a fresh successful CI run for its exact SHA before recording ready_for_release; do not start M1."
+  "next_action": "Push this metadata-only ready_for_release record, require a successful CI run for the latest PR head, then review/merge, verify master CI, publish v0.1.1, and write the post-release receipt; do not start M1."
 }
