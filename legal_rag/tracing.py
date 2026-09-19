@@ -7,6 +7,39 @@ from typing import Any
 from .models import SearchResult, VerificationResult
 
 
+_SAFE_VERIFICATION_TRACE_FIELDS = (
+    "passed",
+    "schema_valid",
+    "evidence_catalog_valid",
+    "citation_ids_valid",
+    "citation_alignment_valid",
+    "evidence_scope_valid",
+    "citation_valid",
+    "disclaimer_present",
+    "response_mode_valid",
+    "semantic_support_status",
+    "expected_answer_mode",
+    "actual_answer_mode",
+    "refusal_required",
+    "refusal_present",
+    "answer_source_format",
+    "required_checks",
+    "refusal_correct",
+    "failure_reasons",
+)
+_VERIFICATION_TRACE_COUNT_FIELDS = {
+    "schema_errors": "schema_error_count",
+    "duplicate_source_ids": "duplicate_source_id_count",
+    "missing_source_ids": "missing_source_id_count",
+    "malformed_citation_tokens": "malformed_citation_token_count",
+    "invalid_scope_citations": "invalid_scope_citation_count",
+    "cited_source_ids": "cited_source_id_count",
+    "visible_source_ids": "visible_source_id_count",
+    "claim_source_ids": "claim_source_id_count",
+    "unsupported_claims": "unsupported_claim_count",
+}
+
+
 class JsonlTraceWriter:
     def __init__(self, path: str | Path, *, run_id: str) -> None:
         self.path = Path(path)
@@ -15,8 +48,13 @@ class JsonlTraceWriter:
 
     def write(self, record: dict[str, Any]) -> None:
         payload = {"run_id": self.run_id, **record}
+        serialized = json.dumps(payload, ensure_ascii=False)
+        try:
+            serialized.encode("utf-8")
+        except UnicodeEncodeError:
+            serialized = json.dumps(payload, ensure_ascii=True)
         with self.path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+            handle.write(serialized + "\n")
 
 
 def search_result_to_trace(result: SearchResult) -> dict[str, Any]:
@@ -37,13 +75,19 @@ def search_result_to_trace(result: SearchResult) -> dict[str, Any]:
 
 
 def verification_result_to_trace(result: VerificationResult | None) -> dict[str, Any] | None:
-    """Serialize verifier diagnostics without copying rejected draft excerpts."""
+    """Serialize verifier diagnostics without copying untrusted draft fragments."""
 
     if result is None:
         return None
-    payload = result.to_dict()
-    unsupported_claims = payload.pop("unsupported_claims", [])
-    payload["unsupported_claim_count"] = len(unsupported_claims)
+    raw = result.to_dict()
+    payload = {
+        field: raw[field]
+        for field in _SAFE_VERIFICATION_TRACE_FIELDS
+        if field in raw
+    }
+    for source_field, count_field in _VERIFICATION_TRACE_COUNT_FIELDS.items():
+        value = raw.get(source_field, [])
+        payload[count_field] = len(value) if isinstance(value, list) else 0
     return payload
 
 

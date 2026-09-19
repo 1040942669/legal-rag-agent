@@ -6,6 +6,14 @@ import unicodedata
 from dataclasses import replace
 from typing import Any
 
+from .json_utils import (
+    DuplicateJsonKeyError,
+    InvalidJsonUnicodeError,
+    NonFiniteJsonConstantError,
+    reject_duplicate_object_pairs,
+    reject_non_finite_json_constant,
+    validate_json_unicode,
+)
 from .models import (
     ANSWER_MODES,
     SEMANTIC_SUPPORT_STATUSES,
@@ -16,7 +24,6 @@ from .models import (
     VerificationContext,
     VerificationResult,
 )
-from .json_utils import DuplicateJsonKeyError, reject_duplicate_object_pairs
 
 
 CITATION_RE = re.compile(r"\[S([1-9]\d*)\]")
@@ -34,12 +41,15 @@ STRUCTURED_ANSWER_FIELDS = {
 }
 EXPLICIT_REFUSAL_PATTERNS = (
     re.compile(
-        r"(?:^|[。！？\n])\s*(?:(?:很)?抱歉[，,]\s*)?"
+        r"(?:^|[。！？\n])\s*(?:(?:(?:很)?抱歉|对不起)[，,]\s*)?"
         r"(?:(?:出于|基于)[^。！？\n，,]{1,30}[，,]\s*)?"
         r"(?:我|本助手|本系统)(?:不能|无法|不会|不予|拒绝)"
         r"(?:(?:为|向)(?:你|您|用户))?(?:直接)?(?:提供|回答|协助|给出)"
     ),
-    re.compile(r"(?:^|[。！？\n])\s*(?:很)?抱歉[，,]\s*(?:不能|无法|不会|不予)(?:回答|提供|协助)"),
+    re.compile(
+        r"(?:^|[。！？\n])\s*(?:(?:很)?抱歉|对不起)[，,]\s*"
+        r"(?:不能|无法|不会|不予)(?:回答|提供|协助)"
+    ),
     re.compile(r"^\s*(?:不能|无法|不予)(?:直接)?(?:回答(?:这个|该)(?:问题|请求)|提供(?:违法|非法|具体操作)|协助(?:规避执法|违法))"),
     re.compile(r"(?:^|[。！？\n])\s*(?:我|本助手|本系统)拒绝(?:提供|回答|协助)"),
     re.compile(r"(?:这个问题|这个请求|该请求)(?:不属于|超出)当前.+(?:范围|能力)"),
@@ -161,14 +171,21 @@ def parse_structured_answer(answer: str | StructuredAnswer) -> StructuredAnswer:
     candidate = _strip_json_fence(raw)
     if candidate.startswith("{"):
         try:
-            payload = json.loads(
-                candidate,
-                object_pairs_hook=reject_duplicate_object_pairs,
+            payload = validate_json_unicode(
+                json.loads(
+                    candidate,
+                    object_pairs_hook=reject_duplicate_object_pairs,
+                    parse_constant=reject_non_finite_json_constant,
+                )
             )
         except json.JSONDecodeError as exc:
             return _legacy_answer(raw, [f"invalid_json:{exc.msg}"])
         except DuplicateJsonKeyError:
             return _invalid_answer(["invalid_json:duplicate_key"])
+        except InvalidJsonUnicodeError:
+            return _invalid_answer(["invalid_json:invalid_unicode"])
+        except NonFiniteJsonConstantError:
+            return _invalid_answer(["invalid_json:non_finite_constant"])
         except RecursionError:
             return _invalid_answer(["invalid_json:nesting_too_deep"])
         except (ValueError, OverflowError):
@@ -445,15 +462,31 @@ def collect_source_ids(answer: StructuredAnswer) -> list[str]:
 def find_malformed_citation_tokens(text: str) -> list[str]:
     """Return citation-like fragments that are not exact ASCII ``[S<n>]`` tokens."""
 
-    residual = CITATION_RE.sub("", text)
-    normalized = _normalize_security_text(residual).translate(
-        str.maketrans({"【": "[", "】": "]", "〔": "[", "〕": "]"})
+    shadow = "".join(_citation_shadow_character(char) for char in text)
+    fragments = [
+        text[match.start() : match.end()]
+        for match in re.finditer(
+            r"\[+\s*[sS][^\]\r\n]*(?:\]|(?=\r?\n)|$)",
+            shadow,
+        )
+    ]
+    return _unique(
+        [fragment[:80] for fragment in fragments if CITATION_RE.fullmatch(fragment) is None]
     )
-    fragments = re.findall(
-        r"\[\s*[sS][^\]\r\n]*(?:\]|(?=\r?\n)|$)",
-        normalized,
-    )
-    return _unique([fragment[:80] for fragment in fragments])
+
+
+def _citation_shadow_character(char: str) -> str:
+    if _is_security_ignorable(char):
+        return " "
+    category = unicodedata.category(char)
+    if category == "Ps":
+        return "["
+    if category == "Pe":
+        return "]"
+    normalized = unicodedata.normalize("NFKC", char)
+    if len(normalized) == 1 and normalized in {"S", "s"}:
+        return normalized
+    return char
 
 
 def find_out_of_scope_citations(
@@ -865,7 +898,14 @@ def _text_for_refusal_detection(text: str) -> str:
 
 def _normalize_security_text(text: str) -> str:
     normalized = unicodedata.normalize("NFKC", text)
-    return re.sub(r"[\u200b-\u200d\u2060\ufeff]", "", normalized)
+    return "".join(char for char in normalized if not _is_security_ignorable(char))
+
+
+def _is_security_ignorable(char: str) -> bool:
+    return (
+        unicodedata.category(char) in {"Cf", "Mn", "Me", "Cn"}
+        or "FILLER" in unicodedata.name(char, "")
+    )
 
 
 def _without_exact_trailing_disclaimer(text: str, disclaimer: str = "") -> str:

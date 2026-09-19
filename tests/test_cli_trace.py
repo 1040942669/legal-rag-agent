@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from typing import Any
 
 from legal_rag import cli
+from legal_rag.tracing import JsonlTraceWriter
 
 
 class TraceValue:
@@ -44,6 +45,17 @@ class FakeChatAssistant:
     def answer(self, question: str, *, generate: bool = True):
         self.calls.append(generate)
         return "最终交付的安全回答", []
+
+
+def test_trace_writer_falls_back_to_ascii_for_unpaired_surrogates(tmp_path: Path) -> None:
+    trace_path = tmp_path / "unicode-trace.jsonl"
+    writer = JsonlTraceWriter(trace_path, run_id="unicode-safe")
+
+    writer.write({"value": chr(0xD800), "ordinary_text": "中文"})
+
+    payload = json.loads(trace_path.read_text(encoding="utf-8"))
+    assert payload["value"] == chr(0xD800)
+    assert payload["ordinary_text"] == "中文"
 
 
 def run_chat_once(
@@ -125,6 +137,14 @@ def test_interactive_chat_trace_separates_rejected_attempt_from_delivered_final(
             "passed": False,
             "actual_answer_mode": "evidence_answer",
             "citation_ids_valid": False,
+            "schema_error_count": 0,
+            "duplicate_source_id_count": 0,
+            "missing_source_id_count": 0,
+            "malformed_citation_token_count": 0,
+            "invalid_scope_citation_count": 0,
+            "cited_source_id_count": 0,
+            "visible_source_id_count": 0,
+            "claim_source_id_count": 0,
             "unsupported_claim_count": 0,
         },
     }
@@ -134,6 +154,14 @@ def test_interactive_chat_trace_separates_rejected_attempt_from_delivered_final(
             "verification": {
                 "passed": True,
                 "actual_answer_mode": "insufficient_evidence",
+                "schema_error_count": 0,
+                "duplicate_source_id_count": 0,
+                "missing_source_id_count": 0,
+                "malformed_citation_token_count": 0,
+                "invalid_scope_citation_count": 0,
+                "cited_source_id_count": 0,
+                "visible_source_id_count": 0,
+                "claim_source_id_count": 0,
                 "unsupported_claim_count": 0,
             },
         },

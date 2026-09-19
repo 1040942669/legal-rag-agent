@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import unittest
 from pathlib import Path
 
@@ -262,6 +263,24 @@ class JudgeTest(unittest.TestCase):
                 '{"faithfulness": 0.9, "relevance": 0.8, "completeness": 0.7, '
                 '"passed": true, "comment": "ok", "extra": 1}',
                 "invalid_schema",
+            ),
+            (
+                '{"faithfulness": NaN, "relevance": 0.8, "completeness": 0.7, '
+                '"passed": true, "comment": "ok"}',
+                "invalid_json",
+            ),
+            (
+                json.dumps(
+                    {
+                        "faithfulness": 0.9,
+                        "relevance": 0.8,
+                        "completeness": 0.7,
+                        "passed": True,
+                        "comment": chr(0xD800),
+                    },
+                    ensure_ascii=True,
+                ),
+                "invalid_json",
             ),
         )
 

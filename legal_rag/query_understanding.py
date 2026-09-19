@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from typing import Protocol
 
-from .json_utils import reject_duplicate_object_pairs
+from .json_utils import (
+    reject_duplicate_object_pairs,
+    reject_non_finite_json_constant,
+    validate_json_unicode,
+)
 from .models import NormalizedQuery
 from .query import QueryAnalysis, analyze_query, should_use_adaptive
 
@@ -104,9 +109,12 @@ def parse_normalized_query_json(
     original_query: str,
     source: str = "llm",
 ) -> NormalizedQuery:
-    payload = json.loads(
-        extract_json_object(raw_text),
-        object_pairs_hook=reject_duplicate_object_pairs,
+    payload = validate_json_unicode(
+        json.loads(
+            extract_json_object(raw_text),
+            object_pairs_hook=reject_duplicate_object_pairs,
+            parse_constant=reject_non_finite_json_constant,
+        )
     )
     if not isinstance(payload, dict):
         raise ValueError("Normalizer JSON must be an object.")
@@ -245,7 +253,11 @@ def require_string_list(payload: dict, key: str) -> list[str]:
 
 
 def require_confidence(value: object) -> float:
-    if not isinstance(value, (int, float)):
+    if (
+        not isinstance(value, (int, float))
+        or isinstance(value, bool)
+        or not math.isfinite(float(value))
+    ):
         raise ValueError("Field `confidence` must be a number.")
     return round(min(max(float(value), 0.0), 1.0), 2)
 

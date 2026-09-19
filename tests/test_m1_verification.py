@@ -152,6 +152,14 @@ class M1VerificationTest(unittest.TestCase):
             "出于安全原因，我无法提供具体案件策略 [S1]",
             "我无法向您提供具体案件策略 [S1]",
             "我\u200b不能直接给出具体案件策略 [S1]",
+            "对不起，我不能直接提供具体案件策略 [S1]",
+            "我\u2063不能直接提供具体案件策略 [S1]",
+            "我\u180e不能直接提供具体案件策略 [S1]",
+            "我\u034f不能直接提供具体案件策略 [S1]",
+            "我\ufe0f不能直接提供具体案件策略 [S1]",
+            "我\u180b不能直接提供具体案件策略 [S1]",
+            "我\u3164不能直接提供具体案件策略 [S1]",
+            "我\u2065不能直接提供具体案件策略 [S1]",
         )
 
         for text in visible_refusals:
@@ -380,7 +388,28 @@ class M1VerificationTest(unittest.TestCase):
         self.assertNotIn("[S999]", fallback)
 
     def test_malformed_visible_citation_token_fails_closed(self) -> None:
-        malformed_tokens = ("[Sfake]", "[S-1]", "[S1a]", "【S999】", "［S999］", "[Ｓ999]", "[Sfake")
+        malformed_tokens = (
+            "[Sfake]",
+            "[S-1]",
+            "[S1a]",
+            "【S999】",
+            "［S999］",
+            "[Ｓ999]",
+            "[Sfake",
+            "[[S1]]",
+            "【[S1]】",
+            "〖S999〗",
+            "⟦S999⟧",
+            "〚S999〛",
+            "❲S999❳",
+            "（S999）",
+            "⌈S999⌉",
+            "⦃S999⦄",
+            "⟬S999⟭",
+            "[\u200bS999]",
+            "【\u2063S999】",
+            "[\ufe0fS999]",
+        )
 
         for malformed_token in malformed_tokens:
             with self.subTest(malformed_token=malformed_token):
@@ -1138,6 +1167,23 @@ class M1VerificationTest(unittest.TestCase):
 
         self.assertFalse(parsed.schema_valid)
         self.assertIn("invalid_json:duplicate_key", parsed.parse_errors)
+
+    def test_structured_parser_rejects_unpaired_surrogate_but_accepts_emoji(self) -> None:
+        payload = {
+            "answer_text": chr(0xD800),
+            "answer_mode": "insufficient_evidence",
+            "claims": [],
+            "limitations": [],
+            "clarification_question": None,
+        }
+        invalid = parse_structured_answer(json.dumps(payload, ensure_ascii=True))
+        payload["answer_text"] = "资料不足😀"
+        valid = parse_structured_answer(json.dumps(payload, ensure_ascii=True))
+
+        self.assertFalse(invalid.schema_valid)
+        self.assertIn("invalid_json:invalid_unicode", invalid.parse_errors)
+        self.assertTrue(valid.schema_valid)
+        self.assertEqual(valid.answer_text, "资料不足😀")
 
     def test_structured_parser_rejects_non_string_deep_and_oversized_inputs(self) -> None:
         deeply_nested = '{"x":' + "[" * 2000 + "0" + "]" * 2000 + "}"

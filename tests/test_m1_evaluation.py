@@ -113,21 +113,11 @@ class InvalidCitationAnswerClient:
 
 class SecretRejectedDraftClient:
     def complete(self, prompt: str) -> str:
-        return json.dumps(
-            {
-                "answer_text": "机密草稿令牌SECRET_DRAFT_123必须立即执行 [S999]。",
-                "answer_mode": "evidence_answer",
-                "claims": [
-                    {
-                        "claim_id": "C1",
-                        "text": "机密草稿令牌SECRET_DRAFT_123必须立即执行",
-                        "source_ids": ["S999"],
-                    }
-                ],
-                "limitations": [],
-                "clarification_question": None,
-            },
-            ensure_ascii=False,
+        return (
+            '{"answer_text":"机密草稿令牌SECRET_DRAFT_123必须立即执行 '
+            '[S424242424242] [SLEAK_SECRET_42",'
+            '"answer_mode":"evidence_answer","claims":[],"limitations":[],'
+            '"clarification_question":null,"LEAK_SECRET_FIELD_99":true}'
         )
 
 
@@ -395,11 +385,23 @@ class M1EvaluationTest(unittest.TestCase):
 
         self.assertEqual(record.generation_attempt["status"], "rejected")
         self.assertGreaterEqual(
-            record.generation_attempt["verification"]["unsupported_claim_count"],
+            record.generation_attempt["verification"]["schema_error_count"],
+            1,
+        )
+        self.assertGreaterEqual(
+            record.generation_attempt["verification"]["malformed_citation_token_count"],
             1,
         )
         self.assertNotIn("unsupported_claims", record.generation_attempt["verification"])
+        self.assertNotIn("schema_errors", record.generation_attempt["verification"])
+        self.assertNotIn(
+            "malformed_citation_tokens",
+            record.generation_attempt["verification"],
+        )
         self.assertNotIn("SECRET_DRAFT_123", trace_text)
+        self.assertNotIn("LEAK_SECRET_FIELD_99", trace_text)
+        self.assertNotIn("SLEAK_SECRET_42", trace_text)
+        self.assertNotIn("S424242424242", trace_text)
         self.assertNotIn(
             "SECRET_DRAFT_123",
             json.dumps(record.generation_attempt, ensure_ascii=False),

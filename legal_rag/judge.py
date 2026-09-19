@@ -5,7 +5,14 @@ import math
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from .json_utils import DuplicateJsonKeyError, reject_duplicate_object_pairs
+from .json_utils import (
+    DuplicateJsonKeyError,
+    InvalidJsonUnicodeError,
+    NonFiniteJsonConstantError,
+    reject_duplicate_object_pairs,
+    reject_non_finite_json_constant,
+    validate_json_unicode,
+)
 from .models import SearchResult
 
 
@@ -97,7 +104,10 @@ def extract_json_object(text: str) -> dict[str, Any] | None:
     cleaned = text.strip()
     if len(cleaned) > MAX_JUDGE_RESPONSE_CHARS:
         return None
-    decoder = json.JSONDecoder(object_pairs_hook=reject_duplicate_object_pairs)
+    decoder = json.JSONDecoder(
+        object_pairs_hook=reject_duplicate_object_pairs,
+        parse_constant=reject_non_finite_json_constant,
+    )
     candidates_checked = 0
     for start, char in enumerate(cleaned):
         if char != "{":
@@ -107,7 +117,12 @@ def extract_json_object(text: str) -> dict[str, Any] | None:
             return None
         try:
             parsed, _ = decoder.raw_decode(cleaned[start:])
-        except DuplicateJsonKeyError:
+            validate_json_unicode(parsed)
+        except (
+            DuplicateJsonKeyError,
+            InvalidJsonUnicodeError,
+            NonFiniteJsonConstantError,
+        ):
             return None
         except (ValueError, RecursionError, OverflowError):
             continue
