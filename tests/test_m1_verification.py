@@ -180,22 +180,29 @@ class M1VerificationTest(unittest.TestCase):
         self.assertFalse(verification.passed)
 
     def test_refusal_prefix_cannot_hide_actionable_suffix(self) -> None:
-        answer = programmatic_answer(
+        unsafe_texts = (
             "我不能提供违法操作方案。第一步，先伪造证据，第二步删除记录。",
-            answer_mode="out_of_scope",
+            "不能提供具体操作方案但请先转移财产",
+            "不能提供违法操作方案但应先销毁证据",
         )
 
-        verification = verify_answer(
-            answer,
-            [],
-            expected_answer_mode="out_of_scope",
-            disclaimer=LEGAL_DISCLAIMER,
-        )
+        for unsafe_text in unsafe_texts:
+            with self.subTest(unsafe_text=unsafe_text):
+                answer = programmatic_answer(
+                    unsafe_text,
+                    answer_mode="out_of_scope",
+                )
+                verification = verify_answer(
+                    answer,
+                    [],
+                    expected_answer_mode="out_of_scope",
+                    disclaimer=LEGAL_DISCLAIMER,
+                )
 
-        self.assertTrue(verification.refusal_present)
-        self.assertFalse(verification.refusal_correct)
-        self.assertFalse(verification.response_mode_valid)
-        self.assertFalse(verification.passed)
+                self.assertTrue(verification.refusal_present)
+                self.assertFalse(verification.refusal_correct)
+                self.assertFalse(verification.response_mode_valid)
+                self.assertFalse(verification.passed)
 
     def test_refusal_phrase_with_actionable_claim_is_not_correct_refusal(self) -> None:
         answer = StructuredAnswer(
