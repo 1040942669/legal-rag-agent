@@ -4,7 +4,9 @@
 
 这份文档记录本项目在开发过程中做过的关键架构取舍、被数据推翻的想法、实验设计和可复述的工程结论。以后每次新增优化模块、删除模块、修改默认策略或发现失败模式，都要同步更新这里。
 
-其中第 01-07 条保留项目早期基线形成时的数据与判断，第 08-12 条记录 2026-06 的 203 部法律 / 19,050 chunks 实验快照。不同阶段的规模数字用于说明演进过程，不应混为同一次实验。
+其中第 01-07 条保留项目早期基线形成时的数据与判断，第 08-12 条记录 2026-06 的 203 部法律 / 19,050 chunks 实验快照，第 13-16 条记录 2026-09 的 Phase 4B 工程决策。这里的 Phase 编号属于旧路线，与当前 M0-M7 不一一对应；后续 M 决策另行记录。不同阶段的规模数字用于说明演进过程，不应混为同一次实验。
+
+历史记录中“证据支持”或 verifier 通过应按当时启发式口径理解：引用编号存在、免责声明和有限词面规则不等于语义蕴含或法律正确性。当前改造主线在 M0 先公开这一限制，后续 M1 再拆分结构、行为与语义状态。
 
 每条记录尽量保持这个结构:
 
@@ -441,8 +443,97 @@ A/B 测出来 adaptive 整体是负的，我没有藏这个结果。它说明查
 - 上述检索结果来自 2026-06 的本地增强语料快照（203 部法律、19,050 article chunks），不是任意未来语料上的稳定常数。
 - v3 检索集有 108 条目标样例；30 条生成子集乘 4 个 backend 形成 120 条 model-case 记录，不能写成 120 个独立生成问题。
 - DeepSeek-V3 同时作为 judge 和被评模型之一，该行存在 self-preference 风险；规则 verifier 和人工抽查仍是必要对照。
-- 当前矩阵由固定 CLI 命令手工执行。Phase 4B 的自动 matrix runner、reranker、cache health 和统一成本聚合尚未实现。
+- Phase 4A 当时的矩阵由固定 CLI 命令手工执行；这一限制已由 Phase 4B 的 matrix runner、cache health、reranker adapter 和统一成本聚合解除，真实 reranker A/B 仍待运行。
 
 ### 决策
 
-在 Phase 4B 完成前，保留 `article + BM25` 作为无外部 API 的可复现 baseline；Qwen3 dense 只作为质量优先配置。Adaptive 继续默认关闭，只有新的分题型 A/B 能证明收益时才扩大触发范围。
+Phase 4B 平台完成后，仍保留 `article + BM25` 作为无外部 API 的可复现 baseline；Qwen3 dense 只作为质量优先配置。Adaptive 继续默认关闭，reranker 也必须通过新的同集 A/B 才能改变默认策略。
+
+## 13. Embedding cache 必须是可验证契约，不只是三个文件
+
+### 问题 / 触发点
+
+旧 cache 只保存向量、chunk IDs 和部分 metadata。即使文件能加载，也无法证明构建时是否使用 query/document prefix、是否拼接法律名和条号、chunk 文本是否在 ID 不变时被修改。Phase 4A 已证明这些文本构造变量能带来显著差异，因此“同模型名、同 chunk 数”不足以确认缓存身份。
+
+### 最终决策
+
+引入 embedding cache schema v2，并采用 fail-closed 校验:
+
+```text
+vector shape/dtype/finite values
+model/provider/normalize/prefix/embed_with_metadata
+ordered chunk IDs
+corpus SHA-256
+embedding contract SHA-256
+```
+
+`cache-health` 可以用 `--allow-legacy` 审计旧缓存，但 dense runtime 不静默接受缺少契约字段的缓存。当前本地旧 BGE cache 因缺少 prefix、metadata embedding 和 corpus fingerprint 被正确拒绝；CPU 重建预估超过 2 小时，留待 GPU 环境完成。
+
+### 可复述工程结论
+
+```text
+我把 embedding cache 当作模型产物契约，而不是一个 vectors.npy。模型名相同并不代表向量语义相同，query instruction、document prefix、metadata 拼接和语料内容都必须进入 identity。否则最危险的不是程序报错，而是系统悄悄使用错误向量并产出看似正常的分数。
+```
+
+## 14. 用 experiment harness 代替手工命令清单
+
+### 问题 / 触发点
+
+Phase 4A 虽然跑出了完整实验，但 chunk、retriever、embedding 和 adaptive 依赖多条手工命令。几个月后很难确认每一格参数是否一致，单格失败也容易让未完成结果与低质量结果混在一起。
+
+### 最终决策
+
+新增五维 matrix runner:
+
+```text
+chunk x retriever x embedding x adaptive x reranker
+```
+
+每格记录明确的 `ok/empty/failed` 状态，并输出 CSV、JSON 和 Markdown。质量指标之外，同步记录 retriever build time/peak memory、平均/P50/P95、rerank calls/documents/time、LLM calls、provider token usage 和显式单价下的估算成本。原始 prompt 和用户输入不进入额外遥测。
+
+自动 runner 在 120 条 v3 cases 上复现了 Phase 4A 结论: BM25 direct Hit@5 0.704、MRR 0.608；adaptive 为 0.667、0.578。同时 P95 从 316.1 ms 增至 1189.3 ms，为“adaptive 默认关闭”补上了尾延迟证据。
+
+### 可复述工程结论
+
+```text
+我没有把实验可复现性理解成 README 里放几条命令，而是把参数空间做成 harness。每一格都有配置 identity、失败状态、质量和成本字段，所以机制失败也会成为结果，而不是中断后消失。
+```
+
+## 15. 先接 BGE v2-m3，Qwen3 Reranker 单独评估
+
+### 问题 / 触发点
+
+2025 年后已有更强的 Qwen3 Reranker，是否应该直接替换 BGE。官方实现显示两者并非相同 adapter: BGE v2-m3 是标准 sequence-classification pair scorer；Qwen3 Reranker 使用 causal LM 的 yes/no token logits，并支持 instruction 和更长上下文。
+
+### 最终决策
+
+- 先用 `BAAI/bge-reranker-v2-m3` 建立标准 CrossEncoder protocol 和 top-N 到 top-K 测量链路。
+- 默认 `none`，模型 lazy load，避免 CLI help、BM25 baseline 或测试触发大模型下载。
+- Qwen3 0.6B/4B/8B 不塞进不匹配的 CrossEncoder 抽象；只有 BGE A/B 显示“候选已召回但排序不足”且 reranking 值得成本时，才实现独立 causal-LM adapter。
+- 当前只宣称 adapter 和 mock 回归完成，不宣称真实 reranker 已带来质量提升。
+
+### 回滚条件
+
+如果完整 v3 同集实验没有提升 Hit@5/MRR，或 P95/资源成本不可接受，保留协议但继续默认关闭，不为展示组件而扩大生产链路。
+
+## 16. 不升级为自由 ReAct、Reflection 或 multi-agent
+
+### 问题 / 触发点
+
+课程手册和最新 Agent 讨论提供了 ReAct、Plan-and-Execute、Reflection、multi-agent 与 contextual retrieval 等机制。项目已经具备 query planning 和 follow-up retrieval，容易继续堆叠“更像 Agent”的模块。
+
+### 后来发现
+
+- 当前规则 adaptive 已经在同集 A/B 中降低质量并抬高 P95，说明更多步骤会真实制造噪声和成本。
+- 法律场景需要可预测停止、证据边界和隐私控制；自由 loop 会扩大工具调用、上下文和难以复盘的状态面。
+- 法条 chunk 已包含法律名/条号，metadata embedding 已做消融；在没有上下文缺失型失败证据前，用 LLM 为全语料生成 contextual text 不划算。
+
+### 最终决策
+
+保留 deterministic harness、严格 JSON、有限计划数和最多一轮 follow-up。Reflection、长期用户记忆、自由工具选择、多智能体协作和 LLM contextualization 暂缓。重新评估必须满足同一个门槛: 指定失败类型、固定对照集、可回放 trace，以及质量收益高于延迟/token/隐私成本。
+
+### 可复述工程结论
+
+```text
+我把 Agent 设计的重点放在 harness 和停止条件，而不是让模型拥有更多自由。已有数据已经证明一次看似合理的 query rewrite 会让 Hit@5 下降并把 P95 放大到约 3.8 倍，所以新增 Agent 机制必须先回答它解决哪个失败类型，以及怎样回滚。
+```

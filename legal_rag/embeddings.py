@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import time
@@ -11,6 +12,8 @@ from .chunking import load_chunks
 from .env import load_dotenv
 from .manifest import new_run_id, summarize_path, write_artifact_manifest
 from .models import Chunk
+
+EMBEDDING_CACHE_SCHEMA_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -40,14 +43,59 @@ class EmbeddingCache:
     vectors: Any
 
 
+@dataclass(frozen=True)
+class CacheHealthIssue:
+    severity: str
+    code: str
+    message: str
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "severity": self.severity,
+            "code": self.code,
+            "message": self.message,
+        }
+
+
+@dataclass(frozen=True)
+class CacheHealthReport:
+    cache_dir: Path
+    issues: list[CacheHealthIssue]
+    metadata: dict[str, Any]
+
+    @property
+    def valid(self) -> bool:
+        return not any(issue.severity == "error" for issue in self.issues)
+
+    @property
+    def status(self) -> str:
+        if not self.valid:
+            return "invalid"
+        if self.issues:
+            return "warning"
+        return "healthy"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "cache_dir": str(self.cache_dir.resolve()),
+            "status": self.status,
+            "valid": self.valid,
+            "error_count": sum(issue.severity == "error" for issue in self.issues),
+            "warning_count": sum(issue.severity == "warning" for issue in self.issues),
+            "issues": [issue.to_dict() for issue in self.issues],
+            "metadata": self.metadata,
+        }
+
+
 class SentenceTransformerEncoder:
     def __init__(self, model_config: EmbeddingModelConfig, *, device: str = "auto") -> None:
         try:
             from sentence_transformers import SentenceTransformer  # type: ignore
         except ModuleNotFoundError as exc:
             raise RuntimeError(
-                "Embedding generation requires sentence-transformers. Run `uv sync` first, "
-                "or build embeddings on a GPU server with the same project code."
+                "Could not import sentence-transformers "
+                f"(missing module: {exc.name or 'unknown'}). Run `uv sync` and verify the "
+                "Torch/Transformers environment, or build embeddings on a GPU server."
             ) from exc
 
         kwargs: dict[str, Any] = {"trust_remote_code": model_config.trust_remote_code}
@@ -179,6 +227,7 @@ def build_embedding_cache(
     chunk_ids = [chunk.chunk_id for chunk in chunks]
     chunk_ids_path.write_text(json.dumps(chunk_ids, ensure_ascii=False, indent=2), encoding="utf-8")
     metadata = {
+        "schema_version": EMBEDDING_CACHE_SCHEMA_VERSION,
         "run_id": artifact_run_id,
         "embedding_key": model_config.key,
         "provider": model_config.provider,
@@ -187,17 +236,24 @@ def build_embedding_cache(
         "role": model_config.role,
         "chunk_strategy": chunk_strategy,
         "chunk_count": len(chunks),
+        "vector_count": int(matrix.shape[0]) if len(matrix.shape) == 2 else 0,
         "dimension": int(matrix.shape[1]) if len(matrix.shape) == 2 else 0,
+        "dtype": str(matrix.dtype),
+        "chunk_fingerprint": chunk_corpus_fingerprint(chunks),
+        "embedding_contract_fingerprint": embedding_contract_fingerprint(model_config),
         "vectors_path": str(vectors_path),
         "chunk_ids_path": str(chunk_ids_path),
         "chunks_path": str(chunks_path),
         "normalize": model_config.normalize,
+        "trust_remote_code": model_config.trust_remote_code,
+        "query_prefix": model_config.query_prefix,
+        "document_prefix": model_config.document_prefix,
         "embed_with_metadata": model_config.embed_with_metadata,
         "manifest_path": str(manifest_path),
         "build_seconds": round(time.perf_counter() - started, 3),
     }
     metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
-    manifest = write_artifact_manifest(
+    write_artifact_manifest(
         manifest_path,
         artifact_type="embedding_cache",
         run_id=artifact_run_id,
@@ -209,6 +265,11 @@ def build_embedding_cache(
             "provider": model_config.provider,
             "model_name": model_config.model_name,
             "normalize": model_config.normalize,
+            "trust_remote_code": model_config.trust_remote_code,
+            "query_prefix": model_config.query_prefix,
+            "document_prefix": model_config.document_prefix,
+            "embed_with_metadata": model_config.embed_with_metadata,
+            "embedding_contract_fingerprint": metadata["embedding_contract_fingerprint"],
             "batch_size": batch_size,
             "device": device,
         },
@@ -220,6 +281,7 @@ def build_embedding_cache(
         metrics={
             "chunk_count": len(chunks),
             "dimension": metadata["dimension"],
+            "chunk_fingerprint": metadata["chunk_fingerprint"],
             "build_seconds": metadata["build_seconds"],
         },
     )
@@ -252,7 +314,7 @@ def load_embedding_cache(cache_dir: str | Path) -> EmbeddingCache:
     root = Path(cache_dir)
     metadata = json.loads((root / "metadata.json").read_text(encoding="utf-8"))
     chunk_ids = json.loads((root / "chunk_ids.json").read_text(encoding="utf-8"))
-    vectors = np.load(root / "vectors.npy")
+    vectors = np.load(root / "vectors.npy", allow_pickle=False)
     return EmbeddingCache(cache_dir=root, metadata=metadata, chunk_ids=chunk_ids, vectors=vectors)
 
 
@@ -260,9 +322,249 @@ def embedding_cache_dir(output_root: str | Path, chunk_strategy: str, embedding_
     return Path(output_root) / chunk_strategy / embedding_key
 
 
-def validate_cache_matches_chunks(cache: EmbeddingCache, chunks: list[Chunk]) -> None:
-    chunk_ids = [chunk.chunk_id for chunk in chunks]
-    if cache.chunk_ids != chunk_ids:
-        raise ValueError(
-            "Embedding cache does not match the loaded chunks. Rebuild embeddings for this chunk strategy."
+def chunk_corpus_fingerprint(chunks: list[Chunk]) -> str:
+    """Hash the ordered, embedding-relevant chunk corpus."""
+    digest = hashlib.sha256()
+    for chunk in chunks:
+        payload = {
+            "chunk_id": chunk.chunk_id,
+            "text": chunk.text,
+            "law_names": chunk.law_names,
+            "article_numbers": chunk.article_numbers,
+            "strategy": chunk.strategy,
+            "metadata": chunk.metadata,
+        }
+        encoded = json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        digest.update(len(encoded).to_bytes(8, "big"))
+        digest.update(encoded)
+    return digest.hexdigest()
+
+
+def embedding_contract_fingerprint(model_config: EmbeddingModelConfig) -> str:
+    payload = {
+        "embedding_key": model_config.key,
+        "provider": model_config.provider,
+        "model_name": model_config.model_name,
+        "normalize": model_config.normalize,
+        "trust_remote_code": model_config.trust_remote_code,
+        "dimensions": model_config.dimensions,
+        "query_prefix": model_config.query_prefix,
+        "document_prefix": model_config.document_prefix,
+        "embed_with_metadata": model_config.embed_with_metadata,
+    }
+    encoded = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def inspect_embedding_cache(
+    cache_dir: str | Path,
+    *,
+    chunks: list[Chunk] | None = None,
+    model_config: EmbeddingModelConfig | None = None,
+    expected_chunk_strategy: str | None = None,
+    strict_contract: bool = True,
+) -> CacheHealthReport:
+    root = Path(cache_dir)
+    issues: list[CacheHealthIssue] = []
+    required = ("metadata.json", "chunk_ids.json", "vectors.npy")
+    for filename in required:
+        if not (root / filename).is_file():
+            issues.append(
+                CacheHealthIssue("error", "missing_file", f"Missing required cache file: {filename}")
+            )
+    if issues:
+        return CacheHealthReport(cache_dir=root, issues=issues, metadata={})
+
+    try:
+        cache = load_embedding_cache(root)
+    except Exception as exc:  # noqa: BLE001 - corruption type depends on JSON/NumPy/filesystem.
+        issues.append(CacheHealthIssue("error", "cache_unreadable", str(exc)))
+        return CacheHealthReport(cache_dir=root, issues=issues, metadata={})
+
+    issues.extend(
+        embedding_cache_issues(
+            cache,
+            chunks=chunks,
+            model_config=model_config,
+            expected_chunk_strategy=expected_chunk_strategy,
+            strict_contract=strict_contract,
         )
+    )
+    return CacheHealthReport(cache_dir=root, issues=issues, metadata=cache.metadata)
+
+
+def embedding_cache_issues(
+    cache: EmbeddingCache,
+    *,
+    chunks: list[Chunk] | None = None,
+    model_config: EmbeddingModelConfig | None = None,
+    expected_chunk_strategy: str | None = None,
+    strict_contract: bool = True,
+) -> list[CacheHealthIssue]:
+    issues: list[CacheHealthIssue] = []
+    metadata = cache.metadata
+    vectors = cache.vectors
+    schema_version = metadata.get("schema_version")
+    if schema_version != EMBEDDING_CACHE_SCHEMA_VERSION:
+        severity = "error" if strict_contract else "warning"
+        issues.append(
+            CacheHealthIssue(
+                severity,
+                "schema_version",
+                f"Expected cache schema {EMBEDDING_CACHE_SCHEMA_VERSION}, got {schema_version!r}. Rebuild the cache.",
+            )
+        )
+
+    shape = getattr(vectors, "shape", ())
+    if len(shape) != 2:
+        issues.append(CacheHealthIssue("error", "vector_shape", f"Expected a 2D vector matrix, got {shape!r}."))
+    else:
+        rows, dimension = int(shape[0]), int(shape[1])
+        if rows != len(cache.chunk_ids):
+            issues.append(
+                CacheHealthIssue(
+                    "error",
+                    "vector_id_count",
+                    f"Vector rows ({rows}) do not match chunk IDs ({len(cache.chunk_ids)}).",
+                )
+            )
+        for key, actual in (("chunk_count", len(cache.chunk_ids)), ("vector_count", rows), ("dimension", dimension)):
+            recorded = metadata.get(key)
+            if recorded is not None and recorded != actual:
+                issues.append(
+                    CacheHealthIssue(
+                        "error",
+                        f"metadata_{key}",
+                        f"metadata.{key}={recorded!r}, actual={actual!r}.",
+                    )
+                )
+        recorded_dtype = metadata.get("dtype")
+        actual_dtype = str(getattr(vectors, "dtype", "unknown"))
+        if recorded_dtype is not None and recorded_dtype != actual_dtype:
+            issues.append(
+                CacheHealthIssue(
+                    "error",
+                    "metadata_dtype",
+                    f"metadata.dtype={recorded_dtype!r}, actual={actual_dtype!r}.",
+                )
+            )
+        try:
+            import numpy as np  # type: ignore
+
+            if not bool(np.isfinite(vectors).all()):
+                issues.append(CacheHealthIssue("error", "non_finite_vectors", "Vector matrix contains NaN or infinity."))
+            elif metadata.get("normalize") and rows:
+                norms = np.linalg.norm(vectors, axis=1)
+                max_deviation = float(np.max(np.abs(norms - 1.0)))
+                if max_deviation > 0.02:
+                    issues.append(
+                        CacheHealthIssue(
+                            "warning",
+                            "normalization_drift",
+                            f"Normalized cache has max L2 norm deviation {max_deviation:.4f}.",
+                        )
+                    )
+        except (TypeError, ValueError):
+            issues.append(CacheHealthIssue("error", "vector_validation", "Vector matrix could not be validated numerically."))
+
+    if expected_chunk_strategy and metadata.get("chunk_strategy") != expected_chunk_strategy:
+        issues.append(
+            CacheHealthIssue(
+                "error",
+                "chunk_strategy",
+                f"Expected chunk strategy {expected_chunk_strategy!r}, got {metadata.get('chunk_strategy')!r}.",
+            )
+        )
+
+    if chunks is not None:
+        expected_ids = [chunk.chunk_id for chunk in chunks]
+        if cache.chunk_ids != expected_ids:
+            issues.append(
+                CacheHealthIssue(
+                    "error",
+                    "chunk_ids",
+                    "Cached chunk IDs or ordering do not match the loaded index.",
+                )
+            )
+        expected_fingerprint = chunk_corpus_fingerprint(chunks)
+        recorded_fingerprint = metadata.get("chunk_fingerprint")
+        if recorded_fingerprint is None:
+            severity = "error" if strict_contract else "warning"
+            issues.append(
+                CacheHealthIssue(
+                    severity,
+                    "chunk_fingerprint_missing",
+                    "Cache has no corpus fingerprint. Rebuild it to detect stale chunk text.",
+                )
+            )
+        elif recorded_fingerprint != expected_fingerprint:
+            issues.append(
+                CacheHealthIssue(
+                    "error",
+                    "chunk_fingerprint",
+                    "Cached corpus fingerprint does not match the loaded index.",
+                )
+            )
+
+    if model_config is not None:
+        expected_contract = {
+            "embedding_key": model_config.key,
+            "provider": model_config.provider,
+            "model_name": model_config.model_name,
+            "normalize": model_config.normalize,
+            "trust_remote_code": model_config.trust_remote_code,
+            "query_prefix": model_config.query_prefix,
+            "document_prefix": model_config.document_prefix,
+            "embed_with_metadata": model_config.embed_with_metadata,
+            "embedding_contract_fingerprint": embedding_contract_fingerprint(model_config),
+        }
+        if model_config.dimensions is not None:
+            expected_contract["dimension"] = model_config.dimensions
+        for key, expected in expected_contract.items():
+            if key not in metadata:
+                severity = "error" if strict_contract else "warning"
+                issues.append(
+                    CacheHealthIssue(
+                        severity,
+                        "contract_field_missing",
+                        f"Cache contract field {key!r} is missing. Rebuild the cache.",
+                    )
+                )
+            elif metadata[key] != expected:
+                issues.append(
+                    CacheHealthIssue(
+                        "error",
+                        "contract_mismatch",
+                        f"Cache contract {key!r} is {metadata[key]!r}; expected {expected!r}.",
+                    )
+                )
+    return issues
+
+
+def validate_cache_matches_chunks(
+    cache: EmbeddingCache,
+    chunks: list[Chunk],
+    *,
+    model_config: EmbeddingModelConfig | None = None,
+) -> None:
+    issues = embedding_cache_issues(
+        cache,
+        chunks=chunks,
+        model_config=model_config,
+        expected_chunk_strategy=chunks[0].strategy if chunks else None,
+        strict_contract=True,
+    )
+    errors = [issue for issue in issues if issue.severity == "error"]
+    if errors:
+        details = "; ".join(f"{issue.code}: {issue.message}" for issue in errors[:6])
+        raise ValueError(f"Embedding cache contract validation failed. {details}")

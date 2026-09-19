@@ -14,6 +14,7 @@ from .chat import LegalChatAssistant
 from .evidence import check_evidence_sufficiency
 from .failure_analysis import label_retrieval_failure
 from .judge import judge_answer
+from .llm import usage_delta, usage_snapshot
 from .models import EvalCase, EvalRecord, SearchResult
 from .query import analyze_query
 from .query_understanding import CompletionClient
@@ -63,6 +64,10 @@ def evaluate(
 ) -> list[EvalRecord]:
     records: list[EvalRecord] = []
     for case in cases:
+        assistant_client = getattr(assistant, "llm", None)
+        assistant_usage_before = usage_snapshot(assistant_client)
+        normalizer_usage_before = usage_snapshot(adaptive_llm_client)
+        judge_usage_before = usage_snapshot(judge_client)
         if assistant is not None:
             # Each case must be answered in isolation; otherwise conversation
             # memory leaks across cases and contaminates model comparisons.
@@ -131,6 +136,13 @@ def evaluate(
             )
         judge_succeeded = judge_result is not None and judge_result.source != "error"
         answer_metrics_available = generate and not error
+        assistant_usage = usage_delta(assistant_usage_before, usage_snapshot(assistant_client))
+        normalizer_usage = usage_delta(
+            normalizer_usage_before,
+            usage_snapshot(adaptive_llm_client),
+        )
+        judge_usage = usage_delta(judge_usage_before, usage_snapshot(judge_client))
+        usage_parts = (assistant_usage, normalizer_usage, judge_usage)
         if trace_writer:
             trace_writer.write(
                 build_retrieval_trace_record(
@@ -179,6 +191,15 @@ def evaluate(
                 judge_pass=int(judge_result.passed) if judge_succeeded else -1,
                 judge_comment=judge_result.comment if judge_succeeded else "",
                 judge_error=judge_result.error if judge_result and not judge_succeeded else "",
+                assistant_llm_calls=int(assistant_usage["calls"]),
+                normalizer_llm_calls=int(normalizer_usage["calls"]),
+                judge_llm_calls=int(judge_usage["calls"]),
+                llm_failed_calls=sum(int(item["failed_calls"]) for item in usage_parts),
+                input_tokens=sum(int(item["input_tokens"]) for item in usage_parts),
+                output_tokens=sum(int(item["output_tokens"]) for item in usage_parts),
+                total_tokens=sum(int(item["total_tokens"]) for item in usage_parts),
+                token_usage_calls=sum(int(item["token_usage_calls"]) for item in usage_parts),
+                llm_latency_ms=round(sum(float(item["latency_ms"]) for item in usage_parts), 3),
             )
         )
     return records
@@ -295,6 +316,21 @@ def available_mean(records: list[EvalRecord], field_name: str) -> float | None:
     return sum(available) / len(available)
 
 
+def percentile(values: list[float], quantile: float) -> float:
+    if not values:
+        return 0.0
+    if not 0.0 <= quantile <= 1.0:
+        raise ValueError("quantile must be between 0 and 1")
+    ordered = sorted(values)
+    if len(ordered) == 1:
+        return float(ordered[0])
+    position = (len(ordered) - 1) * quantile
+    lower = int(position)
+    upper = min(lower + 1, len(ordered) - 1)
+    fraction = position - lower
+    return float(ordered[lower] + (ordered[upper] - ordered[lower]) * fraction)
+
+
 def render_eval_report(records: list[EvalRecord], *, metadata: dict[str, Any] | None = None) -> str:
     if not records:
         return "# 评估报告\n\n没有评估记录。\n"
@@ -303,6 +339,7 @@ def render_eval_report(records: list[EvalRecord], *, metadata: dict[str, Any] | 
     avg_mrr = sum(record.mrr for record in records) / len(records)
     avg_target_coverage = sum(record.target_coverage for record in records) / len(records)
     avg_latency = sum(record.latency_ms for record in records) / len(records)
+    latency_values = [float(record.latency_ms) for record in records]
     avg_keyword = sum(record.keyword_coverage for record in records) / len(records)
     avg_sufficiency = sum(record.sufficiency_pass for record in records) / len(records)
     avg_citation_valid = available_mean(records, "citation_valid")
@@ -335,7 +372,42 @@ def render_eval_report(records: list[EvalRecord], *, metadata: dict[str, Any] | 
         f"- Verifier pass: {avg_verifier:.3f}" if avg_verifier is not None else "- Verifier pass: N/A (retrieval-only)",
         f"- Refusal correctness: {avg_refusal:.3f}" if avg_refusal is not None else "- Refusal correctness: N/A (retrieval-only)",
         f"- 平均延迟: {avg_latency:.1f} ms",
+        f"- P50 延迟: {percentile(latency_values, 0.50):.1f} ms",
+        f"- P95 延迟: {percentile(latency_values, 0.95):.1f} ms",
     ])
+    assistant_calls = sum(record.assistant_llm_calls for record in records)
+    normalizer_calls = sum(record.normalizer_llm_calls for record in records)
+    judge_calls = sum(record.judge_llm_calls for record in records)
+    total_llm_calls = assistant_calls + normalizer_calls + judge_calls
+    token_usage_calls = sum(record.token_usage_calls for record in records)
+    if total_llm_calls:
+        input_tokens = sum(record.input_tokens for record in records)
+        output_tokens = sum(record.output_tokens for record in records)
+        total_tokens = sum(record.total_tokens for record in records)
+        lines.extend([
+            "",
+            "## 调用与成本观测",
+            f"- LLM calls: assistant={assistant_calls}, normalizer={normalizer_calls}, judge={judge_calls}",
+            f"- LLM failed calls: {sum(record.llm_failed_calls for record in records)}",
+            f"- LLM provider latency: {sum(record.llm_latency_ms for record in records):.1f} ms",
+        ])
+        if token_usage_calls:
+            lines.append(
+                f"- Tokens: input={input_tokens}, output={output_tokens}, total={total_tokens} "
+                f"(usage available for {token_usage_calls}/{total_llm_calls} calls)"
+            )
+            input_rate = (metadata or {}).get("input_cost_per_million")
+            output_rate = (metadata or {}).get("output_cost_per_million")
+            if input_rate is not None or output_rate is not None:
+                estimated_cost = (
+                    input_tokens * float(input_rate or 0.0)
+                    + output_tokens * float(output_rate or 0.0)
+                ) / 1_000_000
+                lines.append(
+                    f"- Estimated model cost (user-supplied blended rates): ${estimated_cost:.6f}"
+                )
+        else:
+            lines.append("- Tokens: N/A (provider did not expose usage metadata)")
     scored = scored_records(records)
     if scored:
         scored_hit3 = [float(record.hit_at_3) for record in scored]
@@ -469,6 +541,12 @@ def report_metadata_items(metadata: dict[str, Any]) -> list[tuple[str, str]]:
         ("index_size_mb", "索引体积 (MB)"),
         ("retriever_build_seconds", "检索器构建耗时 (s)"),
         ("retriever_build_peak_mb", "检索器构建峰值内存 (MB)"),
+        ("reranker", "Reranker"),
+        ("rerank_candidate_top_n", "Rerank candidate top N"),
+        ("rerank_calls", "Rerank calls"),
+        ("rerank_failed_calls", "Rerank failed calls"),
+        ("rerank_documents", "Reranked documents"),
+        ("rerank_total_ms", "Rerank total latency (ms)"),
         ("judge_model", "Judge 模型"),
         ("adaptive_enabled", "Adaptive enabled"),
         ("adaptive_use_llm", "Adaptive LLM normalizer"),

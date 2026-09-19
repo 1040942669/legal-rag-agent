@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "record_kind": "template_not_a_release_receipt",
+  "milestone_id": null,
+  "version": null,
+  "repository": "1040942669/legal-rag-agent",
+  "branch": null,
+  "pr_url": null,
+  "release_target_sha": null,
+  "tag_name": null,
+  "remote_tag_target_sha": null,
+  "ci_url": null,
+  "ci_verified_for_target_sha": false,
+  "release_url": null,
+  "release_is_draft": null,
+  "published_at": null,
+  "verified_at": null,
+  "verification_method": null,
+  "acceptance_report": null,
+  "known_limitations": [],
+  "receipt_status": "not_started",
+  "note": "填写真实远程结果后修改record_kind；发布后另作文档回执提交，不移动软件Tag。"
+}

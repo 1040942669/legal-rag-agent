@@ -1,16 +1,22 @@
 # 现行中国法律 RAG 架构升级执行计划
 
-## 当前执行状态
+> 这是截至 2026-09-18 的历史 Phase 0-5 路线与实施记录，不再作为当前发布主线。
+> 当前增量改造合同为 `docs/refactor/MASTER_PLAN.md`，执行事实以
+> `docs/refactor/STATE.json` 和 `docs/refactor/HANDOFF.md` 为准。历史 Phase 完成状态
+> 不等于新主线中的 M0-M7 已完成。
 
-截至 2026-09-18，本项目已经完成 Phase 0-3，以及 Phase 4 的评测硬化子阶段（下称 Phase 4A）:
+## 历史实施状态，截至 2026-09-18
+
+截至 2026-09-18，本项目已经完成 Phase 0-3、Phase 4A 评测硬化，以及 Phase 4B 的实验平台工程实现:
 
 - Phase 0: baseline/reproducibility 基础，包括 baseline 命令、manifest、v2 eval 默认路径、run metadata 和最小回归测试入口。
 - Phase 1: retrieval reliability and failure attribution，包括 sliding neighbor chunk、chunk diagnostics、规则 Query Analyzer、BM25 参数配置化、RRF trace、failure labeler 和检索 trace JSONL。
 - Phase 2: controlled query understanding and multi-query planning，包括 `NormalizedQuery` JSON contract、触发式 adaptive lane、Ollama normalizer adapter with fallback、候选法律/关键词 suggester、bounded retrieval planner、multi-query evidence merge、adaptive trace 和 adaptive eval cases。
 - Phase 3: evidence sufficiency、bounded follow-up retrieval 和 answer verifier，包括生成前风险拒答、证据充分性检查、最多一轮补检索、低置信降级模板、引用/免责声明/verifier 校验、answer eval 指标扩展和 Phase 3 回归测试。
 - Phase 4A: evaluation hardening and manual experiment matrix，包括 120 条 v3 固定评测集、30 条生成子集、bootstrap 95% CI、case 间 memory reset、LLM-as-judge、废止法律降权、保守去重、metadata embedding 消融、LlamaIndex 对照和结果总结。
+- Phase 4B: reproducible experiment platform，包括 reranker protocol/BGE adapter、embedding cache v2 contract、cache health、五维 experiment matrix、P50/P95、build memory、调用/token/可选成本聚合和最新机制决策文档。
 
-当前全量单元测试为 `57 passed`。Phase 4A 的历史实验结论保存在 `reports/RESULTS_SUMMARY.md`；报告反映 2026-06 的本地增强语料和当时模型版本，精确数值不是跨时间稳定承诺。
+截至 2026-09-18，该旧路线当时记录的全量单元测试为 `70 passed`。Phase 4A 的历史实验结论保存在 `reports/RESULTS_SUMMARY.md`；报告反映 2026-06 的本地增强语料和当时模型版本，精确数值不是跨时间稳定承诺。Phase 4B 自动矩阵已在同一 v3 cases 上复现 BM25 direct/adaptive 的质量结论。
 
 Phase 1 验证命令:
 
@@ -41,7 +47,15 @@ python -B -m pytest
 python -m legal_rag.cli evaluate --chunk-strategy article --retriever bm25 --cases eval_cases/legal_eval_cases_v3.jsonl --prefix v3_article_bm25
 ```
 
-下一阶段不是继续堆叠 Agent 能力，而是完成 Phase 4B: reranker protocol、embedding cache health check、自动 experiment matrix runner 和统一成本/延迟观测。当前手工实验已经能支持技术判断，但尚不能替代可重复执行的矩阵工具。
+Phase 4B 验证命令:
+
+```powershell
+uv run pytest -q
+uv run python -m legal_rag.cli cache-health --chunk-strategy article --embedding bge_large_zh
+uv run python -m legal_rag.cli experiment-matrix --chunk-strategies article --retrievers bm25 --adaptive-modes direct,adaptive --rerankers none --cases eval_cases/legal_eval_cases_v3.jsonl
+```
+
+旧路线当时建议的后续工作是用自动矩阵完成真实 reranker A/B、在 GPU 环境重建 v2 embedding cache，并进入 Phase 5 的 LawBench 与最终报告硬化。这些遗留项不构成当前 M0-M7 主线的 next action。Reranker 只有在质量提升且 P95 可接受时才可能改变默认策略。
 
 ## 1. 项目目标
 
@@ -54,7 +68,7 @@ python -m legal_rag.cli evaluate --chunk-strategy article --retriever bm25 --cas
 3. 然后加入受控 query understanding、law router、multi-query retrieval。
 4. 最后增加 evidence sufficiency、bounded retrieval loop、answer verifier、reranker 和 benchmark 报告能力。
 
-## 2. 当前战略评估
+## 2. 制定旧 Phase 计划时的基线评估
 
 ### 已经做得好的部分
 
@@ -75,7 +89,7 @@ python -m legal_rag.cli evaluate --chunk-strategy article --retriever bm25 --cas
 | 查询理解过弱 | 真实用户的长描述、情绪化表达、多意图请求会稀释检索 query。 | Phase 2 加触发式 LLM normalizer 和 deterministic fallback。 |
 | 多 query 证据合并缺失 | 多法律领域问题容易只命中一部分证据。 | Phase 2 加 law router、bounded planner、merge trace。 |
 | 证据充分性与引用校验缺失 | 资料不足时仍可能生成过度结论或虚假引用。 | Phase 3 加 sufficiency checker、bounded follow-up、answer verifier。 |
-| 实验矩阵仍靠手工命令，成本观测不统一 | 已有 embedding/adaptive 历史对比，但难以一键复跑，reranker 也尚未纳入。 | Phase 4B 加 matrix runner、cache health、reranker 和 latency/cost profiler。 |
+| Reranker 真实模型 A/B 尚未完成 | protocol、BGE adapter 和矩阵已完成，但 2.29 GB 模型尚未在完整 v3 集合验证收益与 P95。 | 在资源合适的机器运行 `none,bge_v2_m3` 同集矩阵；无收益则继续默认关闭。 |
 | LawBench 解释不足 | 容易把所有 benchmark 分数误归因于检索。 | Phase 5 加 task map、score importer 和文档硬化。 |
 
 ### 应该暂缓的部分
@@ -120,7 +134,7 @@ flowchart TD
 | Retrieval Merge | 执行多 query 检索、按 `chunk_id` 去重、保留子排名与来源 query。 | `legal_rag/retrieval.py` |
 | Evidence Checker | 判断证据覆盖是否足够，区分缺事实、缺法律依据、低分/低覆盖。 | `legal_rag/evidence.py` |
 | Bounded Loop | 最多一轮 follow-up retrieval，记录停止原因。 | `legal_rag/adaptive.py` 或 `legal_rag/chat.py` |
-| Answer Verifier | 校验 `[Sx]` 引用存在、关键结论有证据支撑、拒答边界正确。 | `legal_rag/verifier.py` |
+| Answer Verifier | 校验 `[Sx]` 引用存在、有限词面启发式和拒答边界；不证明语义支持或法律正确性。 | `legal_rag/verifier.py` |
 | Trace / Reports | 记录 analyzer、planner、retrieval、checker、verifier 的结构化 JSONL。 | `legal_rag/tracing.py`、`legal_rag/evaluation.py` |
 
 ## 4. 设计原则
@@ -205,16 +219,16 @@ flowchart TD
 
 退出标准：产出 BM25、dense、RRF、RRF+rerank、direct/adaptive 的分组对比和默认策略说明。
 
-当前状态：**部分完成**。Phase 4A 已补齐评测集、置信区间、judge 和一轮手工实验矩阵，并确认 adaptive 当前整体负收益、Qwen3 dense 在该快照上质量最高。下表原定的 P4-01 至 P4-05 尚未完整实现；P4-06 只有手工结果总结，需在自动矩阵完成后重新生成。这里保留原任务编号，避免把实验已经跑过误写成工程自动化已经完成。
+当前状态：**平台工程已完成，真实 reranker 决策待实验**。Phase 4A 已补齐评测集、置信区间、judge 和手工矩阵；Phase 4B 已完成 P4-01 至 P4-05，并用自动 runner 复现 BM25 direct/adaptive 结论。P4-06 已更新默认策略和证据边界，但 `bge_v2_m3` 尚未完成真实 120-case A/B，所以 Phase 4 总退出标准仍保留这一项。
 
 | ID | 目标 | 范围/可能触达文件 | 预期产出 | 验收标准 | 非目标 | 建议测试/验证 |
 | --- | --- | --- | --- | --- | --- | --- |
-| P4-01 | 定义 Reranker protocol | 新增 `legal_rag/rerank.py`，`legal_rag/retrieval.py`，`legal_rag/cli.py` | `Reranker` 接口和 `NoOpReranker`，CLI 支持 `--reranker none` | 默认 none 不改变结果；接口可组合到 RRF 后 | 不下载模型 | 单测 no-op rerank 顺序不变 |
-| P4-02 | 接入 BGE reranker adapter | `legal_rag/rerank.py`，`configs/default.yaml`，`requirements` 如需要 | `bge-reranker-base/large` adapter，支持 `top_n -> top_k` | 依赖缺失时错误清晰；有模型时可运行 | 不把 reranker 设为默认 | mock adapter；可选本地 smoke |
-| P4-03 | Embedding cache health check | `legal_rag/embeddings.py`，`legal_rag/manifest.py` | 校验维度、normalize、chunk id、model key、provider、chunk count | cache 不匹配时报可操作错误 | 不自动重建 cache | 单测维度/模型 key/chunk id 不匹配 |
-| P4-04 | Experiment matrix runner | `legal_rag/cli.py`，新增 `legal_rag/experiments.py` | 一条命令跑 chunk x retriever x embedding x adaptive x reranker 的矩阵，输出 `summary.csv` | retrieval-only matrix 可运行并按 group 汇总 | 先不跑生成评测，不做并发调度优化 | 小矩阵 smoke；检查 CSV columns |
-| P4-05 | Cost latency profiler | `legal_rag/tracing.py`，`legal_rag/evaluation.py`，`legal_rag/experiments.py` | 记录 build time、query latency p50/p95、LLM 调用次数、rerank 次数、估算成本 | 报告能同时展示质量与成本 | 不做线上监控和真实账单对接 | 单测聚合函数；matrix report 检查 |
-| P4-06 | 默认策略决策报告 | `docs/`，`reports/`，可能 `README.md` | 根据实验矩阵写出推荐默认链路和不启用项 | 有指标、成本和失败案例支持，不靠主观描述 | 不夸大法律能力 | 人工 review 报告；对照 summary.csv |
+| P4-01 | 定义 Reranker protocol | `legal_rag/rerank.py`，`legal_rag/cli.py` | `Reranker` 接口、wrapper 和 `--reranker none` bypass | 已完成；默认 none 不改变 baseline，base trace 被保留 | 不下载模型 | fake reranker 顺序/trace/stats 单测 |
+| P4-02 | 接入 BGE reranker adapter | `legal_rag/rerank.py`，`configs/default.yaml` | lazy `BAAI/bge-reranker-v2-m3` CrossEncoder，支持 `top_n -> top_k` | adapter 已完成；真实完整 A/B 待资源环境 | 不把 reranker 设为默认 | mock contract 已完成；可选本地/GPU benchmark |
+| P4-03 | Embedding cache health check | `legal_rag/embeddings.py`，`legal_rag/cli.py` | schema v2、模型契约、向量结构、chunk/corpus fingerprint 校验 | 已完成；旧 cache runtime fail-closed，CLI 给出重建原因 | 不自动伪造或重建 cache | healthy/drift/legacy 单测，真实旧 cache 诊断 |
+| P4-04 | Experiment matrix runner | `legal_rag/cli.py`，`legal_rag/experiments.py` | chunk x retriever x embedding x adaptive x reranker，输出 CSV/JSON/Markdown | 已完成；120-case direct/adaptive 两格实跑成功 | 先不跑生成矩阵，不做并发调度优化 | matrix 去重/输出单测与真实 v3 run |
+| P4-05 | Cost latency profiler | `legal_rag/llm.py`，`legal_rag/evaluation.py`，`legal_rag/experiments.py` | build、平均/P50/P95、LLM/rerank calls、token、可选估算成本 | 已完成；provider 无 usage 时显示 N/A | 不做线上监控和真实账单对接 | usage shape/delta、聚合和报告测试 |
+| P4-06 | 默认策略决策报告 | `docs/`，`reports/`，`README.md` | 根据矩阵写出推荐默认链路和不启用项 | direct/BM25 结论已自动复现；reranker 晋升决策待真实 A/B | 不夸大法律能力 | 对照 matrix JSON 与结果摘要人工 review |
 
 ### Phase 5: LawBench, Reporting, and Documentation Hardening
 
@@ -305,7 +319,7 @@ P4-04 -> P4-05 -> P4-06 -> P5-03 -> P5-04
 | LawBench 分数被误读 | 项目展示时夸大 RAG 对纯推理任务的作用。 | task map 区分检索增强型、法律理解型、纯模型能力型，报告分开展示。 |
 | 文档和代码漂移 | 执行计划失去指导意义。 | 每个阶段结束更新 ADL 和本文件验收状态，报告链接到具体 run_id。 |
 
-## 8. 推荐第一批启动任务
+## 8. 旧路线最初启动顺序，仅供追溯
 
 第一批只启动 Phase 0 和少量 Phase 1 任务，目标是建立稳定地面基线和失败解释能力。
 
@@ -330,5 +344,5 @@ P4-04 -> P4-05 -> P4-06 -> P5-03 -> P5-04
 | Phase 1 | 失败样例有 label，RRF 有 trace，chunk 有诊断。 | eval report 的失败归因统计和 trace JSONL。 |
 | Phase 2 | 复杂输入触发 adaptive，清晰输入不触发；multi-query evidence 可追踪。 | adaptive cases direct vs adaptive 对比报告。 |
 | Phase 3 | 已完成。证据不足、虚假引用、越界请求能被降级或拒答，trace/report 包含 sufficiency/verifier 字段。 | `python -B -m pytest`；`evaluate --adaptive --trace-path ...` 检查 evidence/verifier JSONL。 |
-| Phase 4 | 部分完成。Phase 4A 已有固定评测、CI、judge 和手工对比；Phase 4B 的 reranker、cache health、自动 matrix/cost 聚合待开发。 | 当前证据为 `reports/RESULTS_SUMMARY.md`；最终验收仍需自动 experiment matrix `summary.csv`。 |
+| Phase 4 | 平台工程完成，模型决策部分完成。固定评测、judge、reranker adapter、cache health、自动 matrix/cost 聚合均已落地；当时尚无仓库 CI，真实 BGE reranker A/B 也尚未完成。 | 历史记录为 `70 passed`；Phase 4B BM25 matrix CSV/JSON/Markdown；`reports/RESULTS_SUMMARY.md`；最终退出仍需 reranker 同集报告。 |
 | Phase 5 | README、ADL、LawBench 报告能解释项目闭环。 | quickstart smoke、LawBench importer 小样例、最终验收清单。 |

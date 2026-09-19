@@ -1,5 +1,7 @@
 # Legal RAG Evaluation Plan
 
+> 本文中的 Phase 编号描述评测能力的历史来源；当前 M0-M7 改造状态以 `docs/refactor/MASTER_PLAN.md`、`STATE.json` 和 `HANDOFF.md` 为准。
+
 ## 当前问题
 
 早期 `eval_cases/legal_eval_cases.jsonl` 只有 10 条手写样例，主要用于 smoke test。Phase 4A 已新增 `legal_eval_cases_v3.jsonl`（120 条，其中 108 条有检索目标、12 条拒答）和 30 条生成子集。v1/v2 继续保留用于兼容和快速回归，但实验结论应明确写出使用的 case 版本。
@@ -9,7 +11,7 @@
 评估分成两层:
 
 1. Retrieval evaluation: 检索器能否把正确法律和条文排进 top-k。
-2. Answer evaluation: LLM 是否基于检索证据回答、引用是否真实、是否拒绝越界请求。
+2. Answer evaluation: LLM 是否基于检索证据回答、引用编号是否属于本次检索结果、是否按旧规则拒绝越界请求。
 
 当前优先做 retrieval evaluation，因为生成质量会被检索质量强烈影响。
 
@@ -42,7 +44,8 @@ Retrieval:
 - Citation hit: top-k 中是否有可引用的目标条文。
 - Group metrics: 按 case type 分组统计。
 - Bootstrap 95% CI: 对有检索目标的 Hit@3、Hit@5 和 MRR 做固定随机种子的 percentile bootstrap；拒答样例不混入检索均值。
-- Latency: 单次检索平均耗时。
+- Latency: 同时报告平均值、P50 和 P95；跨机器只比较质量，延迟应在同次运行内横向比较。
+- Runtime/Cost: retriever build time/peak memory、rerank calls/documents/time、assistant/normalizer/judge calls、provider token usage，以及显式给定单价时的估算成本。
 - Failure label: 对未命中样例标注 `wrong_law`、`wrong_article`、`metadata_gap`、`low_rank`、`miss` 或 `not_applicable`。
 - Ranking trace: BM25 记录 metadata boost，RRF 记录 BM25/dense 子排名、子分数和 fused score。
 - Adaptive trace: 记录是否触发 adaptive、normalizer 输出、retrieval plans、merge 去重数量和每条证据的来源 query。
@@ -51,13 +54,17 @@ Answer:
 
 - Keyword coverage: 答案是否覆盖关键事实。
 - Evidence sufficiency pass: 生成前证据是否覆盖必要法律/条文提示，资料不足时是否进入降级路径。
-- Citation validity: `[Sx]` 引用编号是否真实存在于当前检索结果。
-- Verifier pass: 规则 verifier 是否同时通过引用、免责声明、越界拒答和基础证据支撑检查。
-- Refusal correctness: 越界问题是否拒答，包括个案策略、违法帮助、非法律问题、医疗/金融越界建议。
+- Citation validity: `[Sx]` 引用编号是否属于本次检索结果；不判断该来源是否语义支持相邻 claim。
+- Verifier pass: 规则 verifier 是否同时通过引用编号、免责声明、越界拒答和基础词面检查。它不等于语义支持或法律正确性。
+- Refusal correctness: 高风险 flag 触发后，答案是否命中旧版拒答词；非风险样例当前自动记为 true，汇总均值包含这些样例，且不衡量过度拒答。
 - Hallucination sample review: 人工抽查答案是否编造法律依据。
 - LLM judge: 可选 `--judge`，输出 faithfulness、relevance、completeness；judge 调用失败或 JSON contract 失败单独计数，不进入质量均值。
 
 `Citation validity`、`Verifier pass` 和 `Refusal correctness` 只对 `--generate` 运行有定义。Retrieval-only 报告将这些字段显示为 `N/A`，避免把拼接的检索文本误当作模型回答；拒答数据在 retrieval-only 阶段只用于验证风险 router 是否命中。
+
+当前 verifier 的边界必须单独解释：有效 `[Sx]` 只证明编号属于本次结果，不能证明来源语义支持该句；未引用法律语句仅做有限词面重合启发式检查；“不能”和“不构成法律意见”等词也可能触发拒答判断。旧版 `Refusal correctness` 不是 precision/recall 或语义正确率，也不检测危险建议是否在免责声明之前已经输出。M0 保留实现并如实记录，后续 M1 才按“应拒答 / 应回答”集合拆分分母，并区分结构、行为与语义状态。
+
+成本不硬编码平台价格。`--input-cost-per-million` 和 `--output-cost-per-million` 接受用户在运行时提供的美元 blended rate；当一次评测混用不同价格的生成模型和 judge 时，应拆成独立 run，不能把一个 blended estimate 当作真实账单。
 
 ## 实验矩阵
 
@@ -86,6 +93,32 @@ bge_large_zh
 chatlaw_text2vec
 qwen3_embedding_4b
 bge_large_zh_meta / qwen3_embedding_4b_meta (metadata-text ablation)
+```
+
+Adaptive:
+
+```text
+direct
+adaptive (deterministic rules by default)
+```
+
+Reranker:
+
+```text
+none
+bge_v2_m3 (optional cross-encoder)
+```
+
+自动矩阵命令会展开上述维度并输出 CSV、JSON 和 Markdown。BM25 cell 不会因为传入多个 embedding key 被无意义地重复执行；单个 cell 缺 cache、缺模型或执行失败时写入 `status=failed`，其他 cell 继续运行。
+
+```powershell
+uv run python -m legal_rag.cli experiment-matrix `
+  --chunk-strategies article,neighbor `
+  --retrievers bm25,dense,rrf `
+  --embeddings bge_large_zh,qwen3_embedding_4b `
+  --adaptive-modes direct,adaptive `
+  --rerankers none,bge_v2_m3 `
+  --cases eval_cases/legal_eval_cases_v3.jsonl
 ```
 
 ## Phase 1 诊断产物
@@ -183,15 +216,31 @@ python -m legal_rag.cli evaluate --chunk-strategy article --retriever bm25 --cas
 
 历史结果见 `reports/RESULTS_SUMMARY.md`。该报告来自 2026-06 的本地增强语料快照；精确复现需要相同的 203 部法律语料、embedding cache 和当时的 API 模型版本。仓库当前可以复现评测逻辑与命令，但还没有自动下载并校验该语料快照。
 
-## Phase 4B 尚未完成
+## Phase 4B 自动实验平台
 
-- Reranker protocol、NoOp/BGE adapter。
-- Embedding cache 的模型 key、维度、normalize、chunk ID 和数量 health check。
-- 自动 experiment matrix runner 和统一 `summary.csv`。
-- 将检索、normalizer、reranker、judge 的延迟/调用次数/估算成本统一聚合。
-- 基于自动矩阵重新生成默认策略决策报告。
+Phase 4B 的工程能力已完成:
 
-因此当前状态应描述为“Phase 4A 已完成、Phase 4B 待开发”，不能把手工实验矩阵等同于自动化实验平台。
+- `Reranker` protocol、lazy CrossEncoder adapter 和 `RerankingRetriever`，默认 `none` 不加载模型。
+- Embedding cache schema v2，校验模型、prefix、metadata embedding、维度、dtype、归一化、chunk 顺序和 corpus fingerprint。
+- `cache-health` 命令；旧 cache 可以 advisory 模式审计，但 runtime 不静默复用缺契约缓存。
+- 五维 experiment matrix runner，统一输出 CSV、JSON 和 Markdown，单格失败显式保留。
+- 平均/P50/P95、build time/peak memory、rerank 调用、LLM 调用、token 和可选成本估算。
+
+自动矩阵已在 120 条 v3 cases 上复跑 `article + BM25`:
+
+| 配置 | Hit@5 (n=108) | MRR | 平均延迟 | P50 | P95 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| direct | 0.704 | 0.608 | 243.5 ms | 201.0 ms | 316.1 ms |
+| adaptive | 0.667 | 0.578 | 437.5 ms | 288.0 ms | 1189.3 ms |
+
+该结果复现了 adaptive 整体负收益，并补充了尾延迟证据。BGE reranker 的接口和 mock 回归已完成，但尚未把约 2.29 GB 的真实模型跑完 120-case A/B，因此不得宣称 reranker 已提升质量，也不把它设为默认。
+
+旧 BGE cache 缺少 schema v2 所需的 prefix、metadata embedding 和 corpus fingerprint，health check 会要求重建。CPU 重建在当前机器预估超过 2 小时，已停止；应在 GPU 或可接受长任务的环境运行:
+
+```powershell
+uv run python -m legal_rag.cli build-embeddings --chunk-strategy article --embedding bge_large_zh
+uv run python -m legal_rag.cli cache-health --chunk-strategy article --embedding bge_large_zh
+```
 
 ## Phase 1 验收命令
 

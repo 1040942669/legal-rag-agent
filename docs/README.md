@@ -5,10 +5,13 @@
 ## 推荐阅读顺序
 
 1. [项目 README](../README.md)：问题、架构、量化结果、踩坑、快速开始和当前状态。
-2. [实验结果总汇](../reports/RESULTS_SUMMARY.md)：v3 历史矩阵的完整指标与复现边界。
-3. [评测方案](EVALUATION_PLAN.md)：case 类型、指标语义、judge 使用方式和解释原则。
-4. [架构决策记录](../ARCHITECTURE_DECISION_LOG.md)：关键取舍、失败假设、回滚条件。
-5. [执行计划](LEGAL_RAG_EXECUTION_PLAN.md)：Phase 0-5 的任务拆分、依赖和验收状态。
+2. [当前增量改造主线](refactor/MASTER_PLAN.md)：M0-M7 范围、验收、版本和发布合同。
+3. [机器可读状态](refactor/STATE.json) 与 [交接记录](refactor/HANDOFF.md)：当前执行事实和下一步。
+4. [实验结果总汇](../reports/RESULTS_SUMMARY.md)：v3 历史矩阵的完整指标与复现边界。
+5. [评测方案](EVALUATION_PLAN.md)：case 类型、指标语义、judge 使用方式和解释原则。
+6. [架构决策记录](../ARCHITECTURE_DECISION_LOG.md)：关键取舍、失败假设、回滚条件。
+7. [Phase 4B 技术调研](PHASE4B_RESEARCH_AND_DECISIONS.md)：reranker/observability 机制、L9 可取原则和暂缓项。
+8. [历史 Phase 执行计划](LEGAL_RAG_EXECUTION_PLAN.md)：截至 2026-09-18 的 Phase 0-5 记录，不是当前 M0-M7 路线。
 
 ## 文档职责
 
@@ -18,7 +21,9 @@
 | `RESULTS_SUMMARY.md` | 历史实验用了什么配置、数字如何解释 | 对未来模型版本的效果承诺 |
 | `EVALUATION_PLAN.md` | 指标和 case 为什么这样设计 | 产品路线和任务排期 |
 | `ARCHITECTURE_DECISION_LOG.md` | 为什么采用或拒绝某个方案 | 当前任务完成状态 |
-| `LEGAL_RAG_EXECUTION_PLAN.md` | 已完成什么、还差什么、如何验收 | 单次实验的详细结果 |
+| `PHASE4B_RESEARCH_AND_DECISIONS.md` | 最新机制如何映射到本项目、哪些能力暂缓 | 通用 Agent 教程或模型排行榜 |
+| `refactor/MASTER_PLAN.md`、`STATE.json`、`HANDOFF.md` | 当前 M0-M7 路线、真实状态和交接 | 历史实验的全部明细 |
+| `LEGAL_RAG_EXECUTION_PLAN.md` | 历史 Phase 0-5 做过什么、当时还差什么 | 当前 M0-M7 发布状态 |
 
 ## 更新规则
 

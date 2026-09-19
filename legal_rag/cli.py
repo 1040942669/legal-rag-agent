@@ -11,25 +11,42 @@ from .chat import LegalChatAssistant, render_sources
 from .chunking import load_chunks
 from .config import load_config, resolve_path
 from .data import profile_dataset, write_profile_outputs
-from .embeddings import build_embedding_cache, embedding_cache_dir, resolve_embedding_model
+from .embeddings import (
+    build_embedding_cache,
+    embedding_cache_dir,
+    inspect_embedding_cache,
+    resolve_embedding_model,
+)
 from .env import load_dotenv
 from .evaluation import evaluate, load_eval_cases, write_eval_outputs
+from .experiments import (
+    build_experiment_specs,
+    comma_values,
+    failed_experiment,
+    summarize_experiment,
+    write_experiment_matrix,
+)
 from .indexing import build_index, resolve_chunks_path
 from .llamaindex_backend import LlamaIndexRetriever
 from .llm import OllamaClient, SiliconFlowClient
 from .manifest import new_run_id
 from .query import analyze_query
+from .rerank import (
+    resolve_reranker_config,
+    retriever_runtime_metrics,
+    wrap_with_reranker,
+)
 from .retrieval import build_retriever
 from .tracing import JsonlTraceWriter, build_retrieval_trace_record
 
 
 def main(argv: list[str] | None = None) -> int:
-    load_dotenv()
     parser = build_parser()
     args = parser.parse_args(argv)
     if not hasattr(args, "handler"):
         parser.print_help()
         return 1
+    load_dotenv()
     try:
         return args.handler(args)
     except Exception as exc:
@@ -40,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="legal-rag",
-        description="Chinese current law conversational RAG assistant.",
+        description="RAG assistant for versioned Chinese law text snapshots.",
     )
     parser.add_argument("--config", default="configs/default.yaml", help="Path to config YAML.")
     subparsers = parser.add_subparsers(dest="command")
@@ -91,12 +108,29 @@ def build_parser() -> argparse.ArgumentParser:
     embeddings.add_argument("--device", default=None)
     embeddings.set_defaults(handler=handle_build_embeddings)
 
+    cache_health = subparsers.add_parser(
+        "cache-health",
+        help="Validate an embedding cache against its chunks and model contract.",
+    )
+    cache_health.add_argument("--index-dir", default=None)
+    cache_health.add_argument("--chunk-strategy", default=None)
+    cache_health.add_argument("--embedding", default=None)
+    cache_health.add_argument("--embedding-cache-dir", default=None)
+    cache_health.add_argument(
+        "--allow-legacy",
+        action="store_true",
+        help="Report missing v2 contract fields as warnings instead of errors.",
+    )
+    cache_health.set_defaults(handler=handle_cache_health)
+
     chat = subparsers.add_parser("chat", help="Start an interactive legal chat session.")
     chat.add_argument("--index-dir", default=None)
     chat.add_argument("--chunk-strategy", default=None)
     chat.add_argument("--retriever", default=None)
     chat.add_argument("--embedding", default=None, help="Embedding key for dense/rrf retrieval.")
     chat.add_argument("--embedding-cache-dir", default=None)
+    chat.add_argument("--reranker", default=None, help="Reranker key from config, or `none`.")
+    chat.add_argument("--rerank-top-n", type=int, default=None)
     chat.add_argument("--model", default=None)
     chat.add_argument("--top-k", type=int, default=None)
     chat.add_argument("--trace-path", default=None)
@@ -119,6 +153,8 @@ def build_parser() -> argparse.ArgumentParser:
     eval_parser.add_argument("--retriever", default=None)
     eval_parser.add_argument("--embedding", default=None, help="Embedding key for dense/rrf retrieval.")
     eval_parser.add_argument("--embedding-cache-dir", default=None)
+    eval_parser.add_argument("--reranker", default=None, help="Reranker key from config, or `none`.")
+    eval_parser.add_argument("--rerank-top-n", type=int, default=None)
     eval_parser.add_argument("--cases", default="eval_cases/legal_eval_cases_v2.jsonl")
     eval_parser.add_argument("--model", default=None)
     eval_parser.add_argument("--models", default=None, help="Comma-separated models or `all`.")
@@ -137,7 +173,45 @@ def build_parser() -> argparse.ArgumentParser:
         help="Score generated answers with an LLM judge (requires --generate).",
     )
     eval_parser.add_argument("--judge-model", default=None, help="Override judge model name.")
+    eval_parser.add_argument(
+        "--input-cost-per-million",
+        type=float,
+        default=None,
+        help="User-supplied blended USD rate per million input tokens.",
+    )
+    eval_parser.add_argument(
+        "--output-cost-per-million",
+        type=float,
+        default=None,
+        help="User-supplied blended USD rate per million output tokens.",
+    )
     eval_parser.set_defaults(handler=handle_evaluate)
+
+    matrix = subparsers.add_parser(
+        "experiment-matrix",
+        help="Run a reproducible retrieval experiment matrix and write CSV/JSON/Markdown summaries.",
+    )
+    matrix.add_argument("--chunk-strategies", default="article", help="Comma-separated keys.")
+    matrix.add_argument("--retrievers", default="bm25", help="Comma-separated retriever keys.")
+    matrix.add_argument("--embeddings", default=None, help="Comma-separated embedding keys.")
+    matrix.add_argument(
+        "--adaptive-modes",
+        default="direct",
+        help="Comma-separated `direct` and/or `adaptive`.",
+    )
+    matrix.add_argument("--rerankers", default="none", help="Comma-separated reranker keys.")
+    matrix.add_argument(
+        "--rerank-top-n",
+        type=int,
+        default=None,
+        help="Candidate count passed from the base retriever to a reranker.",
+    )
+    matrix.add_argument("--cases", default="eval_cases/legal_eval_cases_v3.jsonl")
+    matrix.add_argument("--top-k", type=int, default=None)
+    matrix.add_argument("--report-dir", default=None)
+    matrix.add_argument("--prefix", default="phase4b_experiment_matrix")
+    matrix.add_argument("--fail-fast", action="store_true")
+    matrix.set_defaults(handler=handle_experiment_matrix)
 
     return parser
 
@@ -213,6 +287,7 @@ def handle_baseline(args: argparse.Namespace) -> int:
         config,
         top_k=top_k,
         chunk_strategy=strategy,
+        reranker_key="none",
     )
     cases = load_eval_cases(case_path)
     records = evaluate(
@@ -271,6 +346,28 @@ def handle_build_embeddings(args: argparse.Namespace) -> int:
     return 0
 
 
+def handle_cache_health(args: argparse.Namespace) -> int:
+    config = load_config(args.config)
+    strategy = args.chunk_strategy or config["chunking"]["default_strategy"]
+    index_dir = resolve_index_dir(args.index_dir, config, strategy)
+    chunks = load_chunks(resolve_chunks_path(index_dir))
+    model_config = resolve_embedding_model(config, args.embedding)
+    cache_dir = (
+        resolve_path(args.embedding_cache_dir)
+        if args.embedding_cache_dir
+        else embedding_cache_dir(config["embedding"]["cache_dir"], strategy, model_config.key).resolve()
+    )
+    report = inspect_embedding_cache(
+        cache_dir,
+        chunks=chunks,
+        model_config=model_config,
+        expected_chunk_strategy=strategy,
+        strict_contract=not args.allow_legacy,
+    )
+    print(json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
+    return 0 if report.valid else 2
+
+
 def handle_chat(args: argparse.Namespace) -> int:
     config = load_config(args.config)
     run_id = new_run_id("chat")
@@ -288,6 +385,8 @@ def handle_chat(args: argparse.Namespace) -> int:
         chunk_strategy=strategy,
         embedding_key=args.embedding,
         embedding_cache_dir_arg=args.embedding_cache_dir,
+        reranker_key=args.reranker,
+        rerank_top_n=args.rerank_top_n,
     )
     assistant = LegalChatAssistant(
         retriever,
@@ -383,6 +482,14 @@ def handle_evaluate(args: argparse.Namespace) -> int:
         trace_path=trace_path,
         adaptive_options=adaptive_options,
     )
+    if args.input_cost_per_million is not None and args.input_cost_per_million < 0:
+        raise ValueError("--input-cost-per-million must be non-negative.")
+    if args.output_cost_per_million is not None and args.output_cost_per_million < 0:
+        raise ValueError("--output-cost-per-million must be non-negative.")
+    if args.input_cost_per_million is not None:
+        metadata["input_cost_per_million"] = args.input_cost_per_million
+    if args.output_cost_per_million is not None:
+        metadata["output_cost_per_million"] = args.output_cost_per_million
 
     judge_client = None
     if getattr(args, "judge", False):
@@ -400,6 +507,12 @@ def handle_evaluate(args: argparse.Namespace) -> int:
 
     models = resolve_models(args, config)
     all_records = []
+    runtime_totals: dict[str, int | float] = {
+        "rerank_calls": 0,
+        "rerank_failed_calls": 0,
+        "rerank_documents": 0,
+        "rerank_total_ms": 0.0,
+    }
     for model in models:
         import tracemalloc
 
@@ -413,6 +526,8 @@ def handle_evaluate(args: argparse.Namespace) -> int:
             chunk_strategy=strategy,
             embedding_key=args.embedding,
             embedding_cache_dir_arg=args.embedding_cache_dir,
+            reranker_key=args.reranker,
+            rerank_top_n=args.rerank_top_n,
         )
         retriever_build_seconds = round(time.perf_counter() - build_started, 3)
         _, peak_bytes = tracemalloc.get_traced_memory()
@@ -460,6 +575,10 @@ def handle_evaluate(args: argparse.Namespace) -> int:
             judge_client=judge_client,
         )
         all_records.extend(records)
+        for key, value in retriever_runtime_metrics(retriever).items():
+            runtime_totals[key] = runtime_totals.get(key, 0) + value
+
+    metadata.update(runtime_totals)
 
     prefix = args.prefix or f"eval_{strategy}_{retriever_kind}"
     csv_path, report_path = write_eval_outputs(
@@ -475,6 +594,90 @@ def handle_evaluate(args: argparse.Namespace) -> int:
     return 0
 
 
+def handle_experiment_matrix(args: argparse.Namespace) -> int:
+    import tracemalloc
+
+    config = load_config(args.config)
+    case_path = resolve_path(args.cases)
+    cases = load_eval_cases(case_path)
+    top_k = args.top_k or int(config["retrieval"]["top_k"])
+    default_embedding = config["embedding"]["default"]
+    specs = build_experiment_specs(
+        chunk_strategies=comma_values(args.chunk_strategies, default=["article"]),
+        retrievers=comma_values(args.retrievers, default=["bm25"]),
+        embeddings=comma_values(args.embeddings, default=[default_embedding]),
+        adaptive_modes=comma_values(args.adaptive_modes, default=["direct"]),
+        rerankers=comma_values(args.rerankers, default=["none"]),
+    )
+    rows: list[dict[str, Any]] = []
+    run_id = new_run_id("experiment_matrix")
+    for position, spec in enumerate(specs, start=1):
+        print(f"[{position}/{len(specs)}] {spec.experiment_id}", flush=True)
+        try:
+            index_dir = resolve_index_dir(None, config, spec.chunk_strategy)
+            chunks = load_chunks(resolve_chunks_path(index_dir))
+            tracemalloc.start()
+            build_started = time.perf_counter()
+            try:
+                retriever = create_retriever(
+                    spec.retriever,
+                    chunks,
+                    config,
+                    top_k=top_k,
+                    chunk_strategy=spec.chunk_strategy,
+                    embedding_key=None if spec.embedding == "none" else spec.embedding,
+                    reranker_key=spec.reranker,
+                    rerank_top_n=args.rerank_top_n,
+                )
+                build_seconds = time.perf_counter() - build_started
+                _, peak_bytes = tracemalloc.get_traced_memory()
+            finally:
+                tracemalloc.stop()
+            records = evaluate(
+                cases=cases,
+                retriever=retriever,
+                chunk_strategy=spec.chunk_strategy,
+                model="retrieval-only",
+                generate=False,
+                top_k=top_k,
+                adaptive_enabled=spec.adaptive,
+                adaptive_use_llm=False,
+            )
+            rows.append(
+                summarize_experiment(
+                    spec,
+                    records,
+                    top_k=top_k,
+                    build_seconds=build_seconds,
+                    build_peak_mb=peak_bytes / (1024 * 1024),
+                    runtime_metrics=retriever_runtime_metrics(retriever),
+                )
+            )
+        except Exception as exc:
+            rows.append(failed_experiment(spec, exc, top_k=top_k))
+            if args.fail_fast:
+                raise
+
+    report_dir = resolve_path(args.report_dir or config["artifacts"]["report_dir"])
+    csv_path, json_path, report_path = write_experiment_matrix(
+        rows,
+        report_dir,
+        args.prefix,
+        metadata={
+            "run_id": run_id,
+            "config_path": str(resolve_path(args.config)),
+            "case_path": str(case_path),
+            "case_count": len(cases),
+            "top_k": top_k,
+            "experiment_count": len(specs),
+        },
+    )
+    print(f"Wrote experiment matrix CSV: {csv_path}")
+    print(f"Wrote experiment matrix JSON: {json_path}")
+    print(f"Wrote experiment matrix report: {report_path}")
+    return 0 if any(row.get("status") in {"ok", "partial"} for row in rows) else 2
+
+
 def create_retriever(
     kind: str,
     chunks,
@@ -484,38 +687,47 @@ def create_retriever(
     chunk_strategy: str,
     embedding_key: str | None = None,
     embedding_cache_dir_arg: str | None = None,
+    reranker_key: str | None = None,
+    rerank_top_n: int | None = None,
 ):
     model_config = resolve_embedding_model(config, embedding_key)
     if kind in {"llamaindex_bm25", "llamaindex_dense"}:
-        return LlamaIndexRetriever(
+        retriever = LlamaIndexRetriever(
             chunks,
             kind=kind.replace("llamaindex_", ""),
             top_k=top_k,
             embedding_model=model_config.model_name,
         )
-    cache_dir = None
-    if kind in {"dense", "rrf", "hybrid"}:
-        cache_dir = resolve_embedding_cache_dir(
-            embedding_cache_dir_arg,
-            config,
-            chunk_strategy,
-            model_config.key,
+    else:
+        cache_dir = None
+        if kind in {"dense", "rrf", "hybrid"}:
+            cache_dir = resolve_embedding_cache_dir(
+                embedding_cache_dir_arg,
+                config,
+                chunk_strategy,
+                model_config.key,
+            )
+        retriever = build_retriever(
+            kind,
+            chunks,
+            embedding_model=model_config.model_name,
+            embedding_model_config=model_config,
+            embedding_cache_dir=cache_dir,
+            device=config["embedding"].get("device", "auto"),
+            rrf_k=int(config["retrieval"].get("rrf_k", 60)),
+            rrf_bm25_weight=float(config["retrieval"].get("rrf_bm25_weight", 1.0)),
+            rrf_dense_weight=float(config["retrieval"].get("rrf_dense_weight", 1.0)),
+            bm25_k1=float(config["retrieval"].get("bm25_k1", 1.5)),
+            bm25_b=float(config["retrieval"].get("bm25_b", 0.75)),
+            bm25_law_boost=float(config["retrieval"].get("bm25_law_boost", 40.0)),
+            bm25_article_boost=float(config["retrieval"].get("bm25_article_boost", 80.0)),
+            deprecated_penalty=float(config["retrieval"].get("deprecated_penalty", 1.0)),
         )
-    return build_retriever(
-        kind,
-        chunks,
-        embedding_model=model_config.model_name,
-        embedding_model_config=model_config,
-        embedding_cache_dir=cache_dir,
-        device=config["embedding"].get("device", "auto"),
-        rrf_k=int(config["retrieval"].get("rrf_k", 60)),
-        rrf_bm25_weight=float(config["retrieval"].get("rrf_bm25_weight", 1.0)),
-        rrf_dense_weight=float(config["retrieval"].get("rrf_dense_weight", 1.0)),
-        bm25_k1=float(config["retrieval"].get("bm25_k1", 1.5)),
-        bm25_b=float(config["retrieval"].get("bm25_b", 0.75)),
-        bm25_law_boost=float(config["retrieval"].get("bm25_law_boost", 40.0)),
-        bm25_article_boost=float(config["retrieval"].get("bm25_article_boost", 80.0)),
-        deprecated_penalty=float(config["retrieval"].get("deprecated_penalty", 1.0)),
+    return wrap_with_reranker(
+        retriever,
+        config,
+        reranker_key=reranker_key,
+        candidate_top_n=rerank_top_n,
     )
 
 
@@ -552,6 +764,13 @@ def build_eval_metadata(
     trace_path: Path | None = None,
     adaptive_options: dict | None = None,
 ) -> dict:
+    reranker_config = resolve_reranker_config(config, getattr(args, "reranker", None))
+    requested_top_n = getattr(args, "rerank_top_n", None)
+    rerank_top_n = (
+        requested_top_n
+        if requested_top_n is not None
+        else int(config.get("reranking", {}).get("candidate_top_n", 20))
+    )
     metadata = {
         "run_id": run_id,
         "config_path": str(resolve_path(args.config)),
@@ -567,6 +786,8 @@ def build_eval_metadata(
         "adaptive_max_queries": (adaptive_options or {}).get("max_queries", 3),
         "adaptive_per_plan_top_k": (adaptive_options or {}).get("per_plan_top_k"),
         "adaptive_normalizer_retries": (adaptive_options or {}).get("normalizer_retries", 0),
+        "reranker": reranker_config.key if reranker_config else "none",
+        "rerank_candidate_top_n": rerank_top_n if reranker_config else None,
         **retrieval_metadata(config),
     }
     manifest_path = index_dir / "manifest.json"

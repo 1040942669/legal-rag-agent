@@ -178,3 +178,12 @@ class EvalRecord:
     judge_pass: int = -1
     judge_comment: str = ""
     judge_error: str = ""
+    assistant_llm_calls: int = 0
+    normalizer_llm_calls: int = 0
+    judge_llm_calls: int = 0
+    llm_failed_calls: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    token_usage_calls: int = 0
+    llm_latency_ms: float = 0.0

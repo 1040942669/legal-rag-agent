@@ -152,7 +152,7 @@ class CachedDenseRetriever:
         self.chunks = chunks
         self.model_config = model_config
         self.cache = load_embedding_cache(cache_dir)
-        validate_cache_matches_chunks(self.cache, chunks)
+        validate_cache_matches_chunks(self.cache, chunks, model_config=model_config)
         self.encoder = build_encoder(model_config, device=device)
         self.deprecated_penalty = deprecated_penalty
         self.known_law_hints = build_known_law_hints(chunks)
