@@ -16,7 +16,7 @@
 - Phase 4A: evaluation hardening and manual experiment matrix，包括 120 条 v3 固定评测集、30 条生成子集、bootstrap 95% CI、case 间 memory reset、LLM-as-judge、废止法律降权、保守去重、metadata embedding 消融、LlamaIndex 对照和结果总结。
 - Phase 4B: reproducible experiment platform，包括 reranker protocol/BGE adapter、embedding cache v2 contract、cache health、五维 experiment matrix、P50/P95、build memory、调用/token/可选成本聚合和最新机制决策文档。
 
-当前全量单元测试为 `70 passed`。Phase 4A 的历史实验结论保存在 `reports/RESULTS_SUMMARY.md`；报告反映 2026-06 的本地增强语料和当时模型版本，精确数值不是跨时间稳定承诺。Phase 4B 自动矩阵已在同一 v3 cases 上复现 BM25 direct/adaptive 的质量结论。
+截至 2026-09-18，该旧路线当时记录的全量单元测试为 `70 passed`。Phase 4A 的历史实验结论保存在 `reports/RESULTS_SUMMARY.md`；报告反映 2026-06 的本地增强语料和当时模型版本，精确数值不是跨时间稳定承诺。Phase 4B 自动矩阵已在同一 v3 cases 上复现 BM25 direct/adaptive 的质量结论。
 
 Phase 1 验证命令:
 

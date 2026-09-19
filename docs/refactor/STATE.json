@@ -7,16 +7,16 @@
     "observed_default_branch": "master",
     "observed_baseline_commit": "4ed96ec921593ef81de61ce545513e3f1211b5db",
     "observed_on": "2026-09-19",
-    "workspace_head": "66da8e3056f8287997088d9f503846fd88c9b038",
+    "workspace_head": "b3a2b4605a66c66f76ac6f199552c613e623f44d",
     "workspace_branch": "codex/m0-baseline",
-    "workspace_dirty": true,
+    "workspace_dirty": false,
     "remote_tags_checked": true
   },
-  "execution_status": "in_progress",
+  "execution_status": "ready_for_review",
   "active_milestone": "M0",
   "last_verified_release": null,
   "authorization": {
-    "document_only_until_user_starts": true,
+    "document_only_until_user_starts": false,
     "allow_live_model_calls": false,
     "allow_production_deployment": false,
     "allow_force_push": false,
@@ -40,22 +40,26 @@
       "name": "基线与门禁",
       "planned_version": "v0.1.1",
       "required": true,
-      "status": "in_progress",
+      "status": "ready_for_review",
       "branch": "codex/m0-baseline",
-      "issue_url": null,
-      "milestone_url": null,
-      "pr_url": null,
-      "candidate_sha": null,
+      "issue_url": "https://github.com/1040942669/legal-rag-agent/issues/1",
+      "milestone_url": "https://github.com/1040942669/legal-rag-agent/milestone/1",
+      "pr_url": "https://github.com/1040942669/legal-rag-agent/pull/2",
+      "candidate_sha": "b3a2b4605a66c66f76ac6f199552c613e623f44d",
       "release_target_sha": null,
       "tag": null,
       "release_url": null,
       "remote_release_verified": false,
       "tests": {
-        "status": "in_progress",
-        "passed": 70,
+        "status": "passed",
+        "passed": 89,
         "failed": 0,
         "skipped": 0,
-        "report_path": "docs/refactor/BASELINE_AUDIT.md"
+        "mandatory_checks_passed": 7,
+        "mandatory_checks_total": 7,
+        "report_path": "reports/refactor/M0.md",
+        "ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/35427519552",
+        "ci_sha": "b3a2b4605a66c66f76ac6f199552c613e623f44d"
       },
       "blockers": []
     },
@@ -228,5 +232,5 @@
       "blockers": []
     }
   ],
-  "next_action": "Implement and test the M0 synthetic offline smoke, quality gate, CI, and version/documentation updates; do not start M1."
+  "next_action": "Push the M0 acceptance-document commit and require a fresh successful CI run for its exact SHA before recording ready_for_release; do not start M1."
 }
