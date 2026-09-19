@@ -6,6 +6,7 @@
   "repository": "1040942669/legal-rag-agent",
   "branch": "master",
   "pr_url": "https://github.com/1040942669/legal-rag-agent/pull/2",
+  "receipt_pr_url": "https://github.com/1040942669/legal-rag-agent/pull/3",
   "release_target_sha": "cb7e01982ca6fb95cebde1e5d707527fd36a250c",
   "tag_name": "v0.1.1",
   "remote_tag_target_sha": "cb7e01982ca6fb95cebde1e5d707527fd36a250c",

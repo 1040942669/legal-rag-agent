@@ -2,13 +2,13 @@
 
 ## 当前真实状态
 
-- M0 软件版本已经发布并远端核验；当前状态为 `released_receipt_pending`，仅剩回执文档 PR/CI/合并。不得重复创建 Release 或移动 Tag。
+- M0 软件版本已经发布并远端核验；终态为 `released`。发布回执通过独立文档 [PR #3](https://github.com/1040942669/legal-rag-agent/pull/3) 落库，不得重复创建 Release 或移动 Tag。
 - 目标仓库：`1040942669/legal-rag-agent`；远端默认分支为 `master`。
 - 发布目标 / 当前 `origin/master` 起点：`cb7e01982ca6fb95cebde1e5d707527fd36a250c`。
 - 软件 PR：[PR #2](https://github.com/1040942669/legal-rag-agent/pull/2)，于 `2026-09-19T07:02:14Z` 以普通 merge commit 合并，保留任务开始前已有的 Phase 4B 提交 `66da8e3056f8287997088d9f503846fd88c9b038`。
 - Tag / Release：`v0.1.1` / [GitHub Release](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.1.1)，发布时间 `2026-09-19T07:05:12Z`。
 - 当前回执分支：`codex/m0-release-receipt`，从已发布的 `origin/master` 创建；软件 Tag 不包含也不需要包含后续回执提交。
-- Issue #1 已关闭；Milestone 1 在回执合入后关闭。
+- Issue #1 已关闭；Milestone 1 在回执合入并核对 `master` CI 后关闭。
 - M1-M7 均未开始；active milestone 仍为 M0。
 
 ## 已完成并核实
@@ -56,29 +56,28 @@
 - 任务/服务：本版没有队列、后台任务或生产部署，无运行中任务需要恢复。
 - 版本：已发布 `v0.1.1` 不移动、不复用；修复使用后续版本。
 
-## 回执收尾步骤
+## 回执收尾核对
 
-1. 提交并 push 当前回执分支。
-2. 创建独立文档 PR，记录其 URL，将 STATE/HANDOFF 终态更新为 `released`。
-3. 对回执 PR 最新 head 运行同一离线 CI；复核仅文档 diff 后正常合并。
-4. 等待回执 merge SHA 的 `master` CI 成功，关闭 Milestone 1。
-5. 报告 M0 的真实 PR、Tag、Release、commit、测试和限制，然后停止，不开始 M1。
+1. 对回执 PR #3 最新 head 运行同一离线 CI；复核仅文档 diff 后正常合并。
+2. 等待回执 merge SHA 的 `master` CI 成功，关闭 Milestone 1。
+3. 报告 M0 的真实 PR、Tag、Release、commit、测试和限制，然后停止，不开始 M1。
 
 ## 执行事实表
 
 | 项目 | 当前值 |
 |---|---|
-| 当前里程碑 | M0 / `released_receipt_pending` |
+| 当前里程碑 | M0 / `released` |
 | 软件分支 / 回执分支 | `codex/m0-baseline` / `codex/m0-release-receipt` |
 | 最终 PR head | `e426424b892bedd3bc1c5c13a34e94e7f1496c2f` |
 | Release target | `cb7e01982ca6fb95cebde1e5d707527fd36a250c` |
 | 软件 PR | [#2](https://github.com/1040942669/legal-rag-agent/pull/2) / merged |
+| 回执 PR | [#3](https://github.com/1040942669/legal-rag-agent/pull/3) / documentation-only |
 | Tag / Release | `v0.1.1` / [published](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.1.1) |
 | CI | PR head success / merge SHA `master` success |
 | 测试 | 89 passed；门禁 7/7；合成 smoke 1 passed；wheel 构建/安装 success |
-| 阻塞 | 无软件阻塞；仅回执尚未经 PR 合入 `master` |
-| 下一条可执行动作 | commit/push 回执分支并创建文档 PR |
+| 阻塞 | 无 |
+| 下一条可执行动作 | 核对 PR #3 merge/master CI，关闭 Milestone 1，然后停止 |
 
-## 完成条件
+## 完成说明
 
-回执 PR 合入后，把 STATE/HANDOFF 状态改为 `released`，记录回执 PR URL；`release_target_sha` 始终保持 `cb7e01982ca6fb95cebde1e5d707527fd36a250c`，即使最终 `master` 因回执提交高于 Tag。随后关闭 Milestone 1 并停止。
+`release_target_sha` 始终保持 `cb7e01982ca6fb95cebde1e5d707527fd36a250c`，即使最终 `master` 因回执提交高于 Tag。回执 PR #3 不属于新的软件版本。完成远端 CI 和 Milestone 核对后停止，不开始 M1。

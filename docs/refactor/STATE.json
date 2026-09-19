@@ -7,12 +7,12 @@
     "observed_default_branch": "master",
     "observed_baseline_commit": "4ed96ec921593ef81de61ce545513e3f1211b5db",
     "observed_on": "2026-09-19",
-    "workspace_head": "cb7e01982ca6fb95cebde1e5d707527fd36a250c",
+    "workspace_head": "42e2265c3427785329a293ebc8e345656ea166f7",
     "workspace_branch": "codex/m0-release-receipt",
     "workspace_dirty": false,
     "remote_tags_checked": true
   },
-  "execution_status": "released_receipt_pending",
+  "execution_status": "released",
   "active_milestone": "M0",
   "last_verified_release": {
     "milestone_id": "M0",
@@ -48,9 +48,11 @@
       "name": "基线与门禁",
       "planned_version": "v0.1.1",
       "required": true,
-      "status": "released_receipt_pending",
+      "status": "released",
       "branch": "codex/m0-baseline",
       "receipt_branch": "codex/m0-release-receipt",
+      "receipt_pr_url": "https://github.com/1040942669/legal-rag-agent/pull/3",
+      "receipt_candidate_sha": "42e2265c3427785329a293ebc8e345656ea166f7",
       "issue_url": "https://github.com/1040942669/legal-rag-agent/issues/1",
       "milestone_url": "https://github.com/1040942669/legal-rag-agent/milestone/1",
       "pr_url": "https://github.com/1040942669/legal-rag-agent/pull/2",
@@ -245,5 +247,5 @@
       "blockers": []
     }
   ],
-  "next_action": "Commit and push the verified M0 release receipt, create its documentation PR, record that PR URL, pass CI, merge it, close Milestone 1, and stop without starting M1."
+  "next_action": "M0 is complete. Verify the receipt PR merge/master CI and close Milestone 1, then stop; M1 remains not_started until a new explicit user instruction."
 }
