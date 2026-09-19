@@ -616,6 +616,127 @@ class M1EvaluationTest(unittest.TestCase):
                 )
         self.assertRegex(report, r"(?im)over_refusal_rate[^\n]*1/2[^\n]*0\.500")
 
+    def test_report_subgroups_render_unavailable_v2_metrics_as_na(self) -> None:
+        cases = [
+            EvalCase(
+                case_id="no-gold",
+                question="合成问题 A",
+                case_type="article_lookup",
+                expected_law="",
+                expected_articles=[],
+                keywords=["合成事项 A"],
+                expected_behavior="evidence_answer",
+                schema_version=2,
+            ),
+            EvalCase(
+                case_id="refusal-no-gold",
+                question="合成问题 B",
+                case_type="refusal",
+                expected_law="",
+                expected_articles=[],
+                keywords=["合成事项 B"],
+                expected_behavior="out_of_scope",
+                schema_version=2,
+            ),
+        ]
+        records: list[EvalRecord] = []
+        for case, model in zip(cases, ("retrieval-only-a", "retrieval-only-b"), strict=True):
+            records.extend(
+                evaluation.evaluate(
+                    cases=[case],
+                    retriever=DeterministicRetriever(),
+                    chunk_strategy="article",
+                    model=model,
+                    generate=False,
+                )
+            )
+
+        report = evaluation.render_eval_report(records)
+
+        self.assertRegex(
+            report,
+            r"`retrieval-only-a` n=1 Hit@5\(scored\)=N/A "
+            r"KeywordCov=N/A VerifierPass=N/A",
+        )
+        self.assertRegex(
+            report,
+            r"`retrieval-only-b` n=1 Hit@5\(scored\)=N/A "
+            r"KeywordCov=N/A VerifierPass=N/A",
+        )
+        self.assertRegex(
+            report,
+            r"`refusal` n=1 Hit@3=N/A Hit@5=N/A MRR=N/A "
+            r"TargetCoverage=N/A",
+        )
+        self.assertNotIn("KeywordCov=-1.000", report)
+
+    def test_report_target_coverage_excludes_cases_without_article_gold(self) -> None:
+        article_gold = self.make_behavior_record(
+            "article-gold",
+            "evidence_answer",
+            "evidence_answer",
+        )
+        article_gold.canonical_metrics = {
+            "hit_at_3": {"value": True, "unavailable_reason": None},
+            "hit_at_5": {"value": True, "unavailable_reason": None},
+            "mrr": {"value": 1.0, "unavailable_reason": None},
+            "target_coverage": {"value": 1.0, "unavailable_reason": None},
+        }
+        law_only = self.make_behavior_record(
+            "law-only",
+            "evidence_answer",
+            "evidence_answer",
+        )
+        law_only.target_coverage = 0.0
+        law_only.canonical_metrics = {
+            "hit_at_3": {"value": True, "unavailable_reason": None},
+            "hit_at_5": {"value": True, "unavailable_reason": None},
+            "mrr": {"value": 1.0, "unavailable_reason": None},
+            "target_coverage": {
+                "value": None,
+                "unavailable_reason": "no_article_gold",
+            },
+        }
+
+        report = evaluation.render_eval_report([article_gold, law_only])
+
+        self.assertIn("目标条文覆盖率 (retrieval gold): 1.000", report)
+        self.assertNotIn("目标条文覆盖率 (retrieval gold): 0.500", report)
+
+    def test_model_subgroups_only_average_successful_judge_results(self) -> None:
+        records: list[EvalRecord] = []
+        for model in ("judge-error-a", "judge-error-b"):
+            record = self.make_behavior_record(
+                model,
+                "evidence_answer",
+                "evidence_answer",
+            )
+            record.model = model
+            record.execution["judge"] = {"status": "error", "reason": "timeout"}
+            # Deliberately inconsistent legacy values must not override the
+            # authoritative v2 stage status and unavailable canonical values.
+            record.judge_faithfulness = 1.0
+            record.judge_pass = 1
+            record.judge_error = ""
+            record.canonical_metrics.update(
+                {
+                    "judge_faithfulness": {
+                        "value": None,
+                        "unavailable_reason": "timeout",
+                    },
+                    "judge_pass": {
+                        "value": None,
+                        "unavailable_reason": "timeout",
+                    },
+                }
+            )
+            records.append(record)
+
+        report = evaluation.render_eval_report(records)
+
+        self.assertNotIn("JudgeFaith=", report)
+        self.assertEqual(report.count("JudgeErrors=1"), 2)
+
     def test_write_eval_outputs_refuses_if_either_target_already_exists(self) -> None:
         record = self.make_behavior_record(
             "immutable-output",

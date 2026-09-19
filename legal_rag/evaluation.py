@@ -663,15 +663,46 @@ def bootstrap_ci(
 
 def scored_records(records: list[EvalRecord]) -> list[EvalRecord]:
     """Records with a retrieval target (refusal cases have none and would dilute hit metrics)."""
-    return [record for record in records if record.failure_label != "not_applicable"]
+    scored: list[EvalRecord] = []
+    for record in records:
+        if record.canonical_metrics:
+            if _record_metric(record, "hit_at_5") is not None:
+                scored.append(record)
+            continue
+        if record.failure_label != "not_applicable" and record.case_type != "refusal":
+            scored.append(record)
+    return scored
 
 
 def available_mean(records: list[EvalRecord], field_name: str) -> float | None:
-    values = [float(getattr(record, field_name)) for record in records]
-    available = [value for value in values if value >= 0.0]
+    """Average an available metric without reviving legacy sentinel values.
+
+    A populated v2 canonical metric map is authoritative, including an
+    explicit ``null`` value. Legacy scalar fields are used only for records
+    that do not carry canonical metrics at all.
+    """
+
+    available: list[float] = []
+    for record in records:
+        if record.canonical_metrics:
+            value = _record_metric(record, field_name)
+            if isinstance(value, bool):
+                available.append(float(value))
+            elif isinstance(value, (int, float)):
+                available.append(float(value))
+            continue
+        value = getattr(record, field_name)
+        if isinstance(value, bool):
+            available.append(float(value))
+        elif isinstance(value, (int, float)) and float(value) >= 0.0:
+            available.append(float(value))
     if not available:
         return None
     return sum(available) / len(available)
+
+
+def format_available_metric(value: float | None) -> str:
+    return "N/A" if value is None else f"{value:.3f}"
 
 
 def _record_expected_behavior(record: EvalRecord) -> str:
@@ -839,12 +870,10 @@ def render_eval_report(records: list[EvalRecord], *, metadata: dict[str, Any] | 
         return "# 评估报告\n\n没有评估记录。\n"
     summary = summarize_evaluation(records)
     scored = scored_records(records)
-    avg_hit3 = sum(record.hit_at_3 for record in scored) / len(scored) if scored else None
-    avg_hit5 = sum(record.hit_at_5 for record in scored) / len(scored) if scored else None
-    avg_mrr = sum(record.mrr for record in scored) / len(scored) if scored else None
-    avg_target_coverage = (
-        sum(record.target_coverage for record in scored) / len(scored) if scored else None
-    )
+    avg_hit3 = available_mean(scored, "hit_at_3")
+    avg_hit5 = available_mean(scored, "hit_at_5")
+    avg_mrr = available_mean(scored, "mrr")
+    avg_target_coverage = available_mean(scored, "target_coverage")
     avg_latency = sum(record.latency_ms for record in records) / len(records)
     latency_values = [float(record.latency_ms) for record in records]
     avg_keyword = available_mean(records, "keyword_coverage")
@@ -993,26 +1022,31 @@ def render_eval_report(records: list[EvalRecord], *, metadata: dict[str, Any] | 
         for model_name in models:
             group = [record for record in records if record.model == model_name]
             group_scored = scored_records(group)
-            hit5 = (
-                sum(record.hit_at_5 for record in group_scored) / len(group_scored)
-                if group_scored
-                else 0.0
-            )
-            keyword = sum(record.keyword_coverage for record in group) / len(group)
+            hit5 = available_mean(group_scored, "hit_at_5")
+            keyword = available_mean(group, "keyword_coverage")
             verifier = available_mean(group, "verifier_pass")
-            verifier_text = f"{verifier:.3f}" if verifier is not None else "N/A"
             latency = sum(record.latency_ms for record in group) / len(group)
             line = (
-                f"- `{model_name}` n={len(group)} Hit@5(scored)={hit5:.3f} "
-                f"KeywordCov={keyword:.3f} VerifierPass={verifier_text} "
+                f"- `{model_name}` n={len(group)} "
+                f"Hit@5(scored)={format_available_metric(hit5)} "
+                f"KeywordCov={format_available_metric(keyword)} "
+                f"VerifierPass={format_available_metric(verifier)} "
             )
             line += f"latency={latency:.1f}ms"
-            judged_group = [record for record in group if record.judge_pass >= 0]
+            judged_group = [
+                record
+                for record in group
+                if _record_stage_status(record, "judge") == "succeeded"
+            ]
             if judged_group:
-                faith = sum(record.judge_faithfulness for record in judged_group) / len(judged_group)
-                jpass = sum(record.judge_pass for record in judged_group) / len(judged_group)
-                line += f" JudgeFaith={faith:.3f} JudgePass={jpass:.3f}"
-            judge_error_count = sum(bool(record.judge_error) for record in group)
+                faith = available_mean(judged_group, "judge_faithfulness")
+                jpass = available_mean(judged_group, "judge_pass")
+                if faith is not None and jpass is not None:
+                    line += f" JudgeFaith={faith:.3f} JudgePass={jpass:.3f}"
+            judge_error_count = sum(
+                _record_stage_status(record, "judge") == "error"
+                for record in group
+            )
             if judge_error_count:
                 line += f" JudgeErrors={judge_error_count}"
             lines.append(line)
@@ -1021,19 +1055,23 @@ def render_eval_report(records: list[EvalRecord], *, metadata: dict[str, Any] | 
         "## 分组指标",
     ])
     for case_type, group in grouped_records(records).items():
-        group_hit3 = sum(record.hit_at_3 for record in group) / len(group)
-        group_hit5 = sum(record.hit_at_5 for record in group) / len(group)
-        group_mrr = sum(record.mrr for record in group) / len(group)
-        group_target = sum(record.target_coverage for record in group) / len(group)
+        group_scored = scored_records(group)
+        group_hit3 = available_mean(group_scored, "hit_at_3")
+        group_hit5 = available_mean(group_scored, "hit_at_5")
+        group_mrr = available_mean(group_scored, "mrr")
+        group_target = available_mean(group_scored, "target_coverage")
         group_sufficiency = sum(record.sufficiency_pass for record in group) / len(group)
         group_verifier = available_mean(group, "verifier_pass")
-        group_verifier_text = f"{group_verifier:.3f}" if group_verifier is not None else "N/A"
         group_latency = sum(record.latency_ms for record in group) / len(group)
         lines.append(
-            f"- `{case_type}` n={len(group)} Hit@3={group_hit3:.3f} "
-            f"Hit@5={group_hit5:.3f} MRR={group_mrr:.3f} "
-            f"TargetCoverage={group_target:.3f} Sufficiency={group_sufficiency:.3f} "
-            f"Verifier={group_verifier_text} latency={group_latency:.1f}ms"
+            f"- `{case_type}` n={len(group)} "
+            f"Hit@3={format_available_metric(group_hit3)} "
+            f"Hit@5={format_available_metric(group_hit5)} "
+            f"MRR={format_available_metric(group_mrr)} "
+            f"TargetCoverage={format_available_metric(group_target)} "
+            f"Sufficiency={group_sufficiency:.3f} "
+            f"Verifier={format_available_metric(group_verifier)} "
+            f"latency={group_latency:.1f}ms"
         )
     failure_counts = defaultdict(int)
     for record in records:
