@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-20
+
 ### Added
 
 - M1 结构化回答兼容层，显式区分 `evidence_answer`、`insufficient_evidence`、`needs_clarification` 与 `out_of_scope`。
@@ -22,6 +24,7 @@
 
 - 不在允许快照或权限范围内的证据会在进入生成提示和返回 sources 之前被移除。
 - Trace 分开保存被拒绝的生成尝试与最终交付结果，避免失败草稿被误当作用户收到的回答。
+- M1 累积离线门禁显式禁用 dotenv 与真实模型调用，CI 上传按 commit 和重跑编号区分的机器可读报告。
 
 ### Known limitations
 
