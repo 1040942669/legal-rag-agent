@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
+from typing import Any
 
 from .adaptive import AdaptiveRetrievalResult, retrieve_adaptive
 from .evidence import build_low_confidence_answer, check_evidence_sufficiency
+from .json_utils import validate_json_unicode
 from .llm import build_completion_client
 from .models import (
     AnswerClaim,
@@ -28,6 +31,10 @@ from .verifier import (
 
 
 LEGAL_DISCLAIMER = STANDARD_DISCLAIMER
+CONVERSATION_STATE_SCHEMA_VERSION = 1
+ASSISTANT_SESSION_STATE_SCHEMA_VERSION = 1
+MAX_RENDERED_MEMORY_MESSAGES = 8
+CONVERSATION_ROLES = frozenset({"user", "assistant"})
 PRE_RETRIEVAL_REFUSAL_FLAGS = {
     "case_strategy",
     "illegal_help",
@@ -41,12 +48,35 @@ class ConversationMemory:
     token_limit: int = 2000
     messages: list[tuple[str, str]] = field(default_factory=list)
 
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.token_limit, bool)
+            or not isinstance(self.token_limit, int)
+            or self.token_limit < 1
+        ):
+            raise ValueError("conversation token_limit must be a positive integer")
+        initial_messages = list(self.messages)
+        self.messages = []
+        for role, content in initial_messages:
+            self.add(role, content)
+
     def add(self, role: str, content: str) -> None:
+        if role not in CONVERSATION_ROLES:
+            raise ValueError(f"unsupported conversation role: {role!r}")
+        if not isinstance(content, str):
+            raise ValueError("conversation content must be a string")
+        validate_json_unicode(content)
+        expected_role = "user" if len(self.messages) % 2 == 0 else "assistant"
+        if role != expected_role:
+            raise ValueError(
+                f"conversation messages must alternate user/assistant; expected {expected_role}"
+            )
         self.messages.append((role, content))
-        self._trim()
+        if role == "assistant":
+            self._trim()
 
     def render(self) -> str:
-        return "\n".join(f"{role}: {content}" for role, content in self.messages[-8:])
+        return self._render_messages(self.messages)
 
     def last_user_question(self) -> str:
         for role, content in reversed(self.messages):
@@ -63,9 +93,97 @@ class ConversationMemory:
     def clear(self) -> None:
         self.messages.clear()
 
+    def export_state(self) -> dict[str, Any]:
+        """Return a strict JSON checkpoint without sharing mutable state."""
+
+        state = {
+            "schema_version": CONVERSATION_STATE_SCHEMA_VERSION,
+            "token_limit": self.token_limit,
+            "messages": [
+                {"role": role, "content": content} for role, content in self.messages
+            ],
+        }
+        self._validated_state_messages(state)
+        return state
+
+    def restore_state(self, state: Mapping[str, Any]) -> None:
+        """Replace memory only after a checkpoint passes every validation."""
+
+        restored = self._validated_state_messages(state)
+        self.messages = restored
+
+    def _validated_state_messages(
+        self,
+        state: Mapping[str, Any],
+    ) -> list[tuple[str, str]]:
+        if not isinstance(state, Mapping) or set(state) != {
+            "schema_version",
+            "token_limit",
+            "messages",
+        }:
+            raise ValueError("conversation state fields are invalid")
+        validate_json_unicode(dict(state))
+        schema_version = state["schema_version"]
+        if (
+            isinstance(schema_version, bool)
+            or not isinstance(schema_version, int)
+            or schema_version != CONVERSATION_STATE_SCHEMA_VERSION
+        ):
+            raise ValueError("conversation state schema is unsupported")
+        token_limit = state["token_limit"]
+        if (
+            isinstance(token_limit, bool)
+            or not isinstance(token_limit, int)
+            or token_limit != self.token_limit
+        ):
+            raise ValueError("conversation state token_limit is incompatible")
+        raw_messages = state["messages"]
+        if not isinstance(raw_messages, list):
+            raise ValueError("conversation state messages must be a list")
+        if len(raw_messages) > MAX_RENDERED_MEMORY_MESSAGES:
+            raise ValueError(
+                f"conversation state may contain at most {MAX_RENDERED_MEMORY_MESSAGES} messages"
+            )
+        if len(raw_messages) % 2:
+            raise ValueError(
+                "conversation state must contain complete user/assistant pairs"
+            )
+        restored: list[tuple[str, str]] = []
+        for index, raw_message in enumerate(raw_messages):
+            if not isinstance(raw_message, Mapping) or set(raw_message) != {
+                "role",
+                "content",
+            }:
+                raise ValueError("conversation state message fields are invalid")
+            role = raw_message["role"]
+            content = raw_message["content"]
+            if not isinstance(role, str) or role not in CONVERSATION_ROLES:
+                raise ValueError("conversation state message role is invalid")
+            expected_role = "user" if index % 2 == 0 else "assistant"
+            if role != expected_role:
+                raise ValueError(
+                    "conversation state messages must alternate user/assistant"
+                )
+            if not isinstance(content, str):
+                raise ValueError("conversation state message content must be a string")
+            validate_json_unicode(content)
+            restored.append((role, content))
+        if estimate_tokens(self._render_messages(restored)) > self.token_limit:
+            raise ValueError("conversation state exceeds the configured token budget")
+        return restored
+
+    @staticmethod
+    def _render_messages(messages: list[tuple[str, str]]) -> str:
+        return "\n".join(
+            f"{role}: {content}"
+            for role, content in messages[-MAX_RENDERED_MEMORY_MESSAGES:]
+        )
+
     def _trim(self) -> None:
+        while len(self.messages) > MAX_RENDERED_MEMORY_MESSAGES:
+            del self.messages[:2]
         while estimate_tokens(self.render()) > self.token_limit and self.messages:
-            self.messages.pop(0)
+            del self.messages[:2]
 
 
 class LegalChatAssistant:
@@ -128,7 +246,46 @@ class LegalChatAssistant:
         self.last_evidence_source_id_map = {}
         self.last_generation_error = None
 
-    def answer(self, question: str, *, generate: bool = True) -> tuple[str, list[SearchResult]]:
+    def export_session_state(self) -> dict[str, Any]:
+        """Export only durable conversation state, never per-attempt telemetry."""
+
+        return {
+            "schema_version": ASSISTANT_SESSION_STATE_SCHEMA_VERSION,
+            "memory": self.memory.export_state(),
+        }
+
+    def restore_session_state(self, state: Mapping[str, Any]) -> None:
+        """Restore a validated conversation checkpoint without partial mutation."""
+
+        if not isinstance(state, Mapping) or set(state) != {
+            "schema_version",
+            "memory",
+        }:
+            raise ValueError("assistant session state fields are invalid")
+        validate_json_unicode(dict(state))
+        schema_version = state["schema_version"]
+        if (
+            isinstance(schema_version, bool)
+            or not isinstance(schema_version, int)
+            or schema_version != ASSISTANT_SESSION_STATE_SCHEMA_VERSION
+        ):
+            raise ValueError("assistant session state schema is unsupported")
+        restored_memory = ConversationMemory(token_limit=self.memory.token_limit)
+        restored_memory.restore_state(state["memory"])
+        self.memory = restored_memory
+        self.last_adaptive_result = None
+        self.last_evidence_check = None
+        self.last_verification = None
+        self.last_pre_fallback_verification = None
+        self.last_pre_fallback_answer = None
+        self.last_structured_answer = None
+        self.last_rejected_original_source_ids = []
+        self.last_evidence_source_id_map = {}
+        self.last_generation_error = None
+
+    def answer(
+        self, question: str, *, generate: bool = True
+    ) -> tuple[str, list[SearchResult]]:
         standalone_question = self.condense_question(question)
         pre_analysis = analyze_query(standalone_question)
         self.last_adaptive_result = None
@@ -182,7 +339,9 @@ class LegalChatAssistant:
                 normalized_query=adaptive_result.normalized_query,
                 plans=adaptive_result.plans,
             )
-            evidence_check = replace(evidence_check, stop_reason="evidence_scope_filtered")
+            evidence_check = replace(
+                evidence_check, stop_reason="evidence_scope_filtered"
+            )
             adaptive_result = replace(
                 adaptive_result,
                 results=results,
@@ -208,7 +367,9 @@ class LegalChatAssistant:
                 [],
                 evidence_check=adaptive_result.evidence_check,
                 risk_flags=adaptive_result.analysis.risk_flags,
-                expected_answer_mode=expected_limited_answer_mode(adaptive_result.evidence_check),
+                expected_answer_mode=expected_limited_answer_mode(
+                    adaptive_result.evidence_check
+                ),
                 disclaimer=LEGAL_DISCLAIMER,
                 context=self.verification_context,
             )
@@ -218,14 +379,19 @@ class LegalChatAssistant:
             self.memory.add("assistant", answer.answer_text)
             return answer.answer_text, results
 
-        if adaptive_result.evidence_check and not adaptive_result.evidence_check.sufficient:
+        if (
+            adaptive_result.evidence_check
+            and not adaptive_result.evidence_check.sufficient
+        ):
             answer = build_limited_structured_answer(adaptive_result.evidence_check)
             answer, verification = self._verify_programmatic_answer(
                 answer,
                 results,
                 evidence_check=adaptive_result.evidence_check,
                 risk_flags=adaptive_result.analysis.risk_flags,
-                expected_answer_mode=expected_limited_answer_mode(adaptive_result.evidence_check),
+                expected_answer_mode=expected_limited_answer_mode(
+                    adaptive_result.evidence_check
+                ),
                 disclaimer=LEGAL_DISCLAIMER,
                 context=self.verification_context,
             )
@@ -529,7 +695,9 @@ def build_risk_refusal_answer(risk_flags: list[str]) -> str:
         reason = "我不能提供医疗、金融或投资等专业建议。"
     else:
         reason = "这个问题不属于当前中国现行法律文本检索范围。"
-    return append_disclaimer(reason + "\n\n我可以帮助检索相关法律条文或解释公开法律文本。")
+    return append_disclaimer(
+        reason + "\n\n我可以帮助检索相关法律条文或解释公开法律文本。"
+    )
 
 
 def append_disclaimer(answer: str) -> str:
