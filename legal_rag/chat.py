@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping
+from copy import deepcopy
 from dataclasses import dataclass, field, replace
+from threading import RLock
 from typing import Any
 
 from .adaptive import AdaptiveRetrievalResult, retrieve_adaptive
@@ -17,7 +19,12 @@ from .models import (
     VerificationContext,
     VerificationResult,
 )
-from .query import analyze_query, extract_article_numbers, extract_law_names
+from .query import (
+    QueryAnalysis,
+    analyze_query,
+    extract_article_numbers,
+    extract_law_names,
+)
 from .retrieval import Retriever, format_sources
 from .verifier import (
     SAFE_CLARIFICATION_QUESTION,
@@ -35,6 +42,7 @@ CONVERSATION_STATE_SCHEMA_VERSION = 1
 ASSISTANT_SESSION_STATE_SCHEMA_VERSION = 1
 MAX_RENDERED_MEMORY_MESSAGES = 8
 CONVERSATION_ROLES = frozenset({"user", "assistant"})
+STRUCTURED_ANSWER_PARSER_VERSION = "m1-structured-answer-v1"
 PRE_RETRIEVAL_REFUSAL_FLAGS = {
     "case_strategy",
     "illegal_help",
@@ -43,10 +51,21 @@ PRE_RETRIEVAL_REFUSAL_FLAGS = {
 }
 
 
+@dataclass(frozen=True)
+class ConversationMemorySnapshot:
+    revision: int
+    token_limit: int
+    messages: tuple[tuple[str, str], ...]
+    rendered: str
+    state: Mapping[str, Any]
+
+
 @dataclass
 class ConversationMemory:
     token_limit: int = 2000
     messages: list[tuple[str, str]] = field(default_factory=list)
+    _revision: int = field(default=0, init=False, repr=False, compare=False)
+    _lock: RLock = field(default_factory=RLock, init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if (
@@ -61,56 +80,129 @@ class ConversationMemory:
             self.add(role, content)
 
     def add(self, role: str, content: str) -> None:
-        if role not in CONVERSATION_ROLES:
-            raise ValueError(f"unsupported conversation role: {role!r}")
-        if not isinstance(content, str):
-            raise ValueError("conversation content must be a string")
-        validate_json_unicode(content)
-        expected_role = "user" if len(self.messages) % 2 == 0 else "assistant"
-        if role != expected_role:
+        with self._lock:
+            if role not in CONVERSATION_ROLES:
+                raise ValueError(f"unsupported conversation role: {role!r}")
+            if not isinstance(content, str):
+                raise ValueError("conversation content must be a string")
+            validate_json_unicode(content)
+            expected_role = "user" if len(self.messages) % 2 == 0 else "assistant"
+            if role != expected_role:
+                raise ValueError(
+                    "conversation messages must alternate user/assistant; "
+                    f"expected {expected_role}"
+                )
+            self.messages.append((role, content))
+            if role == "assistant":
+                self._trim()
+            self._revision += 1
+
+    def add_turn(self, user_content: str, assistant_content: str) -> None:
+        """Commit one complete turn after both messages pass validation."""
+
+        with self._lock:
+            self._add_turn_locked(user_content, assistant_content)
+
+    def compare_and_add_turn(
+        self,
+        *,
+        expected_revision: int,
+        expected_messages: tuple[tuple[str, str], ...],
+        expected_token_limit: int,
+        user_content: str,
+        assistant_content: str,
+    ) -> None:
+        """Atomically reject a stale snapshot or append one complete turn."""
+
+        with self._lock:
+            if (
+                self._revision != expected_revision
+                or tuple(self.messages) != expected_messages
+                or self.token_limit != expected_token_limit
+            ):
+                raise RuntimeError("conversation state changed before turn commit")
+            self._add_turn_locked(user_content, assistant_content)
+
+    def _add_turn_locked(self, user_content: str, assistant_content: str) -> None:
+        if len(self.messages) % 2:
             raise ValueError(
-                f"conversation messages must alternate user/assistant; expected {expected_role}"
+                "cannot commit a turn while conversation state is incomplete"
             )
-        self.messages.append((role, content))
-        if role == "assistant":
-            self._trim()
+        for name, content in (
+            ("user content", user_content),
+            ("assistant content", assistant_content),
+        ):
+            if not isinstance(content, str):
+                raise ValueError(f"conversation {name} must be a string")
+            validate_json_unicode(content)
+        self.messages = [
+            *self.messages,
+            ("user", user_content),
+            ("assistant", assistant_content),
+        ]
+        self._trim()
+        self._revision += 1
 
     def render(self) -> str:
-        return self._render_messages(self.messages)
+        with self._lock:
+            return self._render_messages(self.messages)
 
     def last_user_question(self) -> str:
-        for role, content in reversed(self.messages):
-            if role == "user":
-                return content
+        with self._lock:
+            for role, content in reversed(self.messages):
+                if role == "user":
+                    return content
         return ""
 
     def last_assistant_answer(self) -> str:
-        for role, content in reversed(self.messages):
-            if role == "assistant":
-                return content
+        with self._lock:
+            for role, content in reversed(self.messages):
+                if role == "assistant":
+                    return content
         return ""
 
     def clear(self) -> None:
-        self.messages.clear()
+        with self._lock:
+            self.messages.clear()
+            self._revision += 1
 
     def export_state(self) -> dict[str, Any]:
         """Return a strict JSON checkpoint without sharing mutable state."""
 
-        state = {
+        with self._lock:
+            state = self._state_locked()
+            self._validated_state_messages(state)
+            return state
+
+    def snapshot(self) -> ConversationMemorySnapshot:
+        """Capture every value used by a staged turn under one memory lock."""
+
+        with self._lock:
+            messages = tuple(self.messages)
+            return ConversationMemorySnapshot(
+                revision=self._revision,
+                token_limit=self.token_limit,
+                messages=messages,
+                rendered=self._render_messages(list(messages)),
+                state=self._state_locked(),
+            )
+
+    def _state_locked(self) -> dict[str, Any]:
+        return {
             "schema_version": CONVERSATION_STATE_SCHEMA_VERSION,
             "token_limit": self.token_limit,
             "messages": [
                 {"role": role, "content": content} for role, content in self.messages
             ],
         }
-        self._validated_state_messages(state)
-        return state
 
     def restore_state(self, state: Mapping[str, Any]) -> None:
         """Replace memory only after a checkpoint passes every validation."""
 
         restored = self._validated_state_messages(state)
-        self.messages = restored
+        with self._lock:
+            self.messages = restored
+            self._revision += 1
 
     def _validated_state_messages(
         self,
@@ -186,6 +278,54 @@ class ConversationMemory:
             del self.messages[:2]
 
 
+@dataclass(frozen=True)
+class PreparedQuestion:
+    original_question: str
+    standalone_question: str
+    analysis: QueryAnalysis
+    memory_text: str
+    session_state_before: Mapping[str, Any]
+    memory_messages_before: tuple[tuple[str, str], ...]
+    memory_token_limit: int
+    memory_revision: int
+    session_revision: int
+
+
+@dataclass(frozen=True)
+class RetrievedTurn:
+    prepared: PreparedQuestion
+    adaptive_result: AdaptiveRetrievalResult | None
+    results: tuple[SearchResult, ...]
+    evidence_check: EvidenceCheck | None
+    rejected_source_ids: tuple[str, ...] = ()
+    source_id_map: Mapping[str, str] = field(default_factory=dict)
+    terminal_kind: str | None = None
+    terminal_answer: StructuredAnswer | None = None
+    terminal_expected_answer_mode: str | None = None
+
+
+@dataclass(frozen=True)
+class GeneratedTurn:
+    retrieved: RetrievedTurn
+    kind: str
+    answer_text: str
+    answer: StructuredAnswer | None = None
+    generation_error: str | None = None
+    expected_answer_mode: str | None = None
+    raw_response: str | StructuredAnswer | None = None
+    parser_version: str | None = None
+
+
+@dataclass(frozen=True)
+class VerifiedTurn:
+    generated: GeneratedTurn
+    answer_text: str
+    final_answer: StructuredAnswer | None
+    verification: VerificationResult | None
+    pre_fallback_answer: StructuredAnswer | None = None
+    pre_fallback_verification: VerificationResult | None = None
+
+
 class LegalChatAssistant:
     def __init__(
         self,
@@ -224,6 +364,8 @@ class LegalChatAssistant:
         self.last_evidence_source_id_map: dict[str, str] = {}
         self.last_generation_error: str | None = None
         self.memory = ConversationMemory(token_limit=memory_token_limit)
+        self._commit_lock = RLock()
+        self._session_revision = 0
         self.llm = build_completion_client(
             model,
             ollama_base_url=ollama_base_url,
@@ -235,7 +377,12 @@ class LegalChatAssistant:
 
         Used by evaluation, where each case must be answered in isolation.
         """
-        self.memory.clear()
+        with self._commit_lock:
+            self.memory.clear()
+            self._clear_observations()
+            self._session_revision += 1
+
+    def _clear_observations(self) -> None:
         self.last_adaptive_result = None
         self.last_evidence_check = None
         self.last_verification = None
@@ -249,10 +396,11 @@ class LegalChatAssistant:
     def export_session_state(self) -> dict[str, Any]:
         """Export only durable conversation state, never per-attempt telemetry."""
 
-        return {
-            "schema_version": ASSISTANT_SESSION_STATE_SCHEMA_VERSION,
-            "memory": self.memory.export_state(),
-        }
+        with self._commit_lock:
+            return {
+                "schema_version": ASSISTANT_SESSION_STATE_SCHEMA_VERSION,
+                "memory": self.memory.export_state(),
+            }
 
     def restore_session_state(self, state: Mapping[str, Any]) -> None:
         """Restore a validated conversation checkpoint without partial mutation."""
@@ -272,52 +420,72 @@ class LegalChatAssistant:
             raise ValueError("assistant session state schema is unsupported")
         restored_memory = ConversationMemory(token_limit=self.memory.token_limit)
         restored_memory.restore_state(state["memory"])
-        self.memory = restored_memory
-        self.last_adaptive_result = None
-        self.last_evidence_check = None
-        self.last_verification = None
-        self.last_pre_fallback_verification = None
-        self.last_pre_fallback_answer = None
-        self.last_structured_answer = None
-        self.last_rejected_original_source_ids = []
-        self.last_evidence_source_id_map = {}
-        self.last_generation_error = None
+        with self._commit_lock:
+            self.memory = restored_memory
+            self._clear_observations()
+            self._session_revision += 1
 
     def answer(
         self, question: str, *, generate: bool = True
     ) -> tuple[str, list[SearchResult]]:
-        standalone_question = self.condense_question(question)
-        pre_analysis = analyze_query(standalone_question)
-        self.last_adaptive_result = None
-        self.last_evidence_check = None
-        self.last_verification = None
-        self.last_pre_fallback_verification = None
-        self.last_pre_fallback_answer = None
-        self.last_structured_answer = None
-        self.last_rejected_original_source_ids = []
-        self.last_evidence_source_id_map = {}
-        self.last_generation_error = None
-        if should_refuse_before_retrieval(pre_analysis.risk_flags):
+        prepared = self.prepare_question(question)
+        with self._commit_lock:
+            current_memory = self.memory.snapshot()
+            if (
+                self._session_revision == prepared.session_revision
+                and current_memory.revision == prepared.memory_revision
+                and current_memory.messages == prepared.memory_messages_before
+                and current_memory.token_limit == prepared.memory_token_limit
+            ):
+                self._clear_observations()
+        retrieved = self.retrieve_turn(prepared)
+        generated = self.generate_turn(retrieved, generate=generate)
+        verified = self.verify_turn(generated)
+        self.commit_turn(verified)
+        return verified.answer_text, list(retrieved.results)
+
+    def prepare_question(self, question: str) -> PreparedQuestion:
+        with self._commit_lock:
+            memory_snapshot = self.memory.snapshot()
+            session_revision = self._session_revision
+        standalone_question = self.condense_question(
+            question,
+            memory_messages=memory_snapshot.messages,
+        )
+        return PreparedQuestion(
+            original_question=question,
+            standalone_question=standalone_question,
+            analysis=analyze_query(standalone_question),
+            memory_text=memory_snapshot.rendered,
+            session_state_before={
+                "schema_version": ASSISTANT_SESSION_STATE_SCHEMA_VERSION,
+                "memory": memory_snapshot.state,
+            },
+            memory_messages_before=memory_snapshot.messages,
+            memory_token_limit=memory_snapshot.token_limit,
+            memory_revision=memory_snapshot.revision,
+            session_revision=session_revision,
+        )
+
+    def retrieve_turn(self, prepared: PreparedQuestion) -> RetrievedTurn:
+        if should_refuse_before_retrieval(prepared.analysis.risk_flags):
             answer = programmatic_answer(
-                build_risk_refusal_answer(pre_analysis.risk_flags),
+                build_risk_refusal_answer(prepared.analysis.risk_flags),
                 answer_mode="out_of_scope",
                 limitations=["请求超出法律文本学习助手允许的帮助范围。"],
             )
-            answer, verification = self._verify_programmatic_answer(
-                answer,
-                [],
-                expected_answer_mode="out_of_scope",
-                risk_flags=pre_analysis.risk_flags,
-                disclaimer=LEGAL_DISCLAIMER,
-                context=self.verification_context,
+            return RetrievedTurn(
+                prepared=prepared,
+                adaptive_result=None,
+                results=(),
+                evidence_check=None,
+                terminal_kind="pre_retrieval_refusal",
+                terminal_answer=answer,
+                terminal_expected_answer_mode="out_of_scope",
             )
-            self.last_structured_answer = answer
-            self.last_verification = verification
-            self.memory.add("user", question)
-            self.memory.add("assistant", answer.answer_text)
-            return answer.answer_text, []
+
         adaptive_result = retrieve_adaptive(
-            standalone_question,
+            prepared.standalone_question,
             self.retriever,
             top_k=self.top_k,
             enabled=self.adaptive_enabled,
@@ -333,7 +501,7 @@ class LegalChatAssistant:
         )
         if rejected_source_ids:
             evidence_check = check_evidence_sufficiency(
-                standalone_question,
+                prepared.standalone_question,
                 results,
                 analysis=adaptive_result.analysis,
                 normalized_query=adaptive_result.normalized_query,
@@ -355,72 +523,241 @@ class LegalChatAssistant:
                     },
                 },
             )
-        self.last_rejected_original_source_ids = rejected_source_ids
-        self.last_evidence_source_id_map = source_id_map
-        self.last_adaptive_result = adaptive_result
-        self.last_evidence_check = adaptive_result.evidence_check
 
-        if not results:
-            answer = build_limited_structured_answer(adaptive_result.evidence_check)
-            answer, verification = self._verify_programmatic_answer(
-                answer,
-                [],
-                evidence_check=adaptive_result.evidence_check,
-                risk_flags=adaptive_result.analysis.risk_flags,
-                expected_answer_mode=expected_limited_answer_mode(
-                    adaptive_result.evidence_check
-                ),
-                disclaimer=LEGAL_DISCLAIMER,
-                context=self.verification_context,
+        evidence_check = adaptive_result.evidence_check
+        terminal_answer = None
+        terminal_kind = None
+        terminal_expected_answer_mode = None
+        if not results or not evidence_check.sufficient:
+            terminal_answer = build_limited_structured_answer(evidence_check)
+            terminal_kind = "evidence_limited"
+            terminal_expected_answer_mode = expected_limited_answer_mode(evidence_check)
+        return RetrievedTurn(
+            prepared=prepared,
+            adaptive_result=adaptive_result,
+            results=tuple(results),
+            evidence_check=evidence_check,
+            rejected_source_ids=tuple(rejected_source_ids),
+            source_id_map=dict(source_id_map),
+            terminal_kind=terminal_kind,
+            terminal_answer=terminal_answer,
+            terminal_expected_answer_mode=terminal_expected_answer_mode,
+        )
+
+    def generate_turn(
+        self,
+        retrieved: RetrievedTurn,
+        *,
+        generate: bool,
+    ) -> GeneratedTurn:
+        if retrieved.terminal_answer is not None:
+            if (
+                retrieved.terminal_kind is None
+                or retrieved.terminal_expected_answer_mode is None
+            ):
+                raise RuntimeError("terminal retrieval result is missing its contract")
+            return GeneratedTurn(
+                retrieved=retrieved,
+                kind=retrieved.terminal_kind,
+                answer_text=retrieved.terminal_answer.answer_text,
+                answer=retrieved.terminal_answer,
+                expected_answer_mode=retrieved.terminal_expected_answer_mode,
             )
-            self.last_structured_answer = answer
-            self.last_verification = verification
-            self.memory.add("user", question)
-            self.memory.add("assistant", answer.answer_text)
-            return answer.answer_text, results
-
-        if (
-            adaptive_result.evidence_check
-            and not adaptive_result.evidence_check.sufficient
-        ):
-            answer = build_limited_structured_answer(adaptive_result.evidence_check)
-            answer, verification = self._verify_programmatic_answer(
-                answer,
-                results,
-                evidence_check=adaptive_result.evidence_check,
-                risk_flags=adaptive_result.analysis.risk_flags,
-                expected_answer_mode=expected_limited_answer_mode(
-                    adaptive_result.evidence_check
-                ),
-                disclaimer=LEGAL_DISCLAIMER,
-                context=self.verification_context,
-            )
-            self.last_structured_answer = answer
-            self.last_verification = verification
-            self.memory.add("user", question)
-            self.memory.add("assistant", answer.answer_text)
-            return answer.answer_text, results
-
+        results = list(retrieved.results)
         if not generate:
             answer_text = append_disclaimer(render_retrieval_only_answer(results))
-            self.memory.add("user", question)
-            self.memory.add("assistant", answer_text)
-            return answer_text, results
-        else:
-            prompt = build_qa_prompt(
-                question=standalone_question,
-                original_question=question,
-                memory=self.memory.render(),
-                results=results,
+            return GeneratedTurn(
+                retrieved=retrieved,
+                kind="retrieval_only",
+                answer_text=answer_text,
             )
-            try:
-                raw_answer = self.llm.complete(prompt)
-            except Exception:
-                self.last_generation_error = "generation_error"
+
+        prompt = build_qa_prompt(
+            question=retrieved.prepared.standalone_question,
+            original_question=retrieved.prepared.original_question,
+            memory=retrieved.prepared.memory_text,
+            results=results,
+        )
+        try:
+            raw_answer = self.llm.complete(prompt)
+        except Exception:
+            answer = programmatic_answer(
+                "当前无法连接生成模型，因此无法给出可靠结论。",
+                answer_mode="insufficient_evidence",
+                limitations=["生成模型当前不可用。"],
+            )
+            return GeneratedTurn(
+                retrieved=retrieved,
+                kind="generation_error",
+                answer_text=answer.answer_text,
+                answer=answer,
+                generation_error="generation_error",
+                expected_answer_mode="insufficient_evidence",
+            )
+
+        if isinstance(raw_answer, StructuredAnswer):
+            raw_response: str | StructuredAnswer | None = deepcopy(raw_answer)
+            parser_input: str | StructuredAnswer | None = deepcopy(raw_answer)
+        else:
+            raw_response = raw_answer if isinstance(raw_answer, str) else None
+            parser_input = raw_response
+        answer = parse_structured_answer(parser_input)  # type: ignore[arg-type]
+        answer = replace(answer, answer_text=append_disclaimer(answer.answer_text))
+        return GeneratedTurn(
+            retrieved=retrieved,
+            kind="model",
+            answer_text=answer.answer_text,
+            answer=answer,
+            expected_answer_mode="evidence_answer",
+            raw_response=raw_response,
+            parser_version=STRUCTURED_ANSWER_PARSER_VERSION,
+        )
+
+    def verify_turn(self, generated: GeneratedTurn) -> VerifiedTurn:
+        retrieved = generated.retrieved
+        results = list(retrieved.results)
+        if generated.kind == "retrieval_only":
+            expected_text = append_disclaimer(render_retrieval_only_answer(results))
+            if (
+                retrieved.terminal_kind is not None
+                or retrieved.terminal_answer is not None
+                or retrieved.terminal_expected_answer_mode is not None
+                or generated.answer is not None
+                or generated.generation_error is not None
+                or generated.expected_answer_mode is not None
+                or generated.raw_response is not None
+                or generated.parser_version is not None
+                or generated.answer_text != expected_text
+            ):
+                raise RuntimeError("retrieval-only turn contract is invalid")
+            return VerifiedTurn(
+                generated=generated,
+                answer_text=expected_text,
+                final_answer=None,
+                verification=None,
+            )
+        if generated.answer is None or generated.expected_answer_mode is None:
+            raise RuntimeError("generated turn is missing its answer contract")
+        if generated.answer_text != generated.answer.answer_text:
+            raise RuntimeError("generated answer text does not match its envelope")
+
+        terminal_kinds = {"pre_retrieval_refusal", "evidence_limited"}
+        if generated.kind in terminal_kinds:
+            if (
+                retrieved.terminal_kind != generated.kind
+                or retrieved.terminal_answer != generated.answer
+                or retrieved.terminal_expected_answer_mode
+                != generated.expected_answer_mode
+                or generated.generation_error is not None
+                or generated.raw_response is not None
+                or generated.parser_version is not None
+            ):
+                raise RuntimeError("terminal generated turn contract is invalid")
+        elif (
+            retrieved.terminal_kind is not None
+            or retrieved.terminal_answer is not None
+            or retrieved.terminal_expected_answer_mode is not None
+        ):
+            raise RuntimeError("non-terminal turn contains a terminal contract")
+
+        if generated.kind == "pre_retrieval_refusal":
+            if (
+                generated.expected_answer_mode != "out_of_scope"
+                or retrieved.adaptive_result is not None
+                or retrieved.results
+                or retrieved.evidence_check is not None
+            ):
+                raise RuntimeError("pre-retrieval refusal contract is invalid")
+            answer, verification = self._verify_programmatic_answer(
+                generated.answer,
+                [],
+                expected_answer_mode=generated.expected_answer_mode,
+                risk_flags=retrieved.prepared.analysis.risk_flags,
+                disclaimer=LEGAL_DISCLAIMER,
+                context=self.verification_context,
+            )
+        elif generated.kind == "evidence_limited":
+            if (
+                retrieved.adaptive_result is None
+                or retrieved.evidence_check is None
+                or retrieved.evidence_check.sufficient
+            ):
+                raise RuntimeError("limited-evidence turn contract is invalid")
+            answer, verification = self._verify_programmatic_answer(
+                generated.answer,
+                results,
+                expected_answer_mode=generated.expected_answer_mode,
+                evidence_check=retrieved.evidence_check,
+                risk_flags=(
+                    retrieved.adaptive_result.analysis.risk_flags
+                    if retrieved.adaptive_result is not None
+                    else retrieved.prepared.analysis.risk_flags
+                ),
+                disclaimer=LEGAL_DISCLAIMER,
+                context=self.verification_context,
+            )
+        elif generated.kind == "generation_error":
+            expected_error_answer = programmatic_answer(
+                "当前无法连接生成模型，因此无法给出可靠结论。",
+                answer_mode="insufficient_evidence",
+                limitations=["生成模型当前不可用。"],
+            )
+            if (
+                retrieved.adaptive_result is None
+                or retrieved.evidence_check is None
+                or generated.answer != expected_error_answer
+                or generated.generation_error != "generation_error"
+                or generated.expected_answer_mode != "insufficient_evidence"
+                or generated.raw_response is not None
+                or generated.parser_version is not None
+            ):
+                raise RuntimeError("generation-error turn contract is invalid")
+            answer, verification = self._verify_programmatic_answer(
+                generated.answer,
+                results,
+                expected_answer_mode=generated.expected_answer_mode,
+                disclaimer=LEGAL_DISCLAIMER,
+                context=self.verification_context,
+            )
+        elif generated.kind == "model":
+            if retrieved.adaptive_result is None or retrieved.evidence_check is None:
+                raise RuntimeError("model generation requires retrieved evidence")
+            if (
+                generated.generation_error is not None
+                or generated.expected_answer_mode != "evidence_answer"
+                or generated.parser_version != STRUCTURED_ANSWER_PARSER_VERSION
+            ):
+                raise RuntimeError("model generated turn contract is invalid")
+            reparsed_answer = parse_structured_answer(generated.raw_response)
+            reparsed_answer = replace(
+                reparsed_answer,
+                answer_text=append_disclaimer(reparsed_answer.answer_text),
+            )
+            if reparsed_answer != generated.answer:
+                raise RuntimeError("model answer does not match its raw response")
+            answer = generated.answer
+            verification = verify_answer(
+                answer,
+                results,
+                evidence_check=retrieved.evidence_check,
+                risk_flags=retrieved.adaptive_result.analysis.risk_flags,
+                expected_answer_mode=generated.expected_answer_mode,
+                disclaimer=LEGAL_DISCLAIMER,
+                context=self.verification_context,
+            )
+            if not verification.passed:
+                pre_fallback_answer = answer
+                pre_fallback_verification = verification
+                low_confidence = build_low_confidence_answer(retrieved.evidence_check)
+                fallback_text = build_verifier_fallback_answer(
+                    answer.answer_text,
+                    verification,
+                    low_confidence_answer=low_confidence,
+                )
                 answer = programmatic_answer(
-                    "当前无法连接生成模型，因此无法给出可靠结论。",
+                    fallback_text,
                     answer_mode="insufficient_evidence",
-                    limitations=["生成模型当前不可用。"],
+                    limitations=["原生成回答未通过结构或行为检查。"],
                 )
                 answer, verification = self._verify_programmatic_answer(
                     answer,
@@ -429,49 +766,95 @@ class LegalChatAssistant:
                     disclaimer=LEGAL_DISCLAIMER,
                     context=self.verification_context,
                 )
-                self.last_structured_answer = answer
-                self.last_verification = verification
-                self.memory.add("user", question)
-                self.memory.add("assistant", answer.answer_text)
-                return answer.answer_text, results
+                return VerifiedTurn(
+                    generated=generated,
+                    answer_text=answer.answer_text,
+                    final_answer=answer,
+                    verification=verification,
+                    pre_fallback_answer=pre_fallback_answer,
+                    pre_fallback_verification=pre_fallback_verification,
+                )
+        else:
+            raise RuntimeError(f"unsupported generated turn kind: {generated.kind!r}")
 
-        answer = parse_structured_answer(raw_answer)
-        answer = replace(answer, answer_text=append_disclaimer(answer.answer_text))
-        verification = verify_answer(
-            answer,
-            results,
-            evidence_check=adaptive_result.evidence_check,
-            risk_flags=adaptive_result.analysis.risk_flags,
-            expected_answer_mode="evidence_answer",
-            disclaimer=LEGAL_DISCLAIMER,
-            context=self.verification_context,
+        return VerifiedTurn(
+            generated=generated,
+            answer_text=answer.answer_text,
+            final_answer=answer,
+            verification=verification,
         )
-        if not verification.passed:
-            self.last_pre_fallback_verification = verification
-            self.last_pre_fallback_answer = answer
-            low_confidence = build_low_confidence_answer(adaptive_result.evidence_check)
-            fallback_text = build_verifier_fallback_answer(
-                answer.answer_text,
-                verification,
-                low_confidence_answer=low_confidence,
+
+    def commit_turn(self, verified: VerifiedTurn) -> None:
+        if not isinstance(verified, VerifiedTurn):
+            raise TypeError("commit_turn requires a VerifiedTurn")
+
+        # Materialize every caller-controlled value before changing durable or
+        # observable assistant state.  This keeps commit atomic even when a
+        # stage object contains a malformed Mapping or mutable nested value.
+        candidate = deepcopy(verified)
+        generated = candidate.generated
+        retrieved = generated.retrieved
+
+        published_adaptive_result = deepcopy(retrieved.adaptive_result)
+        published_evidence_check = deepcopy(retrieved.evidence_check)
+        published_rejected_source_ids = list(deepcopy(retrieved.rejected_source_ids))
+        published_source_id_map = dict(deepcopy(retrieved.source_id_map))
+        published_generation_error = deepcopy(generated.generation_error)
+
+        canonical = self.verify_turn(generated)
+        candidate_outputs = (
+            candidate.answer_text,
+            candidate.final_answer,
+            candidate.verification,
+            candidate.pre_fallback_answer,
+            candidate.pre_fallback_verification,
+        )
+        canonical_outputs = (
+            canonical.answer_text,
+            canonical.final_answer,
+            canonical.verification,
+            canonical.pre_fallback_answer,
+            canonical.pre_fallback_verification,
+        )
+        if candidate_outputs != canonical_outputs:
+            raise RuntimeError(
+                "verified turn does not match deterministic verification"
             )
-            answer = programmatic_answer(
-                fallback_text,
-                answer_mode="insufficient_evidence",
-                limitations=["原生成回答未通过结构或行为检查。"],
+        if canonical.verification is not None and not canonical.verification.passed:
+            raise RuntimeError("verified turn did not pass required checks")
+
+        published_verification = deepcopy(canonical.verification)
+        published_pre_fallback_verification = deepcopy(
+            canonical.pre_fallback_verification
+        )
+        published_pre_fallback_answer = deepcopy(canonical.pre_fallback_answer)
+        published_structured_answer = deepcopy(canonical.final_answer)
+        published_answer_text = canonical.answer_text
+
+        # Only the short compare-and-publish section is serialized.  All
+        # expensive or caller-controlled work above may fail without holding
+        # the lock or changing state; inside the lock, one stale snapshot can
+        # win at most once.
+        with self._commit_lock:
+            if self._session_revision != retrieved.prepared.session_revision:
+                raise RuntimeError("conversation state changed before turn commit")
+            self.memory.compare_and_add_turn(
+                expected_revision=retrieved.prepared.memory_revision,
+                expected_messages=retrieved.prepared.memory_messages_before,
+                expected_token_limit=retrieved.prepared.memory_token_limit,
+                user_content=retrieved.prepared.original_question,
+                assistant_content=published_answer_text,
             )
-            answer, verification = self._verify_programmatic_answer(
-                answer,
-                results,
-                expected_answer_mode="insufficient_evidence",
-                disclaimer=LEGAL_DISCLAIMER,
-                context=self.verification_context,
-            )
-        self.last_structured_answer = answer
-        self.last_verification = verification
-        self.memory.add("user", question)
-        self.memory.add("assistant", answer.answer_text)
-        return answer.answer_text, results
+            self.last_adaptive_result = published_adaptive_result
+            self.last_evidence_check = published_evidence_check
+            self.last_verification = published_verification
+            self.last_pre_fallback_verification = published_pre_fallback_verification
+            self.last_pre_fallback_answer = published_pre_fallback_answer
+            self.last_structured_answer = published_structured_answer
+            self.last_rejected_original_source_ids = published_rejected_source_ids
+            self.last_evidence_source_id_map = published_source_id_map
+            self.last_generation_error = published_generation_error
+            self._session_revision += 1
 
     def _verify_programmatic_answer(
         self,
@@ -510,31 +893,61 @@ class LegalChatAssistant:
             raise RuntimeError("programmatic terminal response failed verification")
         return safe_answer, safe_verification
 
-    def condense_question(self, question: str) -> str:
-        last_question = self.memory.last_user_question()
+    def condense_question(
+        self,
+        question: str,
+        *,
+        memory_messages: tuple[tuple[str, str], ...] | None = None,
+    ) -> str:
+        if memory_messages is None:
+            memory_messages = self.memory.snapshot().messages
+        last_question = next(
+            (content for role, content in reversed(memory_messages) if role == "user"),
+            "",
+        )
         if not last_question:
             return question
         pronouns = ("这个", "这条", "上一条", "刚才", "它", "该条", "这一条")
         if not any(word in question for word in pronouns):
             return question
+        last_answer = next(
+            (
+                content
+                for role, content in reversed(memory_messages)
+                if role == "assistant"
+            ),
+            "",
+        )
         if self.condense_with_llm:
-            rewritten = self.condense_with_llm_rewrite(question, last_question)
+            rewritten = self.condense_with_llm_rewrite(
+                question,
+                last_question,
+                last_answer=last_answer,
+            )
             if rewritten:
                 return rewritten
         # Rule fallback: carry over the previous question plus the laws and
         # article numbers the assistant just cited, so retrieval keeps anchors.
-        references = extract_reference_hints(self.memory.last_assistant_answer())
+        references = extract_reference_hints(last_answer)
         condensed = f"结合上一轮问题“{last_question}”，回答：{question}"
         if references:
             condensed += f"（上一轮涉及：{'、'.join(references)}）"
         return condensed
 
-    def condense_with_llm_rewrite(self, question: str, last_question: str) -> str:
+    def condense_with_llm_rewrite(
+        self,
+        question: str,
+        last_question: str,
+        *,
+        last_answer: str | None = None,
+    ) -> str:
+        if last_answer is None:
+            last_answer = self.memory.last_assistant_answer()
         prompt = (
             "把用户的追问改写成一个不依赖上下文的独立中文检索问题。\n"
             "只输出改写后的问题本身，不要解释，不要加引号。\n\n"
             f"上一轮问题: {last_question}\n"
-            f"上一轮回答摘要: {self.memory.last_assistant_answer()[:300]}\n"
+            f"上一轮回答摘要: {last_answer[:300]}\n"
             f"用户追问: {question}\n"
         )
         try:
