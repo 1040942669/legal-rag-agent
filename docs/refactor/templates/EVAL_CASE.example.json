@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "record_kind": "synthetic_example_not_real_law",
+  "id": "synthetic-rule-001",
+  "question": "合成的示例规则甲要求提交时附带什么信息？",
+  "type": "explicit_article",
+  "expected_behavior": "evidence_answer",
+  "session_group": null,
+  "turn_index": 0,
+  "gold_evidence": [
+    {
+      "law_id": "synthetic-rule-a",
+      "version_id": "demo-v1",
+      "article_id": "1",
+      "text": "【合成测试资料，非真实法律】项目成员提交修改时，应附带修改说明。"
+    }
+  ],
+  "snapshot_id": "synthetic-demo-snapshot",
+  "split": "unit_fixture",
+  "annotation": {
+    "method": "synthetic_fixture",
+    "legal_authority_verified": false
+  },
+  "notes": "拟新增schema示例；需兼容适配，不直接替换既有EvalCase JSONL格式。"
+}

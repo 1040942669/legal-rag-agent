@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "record_kind": "example_not_executed",
+  "experiment_id": null,
+  "created_at": null,
+  "code": {
+    "commit": null,
+    "dirty": null
+  },
+  "config": {
+    "profile": null,
+    "hash": null
+  },
+  "dataset": {
+    "role": "legacy_regression",
+    "path": null,
+    "sha256": null,
+    "total_cases": null,
+    "gold_cases": null
+  },
+  "corpus": {
+    "snapshot_id": null,
+    "manifest_sha256": null,
+    "source_verified": false
+  },
+  "embedding": {
+    "provider": null,
+    "model": null,
+    "revision": null,
+    "dimensions": null,
+    "normalization": null,
+    "document_recipe_hash": null,
+    "query_recipe_hash": null
+  },
+  "retrieval": {
+    "backend": null,
+    "search_mode": null,
+    "top_k": null,
+    "filter_hash": null,
+    "index_build_id": null
+  },
+  "generation": {
+    "enabled": false,
+    "provider": null,
+    "model": null,
+    "revision": null,
+    "prompt_hash": null,
+    "parameters": {}
+  },
+  "judge": {
+    "enabled": false,
+    "provider": null,
+    "model": null,
+    "rubric_version": null
+  },
+  "execution": {
+    "mode": "offline",
+    "concurrency": 1,
+    "seed": 42,
+    "cache_mode": "disabled",
+    "live_model_calls_allowed": false
+  },
+  "environment": {
+    "os": null,
+    "python": null,
+    "hardware": null,
+    "dependency_lock_hash": null
+  },
+  "metrics_schema_version": null,
+  "result_counts": {
+    "succeeded": null,
+    "failed": null,
+    "not_run": null
+  },
+  "usage": {
+    "model_attempts": null,
+    "embedding_attempts": null,
+    "tokens": null,
+    "cost": null,
+    "cost_currency": null
+  },
+  "limitations": [
+    "Template only. Null denotes unknown/not run, never zero cost or success."
+  ]
+}
