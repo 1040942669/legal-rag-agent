@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "record_kind": "verified_release_receipt",
+  "milestone_id": "M0",
+  "version": "v0.1.1",
+  "repository": "1040942669/legal-rag-agent",
+  "branch": "master",
+  "pr_url": "https://github.com/1040942669/legal-rag-agent/pull/2",
+  "receipt_pr_url": "https://github.com/1040942669/legal-rag-agent/pull/3",
+  "release_target_sha": "cb7e01982ca6fb95cebde1e5d707527fd36a250c",
+  "tag_name": "v0.1.1",
+  "remote_tag_target_sha": "cb7e01982ca6fb95cebde1e5d707527fd36a250c",
+  "ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/35428226839",
+  "ci_verified_for_target_sha": true,
+  "release_url": "https://github.com/1040942669/legal-rag-agent/releases/tag/v0.1.1",
+  "release_is_draft": false,
+  "published_at": "2026-09-19T07:05:12Z",
+  "verified_at": "2026-09-19T07:05:42Z",
+  "verification_method": "GitHub Release API/CLI confirmed the published non-draft release; git ls-remote confirmed the annotated tag peeled target; GitHub Actions confirmed a successful master push run whose headSha equals the release target.",
+  "acceptance_report": "reports/refactor/M0.md",
+  "known_limitations": [
+    "M0 verifies an offline engineering baseline, not real legal-answer quality.",
+    "Historical real-corpus, generation, embedding, reranker, and judge experiments were not rerun.",
+    "The current verifier uses rank, string, refusal-keyword, and lexical heuristics; it does not prove semantic support or legal correctness.",
+    "The declared Python range is >=3.10, while M0 required gates fixed validation to Python 3.12.x.",
+    "Credential-shape scanning is defense in depth and not a guarantee that every possible secret pattern is detectable."
+  ],
+  "receipt_status": "verified",
+  "note": "This receipt is recorded after the software release. Its later documentation commit does not move or replace the v0.1.1 tag target."
+}
