@@ -352,10 +352,26 @@ def evaluate(
             judge_reason = str(judge_status["reason"] or "judge_not_available")
 
         keyword_value = keyword_coverage(answer, case.keywords) if answer_reason is None else None
+        source_ids_exist_value = (
+            verification.evidence_catalog_valid and not verification.missing_source_ids
+            if verification is not None
+            else None
+        )
         citation_ids_value = verification.citation_ids_valid if verification is not None else None
+        citation_valid_value = verification.citation_valid if verification is not None else None
         verifier_value = verification.passed if verification is not None else None
         semantic_value = (
             verification.semantic_support_status if verification is not None else None
+        )
+        evidence_scope_value = (
+            verification.evidence_scope_valid if verification is not None else None
+        )
+        evidence_scope_reason = (
+            verification_reason
+            if verification is None
+            else "scope_check_not_configured"
+            if evidence_scope_value is None
+            else None
         )
         response_mode_value = (
             bool(observed_answer_mode == expected_behavior and verification.response_mode_valid)
@@ -403,8 +419,33 @@ def evaluate(
                 no_gold_reason,
             ),
             "keyword_coverage": metric_value(keyword_value, answer_reason),
+            "schema_valid": metric_value(
+                verification.schema_valid if verification is not None else None,
+                verification_reason,
+            ),
+            "evidence_catalog_valid": metric_value(
+                verification.evidence_catalog_valid if verification is not None else None,
+                verification_reason,
+            ),
+            "source_ids_exist": metric_value(source_ids_exist_value, verification_reason),
             "citation_ids_valid": metric_value(citation_ids_value, verification_reason),
-            "citation_valid": metric_value(citation_ids_value, verification_reason),
+            "citation_alignment_valid": metric_value(
+                verification.citation_alignment_valid if verification is not None else None,
+                verification_reason,
+            ),
+            "evidence_scope_valid": metric_value(
+                evidence_scope_value,
+                evidence_scope_reason,
+            ),
+            "citation_valid": metric_value(citation_valid_value, verification_reason),
+            "disclaimer_present": metric_value(
+                verification.disclaimer_present if verification is not None else None,
+                verification_reason,
+            ),
+            "response_mode_valid": metric_value(
+                verification.response_mode_valid if verification is not None else None,
+                verification_reason,
+            ),
             "verifier_pass": metric_value(verifier_value, verification_reason),
             "semantic_support_status": metric_value(semantic_value, verification_reason),
             "response_mode_correct": metric_value(response_mode_value, verification_reason),
@@ -470,7 +511,9 @@ def evaluate(
                 keyword_coverage=keyword_value if keyword_value is not None else -1.0,
                 citation_hit=citation_hit(results, case),
                 sufficiency_pass=int(evidence_check.sufficient),
-                citation_valid=int(citation_ids_value) if citation_ids_value is not None else -1,
+                citation_valid=(
+                    int(citation_valid_value) if citation_valid_value is not None else -1
+                ),
                 verifier_pass=int(verifier_value) if verifier_value is not None else -1,
                 refusal_correctness=(
                     int(refusal_value) if refusal_value is not None else -1

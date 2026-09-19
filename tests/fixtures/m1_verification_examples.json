@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "fixture_id": "m1-verification-before-after-synthetic-v1",
+  "fixture_kind": "offline_regression_examples",
+  "synthetic": true,
+  "non_legal": true,
+  "contains_real_legal_material": false,
+  "purpose": "记录 M1 验证边界的改前风险与改后期望，仅用于离线规则回归。",
+  "quality_scope": {
+    "measures_real_legal_answer_quality": false,
+    "statement": "这些合成样例只验证分类与证据边界，不代表真实法律回答质量有所提升。"
+  },
+  "before_behavior_scope": "before_behavior 是对 M1 改造前规则行为的固定描述，不在测试中调用旧实现。",
+  "examples": [
+    {
+      "id": "m1-t01-disclaimer-is-not-refusal",
+      "requirement_id": "M1-T01",
+      "synthetic": true,
+      "non_legal": true,
+      "description": "虚构装配手册回答末尾带有标准免责声明。",
+      "disclaimer": "仅供课程学习和法律文本检索参考，不构成法律意见。",
+      "expected_answer_mode": "evidence_answer",
+      "answer": {
+        "answer_text": "合成装配手册说明蓝色齿轮应当贴有圆形编号 [S1]。\n\n仅供课程学习和法律文本检索参考，不构成法律意见。",
+        "answer_mode": "evidence_answer",
+        "claims": [
+          {
+            "claim_id": "C1",
+            "text": "合成装配手册说明蓝色齿轮应当贴有圆形编号",
+            "source_ids": [
+              "S1"
+            ]
+          }
+        ],
+        "limitations": [],
+        "clarification_question": null
+      },
+      "evidence": [
+        {
+          "source_id": "S1",
+          "rank": 1,
+          "chunk_id": "synthetic-assembly-rule-1",
+          "text": "合成装配手册说明蓝色齿轮应当贴有圆形编号。",
+          "document_name": "合成装配手册",
+          "section": "虚构第一节",
+          "source_file": "synthetic_non_legal.txt",
+          "line_no": 1,
+          "score": 1.0
+        }
+      ],
+      "before_behavior": {
+        "rule_shape": "substring_refusal_token",
+        "matched_token": "不构成法律意见",
+        "refusal_present": true,
+        "summary": "改造前的词语匹配会命中免责声明，并把正常回答误算为拒答。"
+      },
+      "after_expected": {
+        "refusal_present": false,
+        "disclaimer_present": true,
+        "response_mode_valid": true
+      }
+    },
+    {
+      "id": "m1-t04-real-id-does-not-prove-support",
+      "requirement_id": "M1-T04",
+      "synthetic": true,
+      "non_legal": true,
+      "description": "回答引用存在的 S1，但 S1 是内容无关的虚构园艺记录。",
+      "disclaimer": "仅供课程学习和法律文本检索参考，不构成法律意见。",
+      "expected_answer_mode": "evidence_answer",
+      "answer": {
+        "answer_text": "合成设备规程规定紫色齿轮必须每小时校准 [S1]。\n\n仅供课程学习和法律文本检索参考，不构成法律意见。",
+        "answer_mode": "evidence_answer",
+        "claims": [
+          {
+            "claim_id": "C1",
+            "text": "合成设备规程规定紫色齿轮必须每小时校准",
+            "source_ids": [
+              "S1"
+            ]
+          }
+        ],
+        "limitations": [],
+        "clarification_question": null
+      },
+      "evidence": [
+        {
+          "source_id": "S1",
+          "rank": 1,
+          "chunk_id": "synthetic-garden-note-1",
+          "text": "合成园艺记录只描述红色花盆每周浇水一次。",
+          "document_name": "合成园艺记录",
+          "section": "虚构第一节",
+          "source_file": "synthetic_non_legal.txt",
+          "line_no": 1,
+          "score": 1.0
+        }
+      ],
+      "before_behavior": {
+        "rule_shape": "citation_short_circuit",
+        "citation_ids_valid": true,
+        "semantic_check_skipped": true,
+        "unsupported_claims": [],
+        "summary": "改造前的启发式会跳过带引用的句子，因此结构通过可能被误读为证据支持。"
+      },
+      "after_expected": {
+        "citation_ids_valid": true,
+        "semantic_support_status_allowed": [
+          "uncertain",
+          "not_checked"
+        ],
+        "semantic_support_status_forbidden": [
+          "supported"
+        ]
+      }
+    }
+  ]
+}

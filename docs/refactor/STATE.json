@@ -7,9 +7,10 @@
     "observed_default_branch": "master",
     "observed_baseline_commit": "4ed96ec921593ef81de61ce545513e3f1211b5db",
     "observed_on": "2026-09-19",
-    "workspace_head": "52714d5f84634f008a5860f6bf4f5aa199ae3261",
+    "workspace_head": "b46228b137db832ff454fd1d2cedd2d92a9c11ef",
+    "workspace_head_note": "Last pushed M1 implementation; the documented 145-test result also includes the current uncommitted documentation, synthetic examples, and canonical-metrics mapping fix. Final candidate SHA is not frozen yet.",
     "workspace_branch": "codex/m1-verification",
-    "workspace_dirty": false,
+    "workspace_dirty": true,
     "remote_tags_checked": true
   },
   "execution_status": "in_progress",
@@ -97,10 +98,14 @@
       "release_url": null,
       "remote_release_verified": false,
       "tests": {
-        "status": "not_run",
-        "passed": null,
-        "failed": null,
-        "skipped": null,
+        "status": "passed",
+        "passed": 145,
+        "failed": 0,
+        "skipped": 0,
+        "subtests_passed": 60,
+        "mandatory_tests_passed": 10,
+        "mandatory_tests_total": 10,
+        "quality_gate_status": "not_run",
         "report_path": null
       },
       "blockers": []
@@ -250,5 +255,5 @@
       "blockers": []
     }
   ],
-  "next_action": "Implement and test M1 verification semantics in bounded modules, pushing each tested module to codex/m1-verification before freezing the v0.2.0 release candidate."
+  "next_action": "Commit and push the M1 documentation, synthetic-example, and canonical-metrics mapping module; then implement and run the independent M1 cumulative quality gate and CI before freezing the v0.2.0 release candidate."
 }

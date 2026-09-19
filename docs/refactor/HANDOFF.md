@@ -9,6 +9,7 @@
 - Tag / Release：`v0.1.1` / [GitHub Release](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.1.1)，发布时间 `2026-09-19T07:05:12Z`。
 - 当前工作分支：`codex/m1-verification`，从上述最新 `origin/master` 创建；工作区在启动时干净。
 - M1 已明确由用户授权连续推进，状态为 `in_progress`；[Issue #4](https://github.com/1040942669/legal-rag-agent/issues/4) 与 [Milestone 2](https://github.com/1040942669/legal-rag-agent/milestone/2) 已创建。
+- M1 已推送的实现 HEAD 为 `b46228b137db832ff454fd1d2cedd2d92a9c11ef`。结构化验证核心、范围过滤和评测 schema v2 主体已完成；当前文档、合成样例和 canonical metrics 映射修正尚未提交，尚未创建 PR、Tag 或 Release。
 - M2-M7 尚未开始；每个阶段仍独立测试、PR、合并、Tag、Release 和回执。
 
 ## M1 启动边界
@@ -29,6 +30,11 @@
 7. PR #2 最终 head `e426424b892bedd3bc1c5c13a34e94e7f1496c2f` 通过 [CI 35428009054](https://github.com/1040942669/legal-rag-agent/actions/runs/35428009054)。
 8. 实际 merge commit `cb7e01982ca6fb95cebde1e5d707527fd36a250c` 通过 [master CI 35428226839](https://github.com/1040942669/legal-rag-agent/actions/runs/35428226839)。
 9. 远端 annotated tag object 为 `9072726ee99c3d13903069f78b747f02a85c8093`，peeled target 为上述 merge commit；Release API/CLI 确认非 draft、非 prerelease、无附件。
+10. M1 结构化回答已区分 `evidence_answer / insufficient_evidence / needs_clarification / out_of_scope`，并保留旧纯文本适配器但降低其可验证性。
+11. M1 verifier 已拆分 schema、证据目录、引用 ID/对齐、快照/权限范围、免责声明、回答模式与语义状态；词面启发式不产生 `supported`。
+12. 越权证据在进入生成提示和返回 sources 前被过滤；伪造引用或无效模式的草稿不会作为最终回答交付，安全终态会再次验证。
+13. M1 评测 schema v2 已实现显式行为分母、retrieval-only N/A、Judge 成功/失败/未执行三态、历史输出防覆盖，以及生成尝试/最终交付分离的 Trace。
+14. 两组完全虚构、非法律的改前/改后 fixture 已覆盖免责声明误判拒答和真实 ID 不等于语义支持；它们只证明规则边界，不是法律质量 benchmark。
 
 ## 真实验证结果
 
@@ -44,14 +50,15 @@
 - 没有运行在线或本地生成模型、Embedding、reranker、LLM judge、真实法律语料实验或付费调用。
 - 没有读取/上传 `.env` 值、完整语料、Embedding cache、私人课程/简历/面试材料或大型产物。
 - 没有引入数据库、FastAPI、LangGraph、Redis/Celery，没有部署生产。
-- 没有开始 M1；verifier/refusal 的代码级语义修复仍属于未来 M1。
+- M1 尚未创建 PR、合并、打 Tag 或发布；`v0.2.0` 仍是计划版本，最新已核验 Release 仍为 `v0.1.1`。
+- M1 尚未实现独立质量门禁入口或更新 CI workflow；当前只真实运行了全量 pytest、M1 专项和累计 M0 门禁。
 - 没有把历史 203 部法律或模型质量数字冒充 M0 新实测。
 
 ## 已知限制
 
 - M0 证明离线工程基线，不证明真实法律问答质量或生产就绪。
-- 当前 verifier 只检查引用 rank、免责声明字符串、宽泛拒答词和有限词面启发式，不证明 claim-source 语义支持或法律正确性。
-- 旧 `Refusal correctness` 会把非风险样例自动记为 true，且不测过度拒答。
+- 当前 verifier 已能严格检查结构、引用目录/对齐和可选范围，但默认语义层仍只有 `uncertain/not_checked`；它不证明 claim-source 语义支持或法律正确性。
+- 旧 `Refusal correctness` 仅在兼容输出中保留；新 schema 使用拒答召回与过度拒答的独立分母，不能与旧总均值直接比较。
 - 项目声明 Python `>=3.10`，M0 必需门禁只固定验证 Python 3.12 系列。
 - 凭证形状扫描不是绝对无泄漏保证，候选另经人工文件清单与完整 diff 审查。
 - GitHub CI 安装锁定依赖时可以联网；门禁子进程使用离线模式，合成 smoke 另在 Python 进程内阻断 socket，并非 runner 的 OS 级 air-gap。
@@ -75,16 +82,14 @@
 |---|---|
 | 当前里程碑 | M1 / `in_progress`（M0 已 `released`） |
 | 当前工作分支 | `codex/m1-verification` |
-| 最终 PR head | `e426424b892bedd3bc1c5c13a34e94e7f1496c2f` |
-| Release target | `cb7e01982ca6fb95cebde1e5d707527fd36a250c` |
-| 软件 PR | [#2](https://github.com/1040942669/legal-rag-agent/pull/2) / merged |
-| 回执 PR | [#3](https://github.com/1040942669/legal-rag-agent/pull/3) / documentation-only |
-| Tag / Release | `v0.1.1` / [published](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.1.1) |
-| CI | PR head success / merge SHA `master` success |
-| 测试 | 89 passed；门禁 7/7；合成 smoke 1 passed；wheel 构建/安装 success |
+| M1 已推送实现 HEAD | `b46228b137db832ff454fd1d2cedd2d92a9c11ef` |
+| M1 PR / Tag / Release | not_created / not_created / not_created |
+| 上一已发布版本 | `v0.1.1` / [Release](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.1.1) / target `cb7e01982ca6fb95cebde1e5d707527fd36a250c` |
+| M1 本地测试 | 145 passed，60 subtests passed；无真实模型或语料调用 |
+| 累计 M0 门禁 | 7/7 passed；门禁内 145 passed、60 subtests passed |
 | M1 Issue / Milestone | [#4](https://github.com/1040942669/legal-rag-agent/issues/4) / [Milestone 2](https://github.com/1040942669/legal-rag-agent/milestone/2) |
 | 阻塞 | 无 |
-| 下一条可执行动作 | 实现 M1 验证数据模型、结构/行为/语义检查与回归测试 |
+| 下一条可执行动作 | 提交并推送 M1 文档、合成样例和 canonical metrics 映射模块，然后实现独立 M1 累积质量门禁与 CI |
 
 ## 完成说明
 

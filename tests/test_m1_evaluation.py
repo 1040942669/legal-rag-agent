@@ -9,7 +9,15 @@ from unittest.mock import patch
 from legal_rag import evaluation
 from legal_rag.chat import LEGAL_DISCLAIMER, LegalChatAssistant
 from legal_rag.judge import judge_answer
-from legal_rag.models import Chunk, EvalCase, EvalRecord, SearchResult
+from legal_rag.models import (
+    AnswerClaim,
+    Chunk,
+    EvalCase,
+    EvalRecord,
+    SearchResult,
+    StructuredAnswer,
+    VerificationContext,
+)
 from legal_rag.tracing import JsonlTraceWriter
 
 
@@ -268,8 +276,15 @@ class M1EvaluationTest(unittest.TestCase):
         for metric_name in (
             "answer_text",
             "keyword_coverage",
+            "schema_valid",
+            "evidence_catalog_valid",
+            "source_ids_exist",
             "citation_ids_valid",
+            "citation_alignment_valid",
+            "evidence_scope_valid",
             "citation_valid",
+            "disclaimer_present",
+            "response_mode_valid",
             "verifier_pass",
             "semantic_support_status",
             "response_mode_correct",
@@ -334,6 +349,76 @@ class M1EvaluationTest(unittest.TestCase):
             trace["final_response"]["value"]["answer_mode"],
             "insufficient_evidence",
         )
+
+    def test_canonical_citation_id_and_scope_metrics_remain_distinct(self) -> None:
+        result = SearchResult(
+            chunk=Chunk(
+                chunk_id="cross-snapshot",
+                text="合成资料 A 只说明合成事项 A。",
+                law_names=["合成测试法A"],
+                article_numbers=["第一条"],
+                source_files=["synthetic.txt"],
+                line_nos=[1],
+                strategy="article",
+                metadata={"snapshot_id": "snapshot-b", "access_scope_ids": ["public"]},
+            ),
+            score=1.0,
+            rank=1,
+            retriever="deterministic",
+        )
+        structured = StructuredAnswer(
+            answer_text=f"合成资料 A 说明合成事项 A [S1]。\n\n{LEGAL_DISCLAIMER}",
+            answer_mode="evidence_answer",
+            claims=[
+                AnswerClaim(
+                    claim_id="C1",
+                    text="合成资料 A 说明合成事项 A",
+                    source_ids=["S1"],
+                )
+            ],
+            limitations=[],
+            clarification_question=None,
+        )
+
+        class CrossSnapshotAssistant:
+            llm = None
+            last_adaptive_result = None
+            last_evidence_check = None
+            last_pre_fallback_answer = None
+            last_pre_fallback_verification = None
+            last_generation_error = None
+
+            def reset_memory(self) -> None:
+                self.last_structured_answer = None
+                self.last_verification = None
+
+            def answer(self, question: str, *, generate: bool = True):
+                self.last_structured_answer = structured
+                self.last_verification = evaluation.verify_answer(
+                    structured,
+                    [result],
+                    expected_answer_mode="evidence_answer",
+                    disclaimer=LEGAL_DISCLAIMER,
+                    context=VerificationContext(
+                        snapshot_id="snapshot-a",
+                        allowed_scope_ids=["public"],
+                    ),
+                )
+                return structured.answer_text, [result]
+
+        record = evaluation.evaluate(
+            cases=[make_case("A")],
+            retriever=DeterministicRetriever(),
+            chunk_strategy="article",
+            generate=True,
+            assistant=CrossSnapshotAssistant(),
+        )[0]
+
+        self.assertEqual(record.canonical_metrics["source_ids_exist"]["value"], True)
+        self.assertEqual(record.canonical_metrics["citation_ids_valid"]["value"], True)
+        self.assertEqual(record.canonical_metrics["evidence_scope_valid"]["value"], False)
+        self.assertEqual(record.canonical_metrics["citation_valid"]["value"], False)
+        self.assertEqual(record.citation_valid, 0)
 
     def test_m1_t08_judge_errors_have_nullable_scores_and_canonical_codes(self) -> None:
         results = [make_result("A")]
