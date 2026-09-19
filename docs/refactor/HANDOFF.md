@@ -9,7 +9,7 @@
 - Tag / Release：`v0.1.1` / [GitHub Release](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.1.1)，发布时间 `2026-09-19T07:05:12Z`。
 - 当前工作分支：`codex/m1-verification`，从上述最新 `origin/master` 创建；工作区在启动时干净。
 - M1 已明确由用户授权连续推进，状态为 `in_progress`；[Issue #4](https://github.com/1040942669/legal-rag-agent/issues/4) 与 [Milestone 2](https://github.com/1040942669/legal-rag-agent/milestone/2) 已创建。
-- M1 已推送的实现 HEAD 为 `b46228b137db832ff454fd1d2cedd2d92a9c11ef`。结构化验证核心、范围过滤和评测 schema v2 主体已完成；当前文档、合成样例和 canonical metrics 映射修正尚未提交，尚未创建 PR、Tag 或 Release。
+- M1 最近一个完整测试的模块提交为 `2d3c6030a12e240850e7b1b4d1a4cf455bff3069`。结构化验证核心、范围过滤、评测 schema v2、指标合同、合成样例和 canonical metrics 映射均已提交；随后仅用 metadata checkpoint 提交同步本交接记录。尚未创建 PR、Tag 或 Release。
 - M2-M7 尚未开始；每个阶段仍独立测试、PR、合并、Tag、Release 和回执。
 
 ## M1 启动边界
@@ -82,14 +82,14 @@
 |---|---|
 | 当前里程碑 | M1 / `in_progress`（M0 已 `released`） |
 | 当前工作分支 | `codex/m1-verification` |
-| M1 已推送实现 HEAD | `b46228b137db832ff454fd1d2cedd2d92a9c11ef` |
+| M1 最近完整测试的模块提交 | `2d3c6030a12e240850e7b1b4d1a4cf455bff3069`；随后 metadata checkpoint 不改变运行时 |
 | M1 PR / Tag / Release | not_created / not_created / not_created |
 | 上一已发布版本 | `v0.1.1` / [Release](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.1.1) / target `cb7e01982ca6fb95cebde1e5d707527fd36a250c` |
 | M1 本地测试 | 145 passed，60 subtests passed；无真实模型或语料调用 |
 | 累计 M0 门禁 | 7/7 passed；门禁内 145 passed、60 subtests passed |
 | M1 Issue / Milestone | [#4](https://github.com/1040942669/legal-rag-agent/issues/4) / [Milestone 2](https://github.com/1040942669/legal-rag-agent/milestone/2) |
 | 阻塞 | 无 |
-| 下一条可执行动作 | 提交并推送 M1 文档、合成样例和 canonical metrics 映射模块，然后实现独立 M1 累积质量门禁与 CI |
+| 下一条可执行动作 | 实现并运行独立 M1 累积质量门禁与 CI，然后冻结 `v0.2.0` 发布候选 |
 
 ## 完成说明
 
