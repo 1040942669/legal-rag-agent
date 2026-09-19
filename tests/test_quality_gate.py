@@ -44,6 +44,39 @@ def _valid_state() -> dict[str, object]:
     }
 
 
+def _state_with_released_m0_and_active_m1() -> dict[str, object]:
+    return {
+        "document_schema_version": 1,
+        "repository": {
+            "full_name": "owner/repository",
+            "workspace_head": "b" * 40,
+        },
+        "execution_status": "in_progress",
+        "active_milestone": "M1",
+        "stage_status_values": ["not_started", "in_progress", "released"],
+        "milestones": [
+            {
+                "id": "M0",
+                "required": True,
+                "status": "released",
+                "tests": {"status": "passed"},
+                "tag": "v0.1.1",
+                "release_url": "https://example.invalid/releases/v0.1.1",
+                "remote_release_verified": True,
+            },
+            {
+                "id": "M1",
+                "required": True,
+                "status": "in_progress",
+                "tests": {"status": "not_run"},
+                "tag": None,
+                "release_url": None,
+                "remote_release_verified": False,
+            },
+        ],
+    }
+
+
 def _valid_run_manifest() -> dict[str, object]:
     return {
         "schema_version": 1,
@@ -150,6 +183,27 @@ def test_state_invariants_reject_unverified_release() -> None:
     assert any("must record a release_url" in error for error in errors)
     assert any("must verify the remote release" in error for error in errors)
     assert any("tests.status must be passed" in error for error in errors)
+
+
+def test_completed_m0_gate_accepts_a_later_active_milestone() -> None:
+    errors = gate.validate_state_payload(
+        _state_with_released_m0_and_active_m1(),
+        milestone="M0",
+    )
+
+    assert errors == []
+
+
+def test_execution_status_must_match_the_actual_active_milestone() -> None:
+    state = _state_with_released_m0_and_active_m1()
+    state["execution_status"] = "released"
+
+    errors = gate.validate_state_payload(state, milestone="M0")
+
+    assert any(
+        "execution_status must equal the active milestone status" in error
+        for error in errors
+    )
 
 
 def test_state_and_manifest_check_parses_candidate_json(tmp_path: Path) -> None:

@@ -476,8 +476,8 @@ def validate_state_payload(payload: Any, milestone: str = "M0") -> list[str]:
             errors.append("stage_status_values must not contain duplicates")
 
     active_milestone = payload.get("active_milestone")
-    if active_milestone != milestone:
-        errors.append(f"active_milestone must be {milestone!r} for this gate")
+    if not isinstance(active_milestone, str) or not active_milestone:
+        errors.append("active_milestone must be a non-empty string")
 
     milestones = payload.get("milestones")
     milestone_entries: dict[str, dict[str, Any]] = {}
@@ -502,24 +502,42 @@ def validate_state_payload(payload: Any, milestone: str = "M0") -> list[str]:
             if not isinstance(tests, dict) or not isinstance(tests.get("status"), str):
                 errors.append(f"milestone {milestone_id} must have tests.status")
 
-    active_entry = milestone_entries.get(milestone)
-    if active_entry is None:
+    gate_entry = milestone_entries.get(milestone)
+    if gate_entry is None:
         errors.append(f"milestones must contain {milestone}")
     else:
-        if active_entry.get("required") is not True:
+        if gate_entry.get("required") is not True:
             errors.append(f"milestone {milestone} must be required")
-        if payload.get("execution_status") != active_entry.get("status"):
-            errors.append("execution_status must equal the active milestone status")
-        if active_entry.get("status") == "released":
-            if not active_entry.get("tag"):
-                errors.append(f"released milestone {milestone} must record a tag")
-            if not active_entry.get("release_url"):
-                errors.append(f"released milestone {milestone} must record a release_url")
-            if active_entry.get("remote_release_verified") is not True:
-                errors.append(f"released milestone {milestone} must verify the remote release")
-            tests = active_entry.get("tests", {})
-            if tests.get("status") != "passed":
-                errors.append(f"released milestone {milestone} tests.status must be passed")
+        if active_milestone != milestone and gate_entry.get("status") != "released":
+            errors.append(
+                f"non-active gated milestone {milestone} must already be released"
+            )
+
+    active_entry = (
+        milestone_entries.get(active_milestone)
+        if isinstance(active_milestone, str)
+        else None
+    )
+    if isinstance(active_milestone, str) and active_entry is None:
+        errors.append(f"milestones must contain active_milestone {active_milestone}")
+    elif (
+        active_entry is not None
+        and payload.get("execution_status") != active_entry.get("status")
+    ):
+        errors.append("execution_status must equal the active milestone status")
+
+    for milestone_id, entry in milestone_entries.items():
+        if entry.get("status") != "released":
+            continue
+        if not entry.get("tag"):
+            errors.append(f"released milestone {milestone_id} must record a tag")
+        if not entry.get("release_url"):
+            errors.append(f"released milestone {milestone_id} must record a release_url")
+        if entry.get("remote_release_verified") is not True:
+            errors.append(f"released milestone {milestone_id} must verify the remote release")
+        tests = entry.get("tests", {})
+        if tests.get("status") != "passed":
+            errors.append(f"released milestone {milestone_id} tests.status must be passed")
 
     repository = payload.get("repository")
     if not isinstance(repository, dict):
