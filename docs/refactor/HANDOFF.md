@@ -8,7 +8,7 @@
 - release target 的 [master CI 35462786212](https://github.com/1040942669/legal-rag-agent/actions/runs/35462786212) 成功。远端 annotated tag object `546b0207eaf7dd46f1303baec9b279c14e41592c` peeled 到同一 target。
 - Tag / Release：`v0.2.0` / [GitHub Release](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.2.0)，发布时间 `2026-09-19T18:59:07Z`；非 draft、非 prerelease、无附件。
 - 当前回执分支：`codex/m1-release-receipt`，从已发布的 `origin/master` 创建；软件 Tag 不包含也不需要包含后续回执提交。
-- M1 当前状态为 `released_receipt_pending`；Issue #4 已由软件 PR 合并关闭，Milestone 2 在回执 PR 合并并核对 master CI 后关闭。
+- M1 终态为 `released`；机器可读回执通过独立文档 [PR #6](https://github.com/1040942669/legal-rag-agent/pull/6) 落库。Issue #4 已由软件 PR 合并关闭，Milestone 2 在回执 PR 合并并核对 master CI 后关闭。
 - M2-M7 尚未开始；每个阶段仍独立测试、PR、合并、Tag、Release 和回执。
 
 ## M1 启动边界
@@ -96,17 +96,18 @@
 
 | 项目 | 当前值 |
 |---|---|
-| 当前里程碑 | M1 / `released_receipt_pending`（软件 Release 已远端核验） |
+| 当前里程碑 | M1 / `released`（软件 Release 已远端核验） |
 | 软件分支 / 回执分支 | `codex/m1-verification` / `codex/m1-release-receipt` |
 | 最终 PR head / release target | `d2fa34776cd188197954eff9a0092c207f309b97` / `d51ed481f986dde807163f4b5583b07bc9ef6750` |
 | M1 PR / Tag / Release | [PR #5](https://github.com/1040942669/legal-rag-agent/pull/5) / `v0.2.0` / [published](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.2.0) |
+| M1 回执 PR | [PR #6](https://github.com/1040942669/legal-rag-agent/pull/6) / documentation-only；初始 head `f58bc77...` CI success |
 | M1 精确候选测试 | final PR head 与 release target 均为 186 passed，148 subtests passed；JUnit 334/0 failures/0 errors/0 skipped；无真实模型或语料调用 |
 | M1 累积门禁 | PR/master 均 17/17 passed（含 M0 7 项 + M1 10 项） |
 | M1 package | `0.2.0` verified build + Python 3.12.13 isolated install/import passed；hash 见上文 |
 | M1 PR / master CI | [run 35462691374](https://github.com/1040942669/legal-rag-agent/actions/runs/35462691374) / [run 35462786212](https://github.com/1040942669/legal-rag-agent/actions/runs/35462786212) / success |
 | M1 Issue / Milestone | [#4](https://github.com/1040942669/legal-rag-agent/issues/4) / [Milestone 2](https://github.com/1040942669/legal-rag-agent/milestone/2) |
-| 阻塞 | 无软件发布阻塞；仅发布回执尚未经文档 PR 合入 `master` |
-| 下一条可执行动作 | 提交/push 回执分支，创建文档 PR，记录其 URL并通过 exact-head CI，正常合并后核对 master CI、关闭 Milestone 2并停止 |
+| 阻塞 | 无；回执 PR 仍须通过最终 head CI 并正常合并，失败时状态退回 `released_receipt_pending`，不得重复发版 |
+| 下一条可执行动作 | push 回执终态提交，等待 PR #6 最终 head CI，正常合并后核对 master CI、关闭 Milestone 2并停止 |
 
 ## 完成说明
 

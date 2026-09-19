@@ -7,13 +7,13 @@
     "observed_default_branch": "master",
     "observed_baseline_commit": "52714d5f84634f008a5860f6bf4f5aa199ae3261",
     "observed_on": "2026-09-20",
-    "workspace_head": "d51ed481f986dde807163f4b5583b07bc9ef6750",
-    "workspace_head_note": "This is the published v0.2.0 release target and the starting point of the post-release receipt branch. The later receipt commit does not move the tag.",
+    "workspace_head": "f58bc77f87ab6ed027ac5471033f58dfc8736e30",
+    "workspace_head_note": "This is the initial M1 receipt candidate. The final receipt-state commit will be newer documentation only and does not move the v0.2.0 tag.",
     "workspace_branch": "codex/m1-release-receipt",
     "workspace_dirty": false,
     "remote_tags_checked": true
   },
-  "execution_status": "released_receipt_pending",
+  "execution_status": "released",
   "active_milestone": "M1",
   "last_verified_release": {
     "milestone_id": "M1",
@@ -88,9 +88,12 @@
       "name": "验证与指标",
       "planned_version": "v0.2.0",
       "required": true,
-      "status": "released_receipt_pending",
+      "status": "released",
       "branch": "codex/m1-verification",
       "receipt_branch": "codex/m1-release-receipt",
+      "receipt_pr_url": "https://github.com/1040942669/legal-rag-agent/pull/6",
+      "receipt_candidate_sha": "f58bc77f87ab6ed027ac5471033f58dfc8736e30",
+      "receipt_candidate_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/35463439972",
       "issue_url": "https://github.com/1040942669/legal-rag-agent/issues/4",
       "milestone_url": "https://github.com/1040942669/legal-rag-agent/milestone/2",
       "pr_url": "https://github.com/1040942669/legal-rag-agent/pull/5",
@@ -138,9 +141,7 @@
         "master_ci_artifact_json_sha256": "6c3f0097aceecefcec58a1a8e95a399b512995555f94b5af1929bf9c9b3044b9",
         "report_path": "reports/refactor/M1.md"
       },
-      "blockers": [
-        "The software release is verified; only the documentation-only receipt PR, its CI, and merge remain."
-      ]
+      "blockers": []
     },
     {
       "id": "M2",
@@ -287,5 +288,5 @@
       "blockers": []
     }
   ],
-  "next_action": "Commit and push the verified M1 release receipt, create its documentation-only PR, record the PR URL, pass its exact-head CI, merge it normally, verify the resulting master CI, close Milestone 2, and stop without starting M2."
+  "next_action": "Push the final receipt-state commit to PR 6, require its exact-head CI, merge normally, verify the resulting master CI, close Milestone 2, and stop without starting M2."
 }

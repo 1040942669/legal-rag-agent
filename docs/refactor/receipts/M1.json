@@ -6,7 +6,9 @@
   "repository": "1040942669/legal-rag-agent",
   "branch": "master",
   "pr_url": "https://github.com/1040942669/legal-rag-agent/pull/5",
-  "receipt_pr_url": null,
+  "receipt_pr_url": "https://github.com/1040942669/legal-rag-agent/pull/6",
+  "receipt_candidate_sha": "f58bc77f87ab6ed027ac5471033f58dfc8736e30",
+  "receipt_candidate_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/35463439972",
   "final_pr_head_sha": "d2fa34776cd188197954eff9a0092c207f309b97",
   "release_target_sha": "d51ed481f986dde807163f4b5583b07bc9ef6750",
   "tag_name": "v0.2.0",
@@ -50,6 +52,6 @@
     "Trace minimization prevents rejected draft bodies and content-bearing verifier diagnostics from entering normal Trace records, but it is not complete privacy governance.",
     "The declared Python range is >=3.10, while required M1 local and CI evidence is primarily Python 3.12.x."
   ],
-  "receipt_status": "verified_release_receipt_pending_merge",
+  "receipt_status": "verified",
   "note": "This receipt is recorded after the software release. Its later documentation commit does not move or replace the v0.2.0 tag target."
 }

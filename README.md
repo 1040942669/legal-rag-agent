@@ -15,7 +15,7 @@
 | 受控 Agent 能力 | 规则 Query Analyzer、严格 JSON normalizer、有限 multi-query planner、证据合并、最多一轮补检索 |
 | 生成边界 | 高风险请求预拒答、证据充分性检查、结构化回答兼容层、引用/范围/行为检查、资料不足或澄清模板、最终交付前复核 |
 | 评测体系 | 120 条分层评测集、30 条固定生成子集、bootstrap 95% CI、显式行为分母、answer/retrieval/Judge N/A、自动五维实验矩阵 |
-| 工程质量 | M1 当前候选 186 个离线测试、148 个子测试；embedding cache v2 契约；17 项累计 JSON 质量门禁与精确 PR-head CI；CLI、manifest、JSONL trace、CSV/JSON/Markdown 报告 |
+| 工程质量 | M1 `v0.2.0` 为 186 个离线测试、148 个子测试；embedding cache v2 契约；17 项累计 JSON 质量门禁与精确 PR/master CI；CLI、manifest、JSONL trace、CSV/JSON/Markdown 报告 |
 
 历史实验中，`Qwen3-Embedding-4B` dense 的 Hit@5 达到 **0.981 [0.954, 1.000]**，无外部 API 的自研 BM25 baseline 为 **0.704 [0.611, 0.787]**。这些数字来自 2026-06 的固定本地语料快照和当时模型版本，不是跨语料、跨时间的效果承诺。完整实验条件见 [结果摘要](reports/RESULTS_SUMMARY.md)。
 
@@ -56,7 +56,7 @@ flowchart LR
     M -- 其余失败 --> P[记录状态并执行既有处理]
 ```
 
-这是调用链的简化图。M1 候选将生成结果适配为结构化回答，分开检查 schema、引用 ID、可见证据范围、回答模式、免责声明和语义状态。词面启发式最多给出 `uncertain` 或 `not_checked`，仍不证明引用语义支持或法律结论正确。
+这是调用链的简化图。M1 `v0.2.0` 将生成结果适配为结构化回答，分开检查 schema、引用 ID、可见证据范围、回答模式、免责声明和语义状态。词面启发式最多给出 `uncertain` 或 `not_checked`，仍不证明引用语义支持或法律结论正确。
 
 ### 1. 数据驱动的分块
 
@@ -259,7 +259,7 @@ uv run --offline --frozen --no-sync python scripts/quality_gate.py --milestone M
 
 需要明确区分三类可复现性：
 
-1. 代码与离线逻辑：M0 发布时由 89 个测试提供基线；当前 M1 候选由 186 个测试、148 个子测试、17 项累计门禁和 BM25 CLI 提供回归证据。这不等于法律正确性保证。
+1. 代码与离线逻辑：M0 发布时由 89 个测试提供基线；M1 `v0.2.0` 由 186 个测试、148 个子测试、17 项累计门禁和 BM25 CLI 提供回归证据。这不等于法律正确性保证。
 2. 历史检索数字：依赖 2026-06 的 203 部法律快照及对应 embedding cache。
 3. API 生成分数：还依赖外部模型版本、服务状态和 judge 偏差，不能视为永久固定值。
 
