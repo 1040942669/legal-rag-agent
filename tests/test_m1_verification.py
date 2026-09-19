@@ -559,6 +559,34 @@ class M1VerificationTest(unittest.TestCase):
         self.assertFalse(insufficient_verification.response_mode_valid)
         self.assertFalse(hidden_insufficiency_verification.response_mode_valid)
 
+    def test_limited_modes_reject_specific_legal_conclusion_prefix(self) -> None:
+        insufficient = programmatic_answer(
+            "你必须立即赔偿100万元。当前检索资料不足，无法给出可靠结论。",
+            answer_mode="insufficient_evidence",
+        )
+        question = "请补充合同日期。"
+        clarification = programmatic_answer(
+            f"你必须立即赔偿100万元。{question}",
+            answer_mode="needs_clarification",
+            clarification_question=question,
+        )
+
+        insufficient_result = verify_answer(
+            insufficient,
+            [],
+            expected_answer_mode="insufficient_evidence",
+            disclaimer=LEGAL_DISCLAIMER,
+        )
+        clarification_result = verify_answer(
+            clarification,
+            [],
+            expected_answer_mode="needs_clarification",
+            disclaimer=LEGAL_DISCLAIMER,
+        )
+
+        self.assertFalse(insufficient_result.response_mode_valid)
+        self.assertFalse(clarification_result.response_mode_valid)
+
     def test_global_citation_cannot_cover_a_claim_without_source_ids(self) -> None:
         answer = StructuredAnswer(
             answer_text=f"背景资料见 [S1]。雇主必须提供住房。\n\n{LEGAL_DISCLAIMER}",
@@ -628,7 +656,10 @@ class M1VerificationTest(unittest.TestCase):
         self.assertEqual(check.followup_queries, [])
 
         clarification = StructuredAnswer(
-            answer_text=f"请补充是否已经履行催告程序？\n\n{LEGAL_DISCLAIMER}",
+            answer_text=(
+                "当前信息不足，需要补充关键事实后再检索。\n\n"
+                f"是否已经履行催告程序？\n\n{LEGAL_DISCLAIMER}"
+            ),
             answer_mode="needs_clarification",
             claims=[],
             limitations=["缺少是否履行催告程序的事实。"],

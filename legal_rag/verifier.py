@@ -44,6 +44,17 @@ INSUFFICIENT_MARKERS = (
     "无法给出可靠结论",
 )
 CLARIFICATION_MARKERS = ("请补充", "需要补充", "请明确", "需要澄清")
+INSUFFICIENT_RESPONSE_TEXTS = frozenset(
+    {
+        "当前检索资料不足，无法给出可靠结论。",
+        (
+            "我无法仅根据当前检索资料给出可靠结论。\n\n"
+            "可以补充更具体的法律名称、条文编号或事实背景后再检索。"
+        ),
+    }
+)
+CLARIFICATION_PREAMBLE = "当前信息不足，需要补充关键事实后再检索。"
+CLARIFICATION_QUESTION_PREFIXES = ("请补充", "请说明", "请明确", "是否", "何时", "哪些")
 BOUNDED_REFUSAL_SENTENCE_PATTERNS = (
     re.compile(r"(?:抱歉[，,])?(?:我|本助手|本系统)(?:不能|无法|不予)(?:为(?:你|您|用户))?(?:直接)?提供(?:违法帮助、规避执法或相关操作方案|违法操作方案|具体操作方案|具体案件策略、胜诉判断或个性化法律意见|医疗、金融或投资等专业建议|具体策略)"),
     re.compile(r"(?:抱歉[，,])?(?:我|本助手|本系统)(?:不能|无法|不予)(?:直接)?(?:回答|协助|给出)(?:这一问题|这个问题|该问题|该请求|具体案件策略、胜诉判断或个性化法律意见)"),
@@ -312,14 +323,14 @@ def validate_response_mode(
             not answer.claims
             and not cited_source_ids
             and not answer.clarification_question
-            and any(marker in answer.answer_text for marker in INSUFFICIENT_MARKERS)
+            and bounded_insufficient_response(answer.answer_text)
             and not refusal_present
         )
     if answer.answer_mode == "needs_clarification":
         question = answer.clarification_question or ""
         return (
             bool(question.strip())
-            and question.strip() in answer.answer_text
+            and bounded_clarification_response(answer.answer_text, question.strip())
             and not answer.claims
             and not cited_source_ids
             and not refusal_present
@@ -331,6 +342,23 @@ def validate_response_mode(
         and refusal_present
         and bounded_out_of_scope_response(answer.answer_text)
     )
+
+
+def bounded_insufficient_response(answer_text: str) -> bool:
+    body = _without_disclaimer_sentences(answer_text).strip()
+    return body in INSUFFICIENT_RESPONSE_TEXTS
+
+
+def bounded_clarification_response(answer_text: str, question: str) -> bool:
+    if (
+        not question
+        or len(question) > 200
+        or "\n" in question
+        or not question.startswith(CLARIFICATION_QUESTION_PREFIXES)
+    ):
+        return False
+    body = _without_disclaimer_sentences(answer_text).strip()
+    return body == f"{CLARIFICATION_PREAMBLE}\n\n{question}"
 
 
 def bounded_out_of_scope_response(answer_text: str) -> bool:

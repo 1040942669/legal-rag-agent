@@ -479,7 +479,6 @@ def sanitize_source_tokens(text: str) -> str:
 
 
 def build_limited_structured_answer(check: EvidenceCheck) -> StructuredAnswer:
-    text = build_low_confidence_answer(check)
     limitations = [
         *check.missing_law_support,
         *check.missing_facts,
@@ -488,13 +487,16 @@ def build_limited_structured_answer(check: EvidenceCheck) -> StructuredAnswer:
     if check.missing_facts:
         clarification = "请补充这些事实信息：" + "、".join(check.missing_facts) + "？"
         return programmatic_answer(
-            text + "\n\n" + clarification,
+            "当前信息不足，需要补充关键事实后再检索。\n\n" + clarification,
             answer_mode="needs_clarification",
             limitations=limitations,
             clarification_question=clarification,
         )
     return programmatic_answer(
-        text,
+        (
+            "我无法仅根据当前检索资料给出可靠结论。\n\n"
+            "可以补充更具体的法律名称、条文编号或事实背景后再检索。"
+        ),
         answer_mode="insufficient_evidence",
         limitations=limitations or ["当前检索资料不足。"],
     )
