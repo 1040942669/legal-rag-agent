@@ -7,9 +7,9 @@
     "observed_default_branch": "master",
     "observed_baseline_commit": "52714d5f84634f008a5860f6bf4f5aa199ae3261",
     "observed_on": "2026-09-20",
-    "workspace_head": "f58bc77f87ab6ed027ac5471033f58dfc8736e30",
-    "workspace_head_note": "This is the initial M1 receipt candidate. The final receipt-state commit will be newer documentation only and does not move the v0.2.0 tag.",
-    "workspace_branch": "codex/m1-release-receipt",
+    "workspace_head": "fee92b4457dc68edc413608fb3a0d263af740922",
+    "workspace_head_note": "This is the verified M1 receipt merge on master. The release-finalization metadata branch is documentation only and does not move the v0.2.0 tag.",
+    "workspace_branch": "codex/m1-release-finalize",
     "workspace_dirty": false,
     "remote_tags_checked": true
   },
@@ -94,6 +94,12 @@
       "receipt_pr_url": "https://github.com/1040942669/legal-rag-agent/pull/6",
       "receipt_candidate_sha": "f58bc77f87ab6ed027ac5471033f58dfc8736e30",
       "receipt_candidate_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/35463439972",
+      "receipt_final_sha": "11b2165396d2dc8c55c5537e33307c15a67376e2",
+      "receipt_final_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/35463637086",
+      "receipt_merge_sha": "fee92b4457dc68edc413608fb3a0d263af740922",
+      "receipt_master_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/35463832520",
+      "receipt_master_ci_sha": "fee92b4457dc68edc413608fb3a0d263af740922",
+      "milestone_state": "closed",
       "issue_url": "https://github.com/1040942669/legal-rag-agent/issues/4",
       "milestone_url": "https://github.com/1040942669/legal-rag-agent/milestone/2",
       "pr_url": "https://github.com/1040942669/legal-rag-agent/pull/5",
@@ -288,5 +294,5 @@
       "blockers": []
     }
   ],
-  "next_action": "Push the final receipt-state commit to PR 6, require its exact-head CI, merge normally, verify the resulting master CI, close Milestone 2, and stop without starting M2."
+  "next_action": "M1 is complete. Stop without starting M2; M2 remains not_started until a later explicit milestone start."
 }
