@@ -1,5 +1,7 @@
 # Legal RAG Evaluation Plan
 
+> 本文中的 Phase 编号描述评测能力的历史来源；当前 M0-M7 改造状态以 `docs/refactor/MASTER_PLAN.md`、`STATE.json` 和 `HANDOFF.md` 为准。
+
 ## 当前问题
 
 早期 `eval_cases/legal_eval_cases.jsonl` 只有 10 条手写样例，主要用于 smoke test。Phase 4A 已新增 `legal_eval_cases_v3.jsonl`（120 条，其中 108 条有检索目标、12 条拒答）和 30 条生成子集。v1/v2 继续保留用于兼容和快速回归，但实验结论应明确写出使用的 case 版本。
@@ -9,7 +11,7 @@
 评估分成两层:
 
 1. Retrieval evaluation: 检索器能否把正确法律和条文排进 top-k。
-2. Answer evaluation: LLM 是否基于检索证据回答、引用是否真实、是否拒绝越界请求。
+2. Answer evaluation: LLM 是否基于检索证据回答、引用编号是否属于本次检索结果、是否按旧规则拒绝越界请求。
 
 当前优先做 retrieval evaluation，因为生成质量会被检索质量强烈影响。
 
@@ -52,13 +54,15 @@ Answer:
 
 - Keyword coverage: 答案是否覆盖关键事实。
 - Evidence sufficiency pass: 生成前证据是否覆盖必要法律/条文提示，资料不足时是否进入降级路径。
-- Citation validity: `[Sx]` 引用编号是否真实存在于当前检索结果。
-- Verifier pass: 规则 verifier 是否同时通过引用、免责声明、越界拒答和基础证据支撑检查。
-- Refusal correctness: 越界问题是否拒答，包括个案策略、违法帮助、非法律问题、医疗/金融越界建议。
+- Citation validity: `[Sx]` 引用编号是否属于本次检索结果；不判断该来源是否语义支持相邻 claim。
+- Verifier pass: 规则 verifier 是否同时通过引用编号、免责声明、越界拒答和基础词面检查。它不等于语义支持或法律正确性。
+- Refusal correctness: 高风险 flag 触发后，答案是否命中旧版拒答词；非风险样例当前自动记为 true，汇总均值包含这些样例，且不衡量过度拒答。
 - Hallucination sample review: 人工抽查答案是否编造法律依据。
 - LLM judge: 可选 `--judge`，输出 faithfulness、relevance、completeness；judge 调用失败或 JSON contract 失败单独计数，不进入质量均值。
 
 `Citation validity`、`Verifier pass` 和 `Refusal correctness` 只对 `--generate` 运行有定义。Retrieval-only 报告将这些字段显示为 `N/A`，避免把拼接的检索文本误当作模型回答；拒答数据在 retrieval-only 阶段只用于验证风险 router 是否命中。
+
+当前 verifier 的边界必须单独解释：有效 `[Sx]` 只证明编号属于本次结果，不能证明来源语义支持该句；未引用法律语句仅做有限词面重合启发式检查；“不能”和“不构成法律意见”等词也可能触发拒答判断。旧版 `Refusal correctness` 不是 precision/recall 或语义正确率，也不检测危险建议是否在免责声明之前已经输出。M0 保留实现并如实记录，后续 M1 才按“应拒答 / 应回答”集合拆分分母，并区分结构、行为与语义状态。
 
 成本不硬编码平台价格。`--input-cost-per-million` 和 `--output-cost-per-million` 接受用户在运行时提供的美元 blended rate；当一次评测混用不同价格的生成模型和 judge 时，应拆成独立 run，不能把一个 blended estimate 当作真实账单。
 

@@ -1,11 +1,17 @@
 # 实验结果总汇 (v3 评测集)
 
+> 本文保存历史实验快照与当时的解释，不是当前法律覆盖或语义正确性证明。
+> Judge 分数受模型和 self-preference 影响；规则 verifier 只做引用编号、免责声明、
+> 宽泛拒答词和有限词面启发式检查。引用存在或 verifier pass 不等于证据语义支持结论。
+
 > 生成时间: 2026-06-13。所有检索实验使用 `eval_cases/legal_eval_cases_v3.jsonl`（120 cases，108 条有 gold 标注 + 12 条拒答），
 > 指标为"有目标样例"上的值（排除拒答类），附 bootstrap 95% 置信区间。
 > 数据集: 203 部法律 / 19,050 条文级 chunk（含专利法、劳动争议调解仲裁法、个人信息保护法、工伤保险条例、物业管理条例补录；
 > 民法通则/合同法/继承法已废止打标降权 penalty=0.5；同法同条号完全重复条文已去重）。
 >
 > 复现边界: 这是 2026-06 本地增强语料、当时 embedding cache 和 API 模型版本的历史快照。仓库保存评测逻辑、v3 cases 和复现命令，但尚未提供自动下载并校验同一语料快照的流程；未来 API 模型更新也可能改变生成分数。
+
+> Phase 4B 是旧路线编号，不表示当前 M0-M7 主线中的 M4 或其他里程碑已经完成。
 
 ## 1. Chunk 策略对比（BM25, article 索引外其余同参）
 
@@ -64,7 +70,7 @@ article 仍保留为 baseline，因为它的条文级 metadata 最精确（条�
 ## 4. 拒答与可控性
 
 - 12 条拒答 case（案件策略/违法帮助/非法律/医疗金融）在当前规则 router 下均能命中至少一个高风险 flag（12/12）。这验证的是路由覆盖，不等于回答质量。
-- 30 条生成子集只抽取了其中 3 条拒答 case；四个 backend 都在生成前走统一规则拒答，因此该子集的 Refusal correctness = 1.000。
+- 30 条生成子集只抽取了其中 3 条拒答 case；四个 backend 都在生成前走统一规则拒答，因此该子集的 Refusal correctness = 1.000。旧指标还会把非风险样例自动记为 true，因此这个值不证明各 backend 分别学会拒答，也不衡量过度拒答、危险建议是否仍被输出或语义适当性。
 - 旧版 retrieval-only 报告曾把拼接的检索文本送入 verifier，得到的 `0.933` 不具备“11/12 正确拒答”的含义；当前实现已将 retrieval-only 的回答指标标为 `N/A`。
 - 全部 120 case 校验过 gold：expected_law/expected_articles 均真实存在于索引中。
 
@@ -102,7 +108,9 @@ article 仍保留为 baseline，因为它的条文级 metadata 最精确（条�
 | DeepSeek-V3 | SiliconFlow API | 0.439 | 0.500 | **1.000** | **1.000** | 7.1 s |
 
 四模型汇总（30 cases × 4 backends = 120 model-case records）：Faithfulness 0.970 / Relevance 0.978 / Completeness 0.975 / Judge pass 0.967，
-Citation validity 0.925；Refusal correctness 1.000（30 条子集只含 3 条拒答 case，每个 backend 均由同一规则 router 在生成前拒答，样本量较小）。
+Citation validity 0.925；Refusal correctness 1.000（30 条子集只含 3 条拒答 case，每个 backend 均由同一规则 router 在生成前拒答，且普通样例按旧口径自动记为 true，样本量和分母均有限）。
+
+这里的 `Citation validity` 只检查引用 rank 是否存在，`Verifier pass` 只表示旧版规则门禁未产生失败原因；二者都不是 claim-support rate、语义忠实度或法律正确率。
 
 关键发现：
 
@@ -111,10 +119,10 @@ Citation validity 0.925；Refusal correctness 1.000（30 条子集只含 3 条�
 2. **本地 4bit 7B 在该子集上未观察到明显劣势**：qwen2.5:7b q4_K_M（verifier 0.467）高于 API 版
    Qwen2.5-7B-Instruct（0.267），但两者并非完全同一权重（本地为 base 系微调版、API 为 Instruct）。
    这只能作为部署可行性信号，不能替代同权重、同提示、同样例的严格量化 A/B。
-3. **faithfulness 普遍 ≥ 0.94**：说明 prompt 中"只依据提供条文回答"的约束 + 引用校验有效，
-   不同 backend 的差距主要在覆盖完整性（verifier/keyword coverage），不在幻觉。
+3. **历史 judge faithfulness 普遍 ≥ 0.94**：这是当时 judge 与提示配置下的信号，
+   不能据此断言不同 backend 的差距不在幻觉，也不能替代语义支持或人工法律审查。
 4. **方法论注意**：judge 为 DeepSeek-V3，对 DeepSeek-V3 自身的打分存在 self-preference 偏置，
-   该行结论需谨慎引用；verifier pass（规则校验，无偏）是更可靠的横向指标。
+   该行结论需谨慎引用；verifier pass 也是有已知盲区的规则启发式，不是无偏横向真值。
 
 ## 7. Phase 4B 自动矩阵复跑（2026-09-18）
 

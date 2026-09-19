@@ -22,6 +22,8 @@ artifacts/test_tmp/
 artifacts/*.env
 reports/*
 !reports/RESULTS_SUMMARY.md
+!reports/refactor/
+!reports/refactor/*.md
 eval_cases/_*.jsonl
 /_smoke_out.txt
 /evaluation_result.*

@@ -1,10 +1,10 @@
-# Legal RAG Agent | 现行中国法律检索增强生成系统
+# Legal RAG Agent | 中国法律文本快照检索增强生成系统
 
-一个面向中国现行法律文本的可复现 RAG 工程项目。它不是把大模型接到向量库后的演示，而是围绕法律场景中的三个核心问题展开：**如何稳定召回正确法条、如何证明一次优化真的有效、如何在证据不足时安全停止生成**。
+一个面向指定中国法律文本快照的可复现 RAG 工程项目。它不是把大模型接到向量库后的演示，而是围绕法律场景中的三个核心问题展开：**如何稳定召回正确法条、如何证明一次优化真的有效、如何在证据不足时安全停止生成**。
 
-项目已经完成从数据画像、分块实验、混合检索、受控查询理解，到证据充分性检查、引用校验、缓存契约和自动实验矩阵的完整闭环。默认链路保持保守：清晰问题直接检索，复杂问题才进入有边界的 adaptive lane；reranker 默认关闭，任何检索或生成增强都必须通过固定评测集、trace、质量与成本指标证明价值。
+仓库已经实现旧 Phase 路线中的规则型工程链路，包括数据画像、分块实验、混合检索、受控查询理解、证据覆盖启发式、引用编号检查、缓存契约和自动实验矩阵。默认链路保持保守：清晰问题直接检索，复杂问题才进入有边界的 adaptive lane；reranker 默认关闭，任何检索或生成增强都必须通过固定评测集、trace、质量与成本指标证明价值。引用语义支持、拒答分母和 verifier 状态仍有已知限制，计划在后续 M1 处理。
 
-> 本项目仅用于检索与工程研究，不提供个案法律意见。完整法律语料不随仓库分发，数据来源及复现边界见下文。
+> 本项目仅用于检索与工程研究，不提供个案法律意见。仓库不随附完整法律语料，历史快照的内容截止日期为 2025-01-01；因此本文不声称覆盖全部当前有效法律。数据来源及复现边界见下文。
 
 ## 项目产出
 
@@ -13,9 +13,9 @@
 | 数据与索引 | 203 部法律、19,050 个条文级 chunk 的历史实验快照；4 种 chunk 策略；废止法律标记与精确重复条文去重 |
 | 检索能力 | 自研中文 BM25、dense、RRF、LlamaIndex 对照；可选 BGE cross-encoder reranker；法律名和条号 metadata boost；完整 ranking trace |
 | 受控 Agent 能力 | 规则 Query Analyzer、严格 JSON normalizer、有限 multi-query planner、证据合并、最多一轮补检索 |
-| 生成安全 | 高风险请求预拒答、证据充分性检查、引用有效性校验、资料不足降级模板、免责声明校验 |
+| 生成边界 | 高风险请求预拒答、证据充分性检查、引用编号与启发式输出检查、资料不足降级模板、免责声明检查 |
 | 评测体系 | 120 条分层评测集、30 条固定生成子集、bootstrap 95% CI、自动五维实验矩阵、P50/P95、调用/token/成本观测 |
-| 工程质量 | 70 个离线单元测试；embedding cache v2 契约；CLI、manifest、JSONL trace、CSV/JSON/Markdown 报告；外部失败可显式归因 |
+| 工程质量 | 89 个离线测试；embedding cache v2 契约；统一 JSON 质量门禁与 PR/master CI；CLI、manifest、JSONL trace、CSV/JSON/Markdown 报告 |
 
 历史实验中，`Qwen3-Embedding-4B` dense 的 Hit@5 达到 **0.981 [0.954, 1.000]**，无外部 API 的自研 BM25 baseline 为 **0.704 [0.611, 0.787]**。这些数字来自 2026-06 的固定本地语料快照和当时模型版本，不是跨语料、跨时间的效果承诺。完整实验条件见 [结果摘要](reports/RESULTS_SUMMARY.md)。
 
@@ -51,9 +51,12 @@ flowchart LR
     K --> I
     J -- 足够或停止 --> L[Answer Generator]
     L --> M[Answer Verifier]
-    M -- 通过 --> N[带来源回答]
-    M -- 不通过 --> O[降级回答]
+    M -- 规则通过 --> N[带来源回答]
+    M -- 部分规则失败 --> O[降级或拒答]
+    M -- 其余失败 --> P[记录状态并执行既有处理]
 ```
+
+这是旧 Phase 调用链的简化图。当前 verifier 只检查引用编号、免责声明、宽泛拒答词和有限词面启发式；并非所有失败原因都会改写答案，也不证明引用语义支持或法律结论正确。
 
 ### 1. 数据驱动的分块
 
@@ -73,7 +76,9 @@ Adaptive lane 不是自由 Agent loop。只有规则分析器识别到模糊、�
 
 ### 4. 生成前后双重校验
 
-生成前检查法律名、条号和问题覆盖是否充分。生成后校验 `[Sx]` 引用是否存在、关键结论是否被证据支持、免责声明是否保留。高风险请求在检索前直接拒答，证据不足或引用无效时返回统一降级模板。
+生成前检查法律名、条号和问题覆盖是否充分。生成后检查 `[Sx]` 引用编号是否存在、未引用法律语句是否与证据有基础词面重合、免责声明是否保留。高风险请求在检索前直接拒答，证据不足或引用无效时返回统一降级模板。
+
+当前 verifier 是规则与启发式防线，不是语义支持或法律正确性证明。带有有效 `[Sx]` 的句子不会继续做语义蕴含判断，拒答检查也可能被“不能”或免责声明等宽泛词触发。因此，引用存在不等于证据真正支持结论；这项边界记录在当前 M0 文档中，语义拆分属于后续 M1，而不是本版已完成能力。
 
 ### 5. 评测优先
 
@@ -103,7 +108,7 @@ Phase 4B 自动矩阵在同一 v3 集合上复跑了 BM25 direct/adaptive。质�
 
 这次复跑同时验证了 matrix runner；它不是新的跨机器性能基准。延迟只应在同一次运行、同一机器内横向比较。
 
-生成实验固定使用 30 条子集和同一 BM25 检索结果，对 4 个 backend 形成 120 条 model-case 记录。整体 judge faithfulness 为 0.970，citation validity 为 0.925。由于 judge 使用 DeepSeek-V3，对同模型存在 self-preference 风险，因此规则 verifier 与人工失败样例仍是更重要的旁证。
+生成实验固定使用 30 条子集和同一 BM25 检索结果，对 4 个 backend 形成 120 条 model-case 记录。历史报告中的 judge faithfulness 为 0.970，citation validity 为 0.925。由于 judge 使用 DeepSeek-V3，对同模型存在 self-preference 风险，规则 verifier 又只有启发式边界，这些数字只能作为当时配置下的信号，不能证明语义支持或法律正确性。
 
 ## 真正有价值的踩坑与修复
 
@@ -133,7 +138,7 @@ Phase 4B 自动矩阵在同一 v3 集合上复跑了 BM25 direct/adaptive。质�
 ```powershell
 git clone https://github.com/1040942669/legal-rag-agent.git
 Set-Location legal-rag-agent
-uv sync
+uv sync --locked
 ```
 
 ### 准备语料
@@ -150,9 +155,9 @@ Chinese-Laws/
 
 仓库不提交完整法律文本、embedding cache 或生成报告。历史结果使用 203 部法律的本地增强快照，精确复跑历史数字需要相同语料；使用公开数据的当前版本时，应把新结果视为一次新的实验。
 
-### 10 分钟离线链路
+### 10 分钟本地语料链路
 
-以下命令不调用 LLM，也不需要 API Key：
+以下命令不调用 LLM，也不需要 API Key，但需要先准备上节说明的本地法律语料：
 
 ```powershell
 uv run python -m legal_rag.cli profile-data
@@ -247,14 +252,14 @@ uv run python -m legal_rag.cli evaluate `
 ## 测试与复现边界
 
 ```powershell
-uv run pytest -q
+uv run --offline --frozen --no-sync python scripts/quality_gate.py --milestone M0 --mode offline
 ```
 
-当前本地验收结果为 `70 passed`。单元测试不依赖真实 LLM 或大型 embedding/reranker 下载，覆盖数据解析、chunk、检索、adaptive contract、证据校验、judge 异常处理、cache drift、rerank adapter/trace、usage 聚合和 matrix 输出。
+该 M0 门禁不需要完整语料或模型 Key，统一运行测试、明确禁止 socket 访问的合成 BM25 smoke、包版本导入、CLI help、Markdown 相对链接、STATE/manifest JSON 和候选文件凭证风险检查。当前候选本地结果为 `89 passed`，门禁 7 项必需检查全部通过。测试覆盖数据解析、chunk、检索、adaptive contract、证据校验、judge 异常处理、cache drift、rerank adapter/trace、usage 聚合、matrix 输出和合成离线 smoke。
 
 需要明确区分三类可复现性：
 
-1. 代码与离线逻辑：由锁文件、配置、70 个测试和 BM25 CLI 保证。
+1. 代码与离线逻辑：由锁文件、配置、89 个测试、统一门禁和 BM25 CLI 提供回归证据；这不等于法律正确性保证。
 2. 历史检索数字：依赖 2026-06 的 203 部法律快照及对应 embedding cache。
 3. API 生成分数：还依赖外部模型版本、服务状态和 judge 偏差，不能视为永久固定值。
 
@@ -283,23 +288,20 @@ ARCHITECTURE_DECISION_LOG.md       关键架构决策和反例
 
 生成的索引、embedding cache、CSV/JSON 报告和 trace 默认位于 `artifacts/`、`reports/`，均不进入 Git。
 
-## 当前状态与下一步
+## 历史 Phase 实现快照与当前改造状态
 
-- Phase 0：可复现 baseline、manifest、run metadata，已完成。
-- Phase 1：检索可靠性、诊断、失败归因和 trace，已完成。
-- Phase 2：受控查询理解与 multi-query planning，已完成。
-- Phase 3：证据充分性、最多一轮补检索和 answer verifier，已完成。
-- Phase 4A：v3 评测集、置信区间、judge 和手工实验矩阵，已完成。
-- Phase 4B：reranker protocol/BGE adapter、embedding cache v2 health check、自动 matrix runner、调用/token/成本和 p50/p95 聚合，工程实现已完成。
+截至 2026-09-18，旧 Phase 0-4B 路线实现了可复现 baseline、检索诊断与 trace、受控查询理解、最多一轮补检索、规则 verifier、v3 评测集、reranker adapter、embedding cache v2 和自动实验矩阵。旧 Phase 编号与当前 M0-M7 里程碑不一一对应；旧路线的 reranker/cache A/B 仍是未完成的实验项，不代表当前发布主线的下一步。
 
-当前不会继续堆叠自由 Agent 能力。下一步是重建旧 embedding cache，并在资源合适的机器上完成 `none vs bge_v2_m3` 的真实 A/B；在数据证明收益前，reranker 和 adaptive 都保持默认关闭。
+当前 M0-M7 主线以 [MASTER_PLAN](docs/refactor/MASTER_PLAN.md)、[STATE](docs/refactor/STATE.json) 和 [HANDOFF](docs/refactor/HANDOFF.md) 为权威来源。M0 正在建立可信基线、离线质量门禁、CI 和首个可发布版本；M1-M7 尚未开始。只有 PR、候选提交 CI、Tag 和 GitHub Release 均真实完成并经远端核验后，M0 才会在状态文件中标记为 `released`。
 
 ## 文档导航
 
 - [文档索引](docs/README.md)：公开文档的职责和阅读顺序。
 - [历史实验结果](reports/RESULTS_SUMMARY.md)：完整数字、环境和解释边界。
 - [评测方案](docs/EVALUATION_PLAN.md)：case 设计、指标定义和报告原则。
-- [执行计划](docs/LEGAL_RAG_EXECUTION_PLAN.md)：Phase 0-5 状态、依赖和验收标准。
+- [当前改造主计划](docs/refactor/MASTER_PLAN.md)：M0-M7 的范围、依赖和验收标准。
+- [机器可读状态](docs/refactor/STATE.json) 与 [执行交接](docs/refactor/HANDOFF.md)：当前事实、下一步和阻塞项。
+- [历史 Phase 0-5 执行记录](docs/LEGAL_RAG_EXECUTION_PLAN.md)：旧路线的状态、依赖和验收记录，仅供追溯。
 - [Phase 4B 技术调研](docs/PHASE4B_RESEARCH_AND_DECISIONS.md)：最新机制、L9 可取原则、实现范围和暂缓项。
 - [架构决策记录](ARCHITECTURE_DECISION_LOG.md)：为什么这样设计、哪些假设被实验推翻。
 

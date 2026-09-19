@@ -41,12 +41,12 @@ from .tracing import JsonlTraceWriter, build_retrieval_trace_record
 
 
 def main(argv: list[str] | None = None) -> int:
-    load_dotenv()
     parser = build_parser()
     args = parser.parse_args(argv)
     if not hasattr(args, "handler"):
         parser.print_help()
         return 1
+    load_dotenv()
     try:
         return args.handler(args)
     except Exception as exc:
@@ -57,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="legal-rag",
-        description="Chinese current law conversational RAG assistant.",
+        description="RAG assistant for versioned Chinese law text snapshots.",
     )
     parser.add_argument("--config", default="configs/default.yaml", help="Path to config YAML.")
     subparsers = parser.add_subparsers(dest="command")
