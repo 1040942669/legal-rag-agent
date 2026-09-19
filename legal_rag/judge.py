@@ -8,6 +8,10 @@ from typing import Any, Protocol
 from .models import SearchResult
 
 
+MAX_JUDGE_RESPONSE_CHARS = 65_536
+MAX_JSON_START_CANDIDATES = 32
+
+
 class CompletionClient(Protocol):
     def complete(self, prompt: str) -> str:
         ...
@@ -82,13 +86,19 @@ def build_judge_prompt(question: str, answer: str, results: list[SearchResult]) 
 def extract_json_object(text: str) -> dict[str, Any] | None:
     """Extract the first complete JSON object without relying on greedy regexes."""
     cleaned = text.strip()
+    if len(cleaned) > MAX_JUDGE_RESPONSE_CHARS:
+        return None
     decoder = json.JSONDecoder()
+    candidates_checked = 0
     for start, char in enumerate(cleaned):
         if char != "{":
             continue
+        candidates_checked += 1
+        if candidates_checked > MAX_JSON_START_CANDIDATES:
+            return None
         try:
             parsed, _ = decoder.raw_decode(cleaned[start:])
-        except json.JSONDecodeError:
+        except (ValueError, RecursionError, OverflowError):
             continue
         if isinstance(parsed, dict):
             return parsed
@@ -146,6 +156,12 @@ def judge_answer(
         )
         message = str(exc).strip() or type(exc).__name__
         return error_result(message, error_code=error_code)
+    if len(raw) > MAX_JUDGE_RESPONSE_CHARS:
+        return error_result(
+            "judge response exceeds the maximum accepted size",
+            error_code="invalid_json",
+            raw_response=raw,
+        )
     parsed = extract_json_object(raw)
     if parsed is None:
         return error_result(
@@ -170,6 +186,13 @@ def judge_answer(
             error_code="invalid_schema",
             raw_response=raw,
         )
+    comment = parsed.get("comment", "")
+    if not isinstance(comment, str):
+        return error_result(
+            "judge response field `comment` must be a string",
+            error_code="invalid_schema",
+            raw_response=raw,
+        )
     faithfulness = scores["faithfulness"]
     relevance = scores["relevance"]
     completeness = scores["completeness"]
@@ -182,6 +205,6 @@ def judge_answer(
         relevance=relevance,
         completeness=completeness,
         passed=passed,
-        comment=str(parsed.get("comment", ""))[:300],
+        comment=comment[:300],
         raw_response=raw[:500],
     )

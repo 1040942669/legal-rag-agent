@@ -158,6 +158,47 @@ class JudgeTest(unittest.TestCase):
         self.assertEqual(result.source, "error")
         self.assertFalse(result.passed)
 
+    def test_judge_rejects_oversized_json_without_exposing_the_full_response(self):
+        client = StubJudgeClient(
+            '{"faithfulness": 0.9, "relevance": 0.8, "completeness": 0.7, '
+            '"passed": true, "comment": "' + "x" * 200_000 + '"}'
+        )
+
+        result = judge_answer(client, question="q", answer="a", results=self.make_results())
+
+        self.assertEqual(result.status, "error")
+        self.assertEqual(result.error_code, "invalid_json")
+        self.assertIsNone(result.faithfulness)
+        self.assertIsNone(result.relevance)
+        self.assertIsNone(result.completeness)
+        self.assertIsNone(result.passed)
+        self.assertLessEqual(len(result.raw_response), 500)
+
+    def test_judge_converts_pathological_json_into_a_stable_error(self):
+        deeply_nested = '{"comment":' + "[" * 2_000 + "0" + "]" * 2_000 + "}"
+        huge_integer = (
+            '{"faithfulness": '
+            + "9" * 10_000
+            + ', "relevance": 0.8, "completeness": 0.7, "passed": true}'
+        )
+
+        for raw in (deeply_nested, huge_integer):
+            with self.subTest(kind="nested" if raw is deeply_nested else "huge_integer"):
+                result = judge_answer(
+                    StubJudgeClient(raw),
+                    question="q",
+                    answer="a",
+                    results=self.make_results(),
+                )
+
+                self.assertEqual(result.status, "error")
+                self.assertIn(result.error_code, {"invalid_json", "invalid_schema"})
+                self.assertIsNone(result.faithfulness)
+                self.assertIsNone(result.relevance)
+                self.assertIsNone(result.completeness)
+                self.assertIsNone(result.passed)
+                self.assertLessEqual(len(result.raw_response), 500)
+
     def test_judge_handles_client_exception(self):
         class FailingClient:
             def complete(self, prompt: str) -> str:

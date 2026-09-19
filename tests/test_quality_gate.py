@@ -454,3 +454,17 @@ def test_ci_runs_the_cumulative_m1_gate_with_a_pinned_report_upload() -> None:
     )
     assert "${{ github.run_attempt }}" in workflow
     assert "if-no-files-found: error" in workflow
+
+
+def test_ci_checks_out_and_labels_the_exact_event_commit() -> None:
+    workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
+
+    assert "if: github.event_name == 'pull_request'" in workflow
+    assert "ref: ${{ github.event.pull_request.head.sha }}" in workflow
+    assert "if: github.event_name == 'push'" in workflow
+    assert "ref: ${{ github.sha }}" in workflow
+    assert (
+        "m1-quality-gate-${{ github.event_name == 'pull_request' "
+        "&& github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}"
+        in workflow
+    )
