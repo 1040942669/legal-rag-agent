@@ -260,8 +260,21 @@ def search_result_to_artifact(result: SearchResult) -> dict[str, Any]:
             "trace": result.trace,
         },
     }
-    search_result_from_artifact(artifact)
-    return _json_copy(artifact)
+    restored = search_result_from_artifact(artifact)
+    canonical_artifact = {
+        "artifact_schema_version": EVALUATION_ARTIFACT_SCHEMA_VERSION,
+        "search_result": {
+            "chunk": {
+                field.name: getattr(restored.chunk, field.name)
+                for field in fields(Chunk)
+            },
+            "score": restored.score,
+            "rank": restored.rank,
+            "retriever": restored.retriever,
+            "trace": restored.trace,
+        },
+    }
+    return _json_copy(canonical_artifact)
 
 
 def search_result_from_artifact(artifact: Mapping[str, Any]) -> SearchResult:

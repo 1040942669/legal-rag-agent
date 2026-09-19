@@ -467,6 +467,76 @@ class LegalChatAssistant:
             session_revision=session_revision,
         )
 
+    def bind_prepared_question(
+        self,
+        *,
+        original_question: str,
+        standalone_question: str,
+        analysis: QueryAnalysis,
+        memory_text: str,
+        session_state_before: Mapping[str, Any],
+    ) -> PreparedQuestion:
+        """Bind cached semantic preparation to the current session fence.
+
+        Process-local memory/session revisions are never replayable data.  A
+        cached preparation may only be rebound when its durable checkpoint and
+        rendered memory exactly match the assistant's current state.
+        """
+
+        for name, value in (
+            ("original_question", original_question),
+            ("standalone_question", standalone_question),
+            ("memory_text", memory_text),
+        ):
+            if not isinstance(value, str):
+                raise ValueError(f"{name} must be a string")
+            validate_json_unicode(value)
+        if not isinstance(analysis, QueryAnalysis):
+            raise ValueError("analysis must be a QueryAnalysis")
+        if analysis.original_query != standalone_question:
+            raise ValueError("analysis is not bound to the standalone question")
+        if analysis != analyze_query(standalone_question):
+            raise ValueError("analysis does not match the standalone question")
+        if not isinstance(session_state_before, Mapping):
+            raise ValueError("session_state_before must be an object")
+        checkpoint = deepcopy(dict(session_state_before))
+        validate_json_unicode(checkpoint)
+        if set(checkpoint) != {"schema_version", "memory"}:
+            raise ValueError("session_state_before fields are invalid")
+        schema_version = checkpoint["schema_version"]
+        if (
+            isinstance(schema_version, bool)
+            or not isinstance(schema_version, int)
+            or schema_version != ASSISTANT_SESSION_STATE_SCHEMA_VERSION
+        ):
+            raise ValueError("session_state_before schema is unsupported")
+        memory_state = checkpoint["memory"]
+        if not isinstance(memory_state, Mapping):
+            raise ValueError("session_state_before.memory must be an object")
+        self.memory._validated_state_messages(memory_state)
+
+        with self._commit_lock:
+            memory_snapshot = self.memory.snapshot()
+            current_state = {
+                "schema_version": ASSISTANT_SESSION_STATE_SCHEMA_VERSION,
+                "memory": memory_snapshot.state,
+            }
+            if checkpoint != current_state or memory_text != memory_snapshot.rendered:
+                raise RuntimeError(
+                    "cached preparation does not match current conversation state"
+                )
+            return PreparedQuestion(
+                original_question=original_question,
+                standalone_question=standalone_question,
+                analysis=deepcopy(analysis),
+                memory_text=memory_text,
+                session_state_before=deepcopy(current_state),
+                memory_messages_before=memory_snapshot.messages,
+                memory_token_limit=memory_snapshot.token_limit,
+                memory_revision=memory_snapshot.revision,
+                session_revision=self._session_revision,
+            )
+
     def retrieve_turn(self, prepared: PreparedQuestion) -> RetrievedTurn:
         if should_refuse_before_retrieval(prepared.analysis.risk_flags):
             answer = programmatic_answer(
