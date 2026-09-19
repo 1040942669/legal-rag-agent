@@ -3,13 +3,12 @@
 ## 当前真实状态
 
 - M0 软件版本已经发布并远端核验；终态为 `released`。发布回执 [PR #3](https://github.com/1040942669/legal-rag-agent/pull/3) 已于 `2026-09-19T07:13:37Z` 合并，`master` merge commit `52714d5f84634f008a5860f6bf4f5aa199ae3261` 的 [CI 35428743968](https://github.com/1040942669/legal-rag-agent/actions/runs/35428743968) 成功，Milestone 1 已关闭。
-- 目标仓库：`1040942669/legal-rag-agent`；远端默认分支为 `master`。
-- M0 Release target 仍为 `cb7e01982ca6fb95cebde1e5d707527fd36a250c`；M1 工作基线为当前 `origin/master` 的 `52714d5f84634f008a5860f6bf4f5aa199ae3261`。
-- 软件 PR：[PR #2](https://github.com/1040942669/legal-rag-agent/pull/2)，于 `2026-09-19T07:02:14Z` 以普通 merge commit 合并，保留任务开始前已有的 Phase 4B 提交 `66da8e3056f8287997088d9f503846fd88c9b038`。
-- Tag / Release：`v0.1.1` / [GitHub Release](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.1.1)，发布时间 `2026-09-19T07:05:12Z`。
-- 当前工作分支：`codex/m1-verification`，从上述最新 `origin/master` 创建；工作区在启动时干净。
-- M1 已明确由用户授权连续推进；当前状态为 `ready_for_release`。[Issue #4](https://github.com/1040942669/legal-rag-agent/issues/4)、[Milestone 2](https://github.com/1040942669/legal-rag-agent/milestone/2) 与 [PR #5](https://github.com/1040942669/legal-rag-agent/pull/5) 已创建。Tag / Release 仍未创建，因此 M1 尚未发布。
-- M1 冻结软件候选为 `647c0238674abe603fdf33e80191c19eb6de3dd9`。它已完成 `0.2.0` 包构建与隔离安装，并由显式检出同一 PR head SHA 的 [Actions run 35461753394](https://github.com/1040942669/legal-rag-agent/actions/runs/35461753394) 验证累计门禁。更早的 `b7c564a...`、`8a31a36...` 和 merge-ref 证据只保留历史追溯价值。
+- 目标仓库：`1040942669/legal-rag-agent`；远端默认分支为 `master`。M1 工作基线为 `52714d5f84634f008a5860f6bf4f5aa199ae3261`。
+- M1 软件 [PR #5](https://github.com/1040942669/legal-rag-agent/pull/5) 已于 `2026-09-19T18:56:38Z` 普通合并；最终 PR head 为 `d2fa34776cd188197954eff9a0092c207f309b97`，release target / merge commit 为 `d51ed481f986dde807163f4b5583b07bc9ef6750`。
+- release target 的 [master CI 35462786212](https://github.com/1040942669/legal-rag-agent/actions/runs/35462786212) 成功。远端 annotated tag object `546b0207eaf7dd46f1303baec9b279c14e41592c` peeled 到同一 target。
+- Tag / Release：`v0.2.0` / [GitHub Release](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.2.0)，发布时间 `2026-09-19T18:59:07Z`；非 draft、非 prerelease、无附件。
+- 当前回执分支：`codex/m1-release-receipt`，从已发布的 `origin/master` 创建；软件 Tag 不包含也不需要包含后续回执提交。
+- M1 当前状态为 `released_receipt_pending`；Issue #4 已由软件 PR 合并关闭，Milestone 2 在回执 PR 合并并核对 master CI 后关闭。
 - M2-M7 尚未开始；每个阶段仍独立测试、PR、合并、Tag、Release 和回执。
 
 ## M1 启动边界
@@ -42,6 +41,10 @@
 19. PR #5 的 [Actions run 35461753394](https://github.com/1040942669/legal-rag-agent/actions/runs/35461753394) 显式检出同一 head `647c023...` 并成功；下载 JSON 确认 17/17、186 passed、148 subtests、JUnit 334/0/0/0。产物名为 `m1-quality-gate-647c0238674abe603fdf33e80191c19eb6de3dd9-1`。
 20. Normalizer、结构化回答和 Judge 的模型 JSON 入口已统一拒绝重复 key、非标准非有限数值、孤立 surrogate、超限或资源异常输入；引用/拒答检查覆盖 Unicode 括号与不可见格式字符并保守失败关闭。
 21. 被拒绝草稿正文和内容型 verifier 诊断不进入普通 Trace；安全 serializer 使用显式 allowlist，生成的 schema、引用片段和 source ID 列表只保留计数。Trace 仍记录用户 query、派生查询和检索 metadata，评测记录仍保存最终回答与成功 Judge comment，不能宣称全链路脱敏。
+22. 最终文档 head `d2fa34776cd188197954eff9a0092c207f309b97` 在干净工作区本地再次通过 17/17 门禁，并由精确 PR-head [CI 35462691374](https://github.com/1040942669/legal-rag-agent/actions/runs/35462691374) 复验。
+23. PR #5 普通合并为 `d51ed481f986dde807163f4b5583b07bc9ef6750`；对应 master push CI 复验 17/17、186 passed、148 subtests、JUnit 334/0/0/0。
+24. annotated `v0.2.0` 的远端 tag object / peeled target 已交叉核对；GitHub Release API/CLI 确认发布对象非 draft、非 prerelease且无附件。
+25. 机器可读发布回执为 `docs/refactor/receipts/M1.json`；它在软件 Release 之后由独立文档 PR 落库，不移动 `v0.2.0`。
 
 ## 真实验证结果
 
@@ -51,18 +54,19 @@
 - lock / 环境：`uv lock --check`、`uv sync --check --offline --frozen` 均以 0 退出。
 - 发布包：`uv build --offline` 成功产生 `0.1.1` sdist/wheel；wheel 在全新临时 Python 3.12.13 venv 离线安装并导入，版本核对为 `0.1.1`。
 - 验收报告：`reports/refactor/M0.md`；机器可读回执：`docs/refactor/receipts/M0.json`。
-- M1 累积门禁：精确检出软件候选 `647c023...` 的 PR-head CI 为 17/17 通过，全量 `186 passed, 148 subtests passed`，JUnit 汇总 `334 tests, 0 failures, 0 errors, 0 skipped`；合成 smoke 与 `M1-T01` 至 `M1-T10` 均独立通过。
+- M1 累积门禁：最终 PR head `d2fa347...` 与 release target `d51ed48...` 的精确 CI 均为 17/17 通过，全量 `186 passed, 148 subtests passed`，JUnit 汇总 `334 tests, 0 failures, 0 errors, 0 skipped`；合成 smoke 与 `M1-T01` 至 `M1-T10` 均独立通过。
 - M1 环境与工作流：workflow YAML 可解析，`uv lock --check` 与 `uv sync --check --offline --frozen` 均通过；未知 milestone/mode 生成配置错误报告并返回逻辑退出码 2。
 - M1 最终发布内容候选包：wheel `legal_rag_assistant-0.2.0-py3-none-any.whl`，101,188 bytes，SHA-256 `c5fa5e291e17d2dc5218577af23a1880e0c27ea93abfbd2e097be19c9df4a6f7`；sdist `legal_rag_assistant-0.2.0.tar.gz`，138,515 bytes，SHA-256 `b9172b8a18a983c30dcd9893df4ec808ad31d003e6fa33bcbd943b9896708078`。
-- M1 验收报告：`reports/refactor/M1.md`；当前包含 clean 候选与精确 PR-head CI 证据，实际 merge SHA、master CI、Tag、Release 与发布回执仍待对应步骤真实完成。
-- M1 PR CI 产物：`m1-quality-gate-647c0238674abe603fdf33e80191c19eb6de3dd9-1`，GitHub digest `sha256:d87112cbdc14efc31425da30eff28dbf73d13cdd6a5b92519ba04591073b0232`；本地解包 JSON SHA-256 `fb17787d94e042bb58d6c32d1400c5b0c5415cd54b1dd0abfdad936b955b818e`。
+- M1 验收报告：`reports/refactor/M1.md`；机器可读发布回执：`docs/refactor/receipts/M1.json`。
+- M1 最终 PR CI 产物：`m1-quality-gate-d2fa34776cd188197954eff9a0092c207f309b97-1`，GitHub digest `sha256:92611875339d1d779978ba2d94596629ea0425e4cf001e728e64dd3e6c188c71`；本地解包 JSON SHA-256 `da6e64182a64c6190c7a3f110dc11e2e6abe04d035e6d54578c9e45664ec66b5`。
+- M1 master CI 产物：`m1-quality-gate-d51ed481f986dde807163f4b5583b07bc9ef6750-1`，GitHub digest `sha256:145aa5e10e5ab03d013bdbfe425af245eb565ffc2306fa09af8a2294f44b4a7f`；本地解包 JSON SHA-256 `6c3f0097aceecefcec58a1a8e95a399b512995555f94b5af1929bf9c9b3044b9`。
 
 ## 没有做的事情
 
 - 没有运行在线或本地生成模型、Embedding、reranker、LLM judge、真实法律语料实验或付费调用。
 - 没有读取/上传 `.env` 值、完整语料、Embedding cache、私人课程/简历/面试材料或大型产物。
 - 没有引入数据库、FastAPI、LangGraph、Redis/Celery，没有部署生产。
-- M1 尚未合并、打 Tag 或发布；`0.2.0` 目前只是 PR 中已验证候选，最新已核验 Release 仍为 `v0.1.1`。
+- M1 软件已经发布；尚未完成的仅是发布回执文档 PR/CI/合并与 Milestone 2 收尾，不得重复发版或移动 Tag。
 - 本地门禁 JSON、下载的 CI JSON 与包构建物只保存在被忽略的本地 `.tmp`；它们没有进入 Git 或 Release 附件。GitHub Actions 产物按平台保留策略远端保存。
 - 没有把历史 203 部法律或模型质量数字冒充 M0 新实测。
 
@@ -77,10 +81,10 @@
 
 ## 回滚
 
-- 代码：M1 发布前可关闭 PR 而不触碰 `master`；发布后通过新的 revert PR 回滚实际 M1 merge commit，不强推、不重写历史。
+- 代码：发布后如需撤销，通过新的 revert PR 回滚 M1 merge commit `d51ed481f986dde807163f4b5583b07bc9ef6750`，不强推、不重写历史。
 - 数据：本版没有数据库或语料迁移，无数据回滚动作。
 - 任务/服务：本版没有队列、后台任务或生产部署，无运行中任务需要恢复。
-- 版本：已发布 `v0.1.1` 不移动、不复用；修复使用后续版本。
+- 版本：已发布 `v0.1.1` 与 `v0.2.0` 均不移动、不复用；修复使用后续版本。
 
 ## M0 回执收尾核对
 
@@ -92,19 +96,18 @@
 
 | 项目 | 当前值 |
 |---|---|
-| 当前里程碑 | M1 / `ready_for_release`（M0 已 `released`） |
-| 当前工作分支 | `codex/m1-verification` |
-| M1 冻结软件候选 | `647c0238674abe603fdf33e80191c19eb6de3dd9`；包验证与精确 PR-head CI 已通过 |
-| M1 PR / Tag / Release | [PR #5](https://github.com/1040942669/legal-rag-agent/pull/5) / not_created / not_created |
-| 上一已发布版本 | `v0.1.1` / [Release](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.1.1) / target `cb7e01982ca6fb95cebde1e5d707527fd36a250c` |
-| M1 精确候选测试 | PR-head `647c023...`：186 passed，148 subtests passed；JUnit 334/0 failures/0 errors/0 skipped；无真实模型或语料调用 |
-| M1 累积门禁 | 17/17 passed（含 M0 7 项 + M1 10 项）；精确 PR-head CI 得到同一计数 |
-| M1 package | `0.2.0` clean build + Python 3.12.13 isolated install/import passed；hash 见上文 |
-| M1 PR CI | head/checkout `647c023...` / [run 35461753394](https://github.com/1040942669/legal-rag-agent/actions/runs/35461753394) / success / exact head verified |
+| 当前里程碑 | M1 / `released_receipt_pending`（软件 Release 已远端核验） |
+| 软件分支 / 回执分支 | `codex/m1-verification` / `codex/m1-release-receipt` |
+| 最终 PR head / release target | `d2fa34776cd188197954eff9a0092c207f309b97` / `d51ed481f986dde807163f4b5583b07bc9ef6750` |
+| M1 PR / Tag / Release | [PR #5](https://github.com/1040942669/legal-rag-agent/pull/5) / `v0.2.0` / [published](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.2.0) |
+| M1 精确候选测试 | final PR head 与 release target 均为 186 passed，148 subtests passed；JUnit 334/0 failures/0 errors/0 skipped；无真实模型或语料调用 |
+| M1 累积门禁 | PR/master 均 17/17 passed（含 M0 7 项 + M1 10 项） |
+| M1 package | `0.2.0` verified build + Python 3.12.13 isolated install/import passed；hash 见上文 |
+| M1 PR / master CI | [run 35462691374](https://github.com/1040942669/legal-rag-agent/actions/runs/35462691374) / [run 35462786212](https://github.com/1040942669/legal-rag-agent/actions/runs/35462786212) / success |
 | M1 Issue / Milestone | [#4](https://github.com/1040942669/legal-rag-agent/issues/4) / [Milestone 2](https://github.com/1040942669/legal-rag-agent/milestone/2) |
-| 阻塞 | 无已知软件阻塞；仍须按发布流程让文档提交通过正常 PR CI，不得绕过 review/protection |
-| 下一条可执行动作 | 提交并推送本次发布文档，等待最终 PR head CI；随后普通合并 PR #5，核对 merge SHA 的 `master` CI，再创建 `v0.2.0` annotated Tag 与 GitHub Release |
+| 阻塞 | 无软件发布阻塞；仅发布回执尚未经文档 PR 合入 `master` |
+| 下一条可执行动作 | 提交/push 回执分支，创建文档 PR，记录其 URL并通过 exact-head CI，正常合并后核对 master CI、关闭 Milestone 2并停止 |
 
 ## 完成说明
 
-`v0.1.1` 的 `release_target_sha` 始终保持 `cb7e01982ca6fb95cebde1e5d707527fd36a250c`，即使当前 `master` 因回执提交高于 Tag。M1 从回执合并后的 `master` 开始，不能移动或复用旧 Tag。
+`v0.2.0` 的 `release_target_sha` 始终保持 `d51ed481f986dde807163f4b5583b07bc9ef6750`，即使 `master` 随后因回执提交高于 Tag。回执 PR 不属于新的软件版本；完成回执 CI、合并、master CI 与 Milestone 核对后停止，不开始 M2。
