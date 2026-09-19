@@ -8,7 +8,7 @@ import urllib.request
 from dataclasses import dataclass, field
 from typing import Any
 
-from .env import load_dotenv
+from .env import load_dotenv, require_live_model_calls_allowed
 
 SILICONFLOW_MODEL_PREFIX = "siliconflow:"
 
@@ -61,6 +61,7 @@ class OllamaClient:
     usage: CompletionUsage = field(default_factory=CompletionUsage, init=False, repr=False, compare=False)
 
     def complete(self, prompt: str) -> str:
+        require_live_model_calls_allowed("Ollama completion")
         self.usage.calls += 1
         started = time.perf_counter()
         try:
@@ -124,6 +125,7 @@ class SiliconFlowClient:
     usage: CompletionUsage = field(default_factory=CompletionUsage, init=False, repr=False, compare=False)
 
     def complete(self, prompt: str) -> str:
+        require_live_model_calls_allowed("SiliconFlow completion")
         self.usage.calls += 1
         started = time.perf_counter()
         try:

@@ -9,6 +9,12 @@ import pytest
 
 
 _SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "quality_gate.py"
+_WORKFLOW_PATH = (
+    Path(__file__).resolve().parents[1]
+    / ".github"
+    / "workflows"
+    / "quality-gate.yml"
+)
 _SPEC = importlib.util.spec_from_file_location("m0_quality_gate", _SCRIPT_PATH)
 assert _SPEC is not None and _SPEC.loader is not None
 gate = importlib.util.module_from_spec(_SPEC)
@@ -102,6 +108,8 @@ def test_sanitized_environment_removes_credentials_and_forces_offline() -> None:
     assert clean["HOME"] == "safe-home"
     assert clean["UV_OFFLINE"] == "1"
     assert clean["HF_HUB_OFFLINE"] == "1"
+    assert clean["ALLOW_LIVE_MODEL_CALLS"] == "false"
+    assert clean["LEGAL_RAG_DISABLE_DOTENV"] == "1"
     assert "OPENAI_API_KEY" not in clean
     assert "AWS_SECRET_ACCESS_KEY" not in clean
     assert "HTTP_PROXY" not in clean
@@ -194,6 +202,32 @@ def test_completed_m0_gate_accepts_a_later_active_milestone() -> None:
     assert errors == []
 
 
+def test_active_m1_gate_accepts_released_m0_state() -> None:
+    errors = gate.validate_state_payload(
+        _state_with_released_m0_and_active_m1(),
+        milestone="M1",
+    )
+
+    assert errors == []
+
+
+def test_active_m1_gate_rejects_an_unreleased_m0_prerequisite() -> None:
+    state = _state_with_released_m0_and_active_m1()
+    m0 = state["milestones"][0]  # type: ignore[index]
+    m0["status"] = "not_started"  # type: ignore[index]
+    m0["tests"] = {"status": "not_run"}  # type: ignore[index]
+    m0["tag"] = None  # type: ignore[index]
+    m0["release_url"] = None  # type: ignore[index]
+    m0["remote_release_verified"] = False  # type: ignore[index]
+
+    errors = gate.validate_state_payload(state, milestone="M1")
+
+    assert any(
+        "prerequisite milestone M0 must already be released" in error
+        for error in errors
+    )
+
+
 def test_execution_status_must_match_the_actual_active_milestone() -> None:
     state = _state_with_released_m0_and_active_m1()
     state["execution_status"] = "released"
@@ -282,6 +316,62 @@ def test_gate_requires_each_mandatory_record_once_and_passed() -> None:
     assert not gate.gate_succeeded(records)
 
 
+def test_m1_gate_is_cumulative_and_maps_every_named_acceptance_test() -> None:
+    expected_m1_ids = {f"M1-T{index:02d}" for index in range(1, 11)}
+
+    assert set(gate.MANDATORY_M1_CHECK_IDS) == (
+        set(gate.MANDATORY_M0_CHECK_IDS) | expected_m1_ids
+    )
+    assert set(gate.M1_TEST_SELECTORS) == expected_m1_ids
+    assert len(gate.M1_TEST_SELECTORS["M1-T03"]) == 2
+    assert len(gate.M1_TEST_SELECTORS["M1-T07"]) == 2
+    assert len(gate.M1_TEST_SELECTORS["M1-T08"]) == 3
+    assert len(gate.M1_TEST_SELECTORS["M1-T10"]) == 2
+    assert any(
+        "test_m1_synthetic_examples.py" in selector
+        for selector in gate.M1_TEST_SELECTORS["M1-T01"]
+    )
+    assert any(
+        "test_m1_synthetic_examples.py" in selector
+        for selector in gate.M1_TEST_SELECTORS["M1-T04"]
+    )
+
+
+def test_mandatory_pytest_check_fails_closed_on_skip_or_xfail(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    def fake_subprocess_check(**kwargs):
+        command = kwargs["command"]
+        junit_index = command.index("--junitxml") + 1
+        junit_path = Path(command[junit_index])
+        _write(
+            junit_path,
+            '<testsuites><testsuite tests="1" failures="0" errors="0" skipped="1" /></testsuites>',
+        )
+        return gate.result_record(
+            test_id=kwargs["test_id"],
+            command=command,
+            exit_code=0,
+            status="passed",
+            output_summary="pytest returned zero",
+            artifact_path=kwargs.get("artifact_path"),
+        )
+
+    monkeypatch.setattr(gate, "run_subprocess_check", fake_subprocess_check)
+
+    record = gate.run_pytest_check(
+        test_id="M1-T01",
+        selectors=("tests/example.py::test_required",),
+        repo_root=tmp_path,
+        timeout_seconds=30,
+    )
+
+    assert record["status"] == "failed"
+    assert record["exit_code"] == 1
+    assert "skipped or xfailed" in record["output_summary"]
+
+
 def test_result_record_contains_required_machine_readable_fields() -> None:
     record = gate.result_record(
         test_id="M0-example",
@@ -293,12 +383,14 @@ def test_result_record_contains_required_machine_readable_fields() -> None:
 
     assert gate.REQUIRED_RECORD_FIELDS.issubset(record)
     assert record["environment"]["mode"] == "offline"
+    assert record["environment"]["dotenv_loading_disabled"] is True
+    assert record["environment"]["live_model_calls_allowed"] is False
     assert record["executed_at"].endswith("Z")
 
 
 @pytest.mark.parametrize(
     ("milestone", "mode"),
-    [("M1", "offline"), ("M0", "integration"), (None, "offline")],
+    [("M2", "offline"), ("M0", "integration"), (None, "offline")],
 )
 def test_unknown_milestone_or_mode_is_rejected(
     milestone: str | None,
@@ -307,5 +399,58 @@ def test_unknown_milestone_or_mode_is_rejected(
     assert gate.validate_request(milestone, mode)
 
 
-def test_supported_request_is_accepted() -> None:
-    assert gate.validate_request("M0", "offline") == []
+@pytest.mark.parametrize("milestone", ["M0", "M1"])
+def test_supported_request_is_accepted(milestone: str) -> None:
+    assert gate.validate_request(milestone, "offline") == []
+
+
+def test_main_dispatches_the_requested_milestone(monkeypatch, capsys) -> None:
+    calls: list[str] = []
+
+    def report_for(milestone: str) -> dict[str, object]:
+        calls.append(milestone)
+        return {
+            "schema_version": 1,
+            "milestone": milestone,
+            "mode": "offline",
+            "started_at": "2026-09-20T00:00:00Z",
+            "finished_at": "2026-09-20T00:00:00Z",
+            "status": "passed",
+            "exit_code": 0,
+            "mandatory_check_ids": [],
+            "checks": [],
+            "artifact_path": None,
+        }
+
+    monkeypatch.setattr(gate, "run_m0_offline", lambda repo_root: report_for("M0"))
+    monkeypatch.setattr(gate, "run_m1_offline", lambda repo_root: report_for("M1"))
+
+    assert gate.main(["--milestone", "M1", "--mode", "offline"]) == 0
+    assert calls == ["M1"]
+    assert json.loads(capsys.readouterr().out)["milestone"] == "M1"
+
+
+def test_main_returns_configuration_exit_code_for_unsupported_request(capsys) -> None:
+    assert gate.main(["--milestone", "M2", "--mode", "offline"]) == 2
+    report = json.loads(capsys.readouterr().out)
+    assert report["status"] == "failed"
+    assert report["exit_code"] == 2
+
+
+def test_ci_runs_the_cumulative_m1_gate_with_a_pinned_report_upload() -> None:
+    workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
+
+    assert "pull_request_target" not in workflow
+    assert "secrets." not in workflow
+    assert "permissions:\n  contents: read" in workflow
+    assert "persist-credentials: false" in workflow
+    assert "--milestone M1" in workflow
+    assert "--mode offline" in workflow
+    assert "--milestone M0" not in workflow
+    assert "cancel-in-progress: ${{ github.event_name == 'pull_request' }}" in workflow
+    assert (
+        "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"
+        in workflow
+    )
+    assert "${{ github.run_attempt }}" in workflow
+    assert "if-no-files-found: error" in workflow

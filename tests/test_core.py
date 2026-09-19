@@ -1,18 +1,26 @@
 import json
+import os
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from uuid import uuid4
 
 from legal_rag.chunking import build_chunks
 from legal_rag.config import load_config
 from legal_rag.data import parse_law_file, profile_dataset
 from legal_rag.diagnostics import build_chunk_diagnostics
-from legal_rag.embeddings import resolve_embedding_model
-from legal_rag.env import clean_env_value
+from legal_rag.embeddings import (
+    EmbeddingModelConfig,
+    SentenceTransformerEncoder,
+    SiliconFlowEmbeddingEncoder,
+    resolve_embedding_model,
+)
+from legal_rag.env import clean_env_value, load_dotenv
 from legal_rag.evaluation import render_eval_report
 from legal_rag.failure_analysis import label_retrieval_failure
 from legal_rag.indexing import build_index
 from legal_rag.manifest import write_artifact_manifest
+from legal_rag.llm import OllamaClient, SiliconFlowClient
 from legal_rag.models import EvalCase, EvalRecord, SearchResult
 from legal_rag.query import analyze_query
 from legal_rag.retrieval import BM25Retriever, RRFHybridRetriever, format_sources
@@ -207,6 +215,38 @@ class CoreTest(unittest.TestCase):
         self.assertEqual(clean_env_value('"abc"'), "abc")
         self.assertEqual(clean_env_value("'abc'"), "abc")
         self.assertEqual(clean_env_value("abc"), "abc")
+
+    def test_dotenv_loading_can_be_disabled_for_offline_execution(self) -> None:
+        root = self.make_workspace_temp()
+        dotenv_path = root / ".env"
+        dotenv_path.write_text("OFFLINE_TEST_VALUE=must-not-load\n", encoding="utf-8")
+
+        with patch.dict(os.environ, {"LEGAL_RAG_DISABLE_DOTENV": "1"}, clear=False):
+            os.environ.pop("OFFLINE_TEST_VALUE", None)
+            self.assertIsNone(load_dotenv(dotenv_path))
+            self.assertNotIn("OFFLINE_TEST_VALUE", os.environ)
+
+    def test_live_provider_clients_fail_closed_when_disabled(self) -> None:
+        embedding_config = EmbeddingModelConfig(
+            key="remote-test",
+            provider="siliconflow",
+            model_name="remote-test-model",
+            role="document",
+        )
+
+        with patch.dict(os.environ, {"ALLOW_LIVE_MODEL_CALLS": "false"}, clear=False):
+            for label, invoke in (
+                ("ollama", lambda: OllamaClient(model="test").complete("prompt")),
+                ("siliconflow", lambda: SiliconFlowClient(model="test").complete("prompt")),
+                (
+                    "sentence-transformer",
+                    lambda: SentenceTransformerEncoder(embedding_config),
+                ),
+                ("embedding", lambda: SiliconFlowEmbeddingEncoder(embedding_config)),
+            ):
+                with self.subTest(provider=label):
+                    with self.assertRaisesRegex(RuntimeError, "ALLOW_LIVE_MODEL_CALLS"):
+                        invoke()
 
     def test_manifest_writer_records_reproducibility_fields(self) -> None:
         manifest_path = self.make_workspace_temp() / "manifest.json"
