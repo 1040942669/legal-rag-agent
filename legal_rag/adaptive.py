@@ -221,6 +221,9 @@ def run_bounded_followup(
     if evidence.sufficient:
         trace["stop_reason"] = "sufficient"
         return results, with_stop_reason(evidence, "sufficient"), trace
+    if evidence.stop_reason == "needs_clarification":
+        trace["stop_reason"] = "needs_clarification"
+        return results, with_stop_reason(evidence, "needs_clarification"), trace
     if max_rounds <= 0 or not evidence.followup_queries:
         reason = "max_rounds_reached" if max_rounds <= 0 else "no_followup_query"
         trace["stop_reason"] = reason

@@ -4,6 +4,19 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
+ANSWER_MODES = frozenset(
+    {
+        "evidence_answer",
+        "insufficient_evidence",
+        "needs_clarification",
+        "out_of_scope",
+    }
+)
+SEMANTIC_SUPPORT_STATUSES = frozenset(
+    {"supported", "unsupported", "uncertain", "not_checked"}
+)
+
+
 @dataclass(frozen=True)
 class LawArticle:
     article_id: str
@@ -118,22 +131,128 @@ class EvidenceCheck:
 
 
 @dataclass(frozen=True)
+class AnswerClaim:
+    claim_id: str
+    text: str
+    source_ids: list[str]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "claim_id": self.claim_id,
+            "text": self.text,
+            "source_ids": self.source_ids,
+        }
+
+
+@dataclass(frozen=True)
+class StructuredAnswer:
+    """Canonical answer envelope used by the M1 verifier.
+
+    ``schema_valid`` and ``adapter_source`` describe how confidently the
+    envelope was obtained.  They are intentionally omitted from ``to_dict``
+    so the public generation contract remains the five fields documented in
+    the refactor plan.
+    """
+
+    answer_text: str
+    answer_mode: str
+    claims: list[AnswerClaim]
+    limitations: list[str]
+    clarification_question: str | None
+    schema_valid: bool = True
+    adapter_source: str = "structured_object"
+    parse_errors: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "answer_text": self.answer_text,
+            "answer_mode": self.answer_mode,
+            "claims": [claim.to_dict() for claim in self.claims],
+            "limitations": self.limitations,
+            "clarification_question": self.clarification_question,
+        }
+
+
+@dataclass(frozen=True)
+class VerificationContext:
+    """Evidence boundary for one verification run.
+
+    When either boundary is configured, cited evidence must carry the
+    corresponding metadata.  A missing value is rejected instead of being
+    silently treated as in-scope.
+    """
+
+    snapshot_id: str | None = None
+    allowed_scope_ids: list[str] | None = None
+
+
+@dataclass(frozen=True)
 class VerificationResult:
     passed: bool
-    citation_valid: bool
-    missing_citations: list[str]
-    unsupported_claims: list[str]
+    schema_valid: bool
+    evidence_catalog_valid: bool
+    citation_ids_valid: bool
+    citation_alignment_valid: bool
+    evidence_scope_valid: bool | None
     disclaimer_present: bool
-    refusal_correct: bool
+    response_mode_valid: bool
+    semantic_support_status: str
+    expected_answer_mode: str | None
+    actual_answer_mode: str
+    refusal_required: bool
+    refusal_present: bool
+    answer_source_format: str
+    schema_errors: list[str]
+    required_checks: list[str]
+    duplicate_source_ids: list[str]
+    missing_source_ids: list[str]
+    invalid_scope_citations: list[str]
+    cited_source_ids: list[str]
+    visible_source_ids: list[str]
+    claim_source_ids: list[str]
+    unsupported_claims: list[str]
+    refusal_correct: bool | None
     failure_reasons: list[str] = field(default_factory=list)
+
+    @property
+    def citation_valid(self) -> bool:
+        """Compatibility alias for pre-M1 callers and legacy CSV output."""
+
+        return self.citation_ids_valid and self.evidence_scope_valid is not False
+
+    @property
+    def missing_citations(self) -> list[str]:
+        """Legacy rank-only view used by the pre-M1 verifier tests."""
+
+        return [source_id.removeprefix("S") for source_id in self.missing_source_ids]
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "passed": self.passed,
+            "schema_valid": self.schema_valid,
+            "evidence_catalog_valid": self.evidence_catalog_valid,
+            "citation_ids_valid": self.citation_ids_valid,
+            "citation_alignment_valid": self.citation_alignment_valid,
+            "evidence_scope_valid": self.evidence_scope_valid,
             "citation_valid": self.citation_valid,
-            "missing_citations": self.missing_citations,
-            "unsupported_claims": self.unsupported_claims,
             "disclaimer_present": self.disclaimer_present,
+            "response_mode_valid": self.response_mode_valid,
+            "semantic_support_status": self.semantic_support_status,
+            "expected_answer_mode": self.expected_answer_mode,
+            "actual_answer_mode": self.actual_answer_mode,
+            "refusal_required": self.refusal_required,
+            "refusal_present": self.refusal_present,
+            "answer_source_format": self.answer_source_format,
+            "schema_errors": self.schema_errors,
+            "required_checks": self.required_checks,
+            "duplicate_source_ids": self.duplicate_source_ids,
+            "missing_source_ids": self.missing_source_ids,
+            "missing_citations": self.missing_citations,
+            "invalid_scope_citations": self.invalid_scope_citations,
+            "cited_source_ids": self.cited_source_ids,
+            "visible_source_ids": self.visible_source_ids,
+            "claim_source_ids": self.claim_source_ids,
+            "unsupported_claims": self.unsupported_claims,
             "refusal_correct": self.refusal_correct,
             "failure_reasons": self.failure_reasons,
         }

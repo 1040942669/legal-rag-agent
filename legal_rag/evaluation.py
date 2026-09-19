@@ -177,7 +177,9 @@ def evaluate(
                 citation_valid=int(verification.citation_valid) if answer_metrics_available else -1,
                 verifier_pass=int(verification.passed) if answer_metrics_available else -1,
                 refusal_correctness=(
-                    int(verification.refusal_correct) if answer_metrics_available else -1
+                    int(verification.refusal_correct)
+                    if answer_metrics_available and verification.refusal_correct is not None
+                    else -1
                 ),
                 latency_ms=latency_ms,
                 answer=answer[:1200],
