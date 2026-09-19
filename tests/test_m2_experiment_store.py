@@ -402,6 +402,16 @@ def test_succeeded_attempt_without_marker_is_pending_not_runnable(tmp_path) -> N
     assert inventory.runnable == ("case-b", "case-c")
     assert "case-a" not in inventory.runnable
 
+    loaded_attempts = store.load_attempts("case-a")
+    assert loaded_attempts[0]["attempt"] == 1
+    loaded_attempts[0]["result"]["value"] = "caller-mutation"
+    assert store.load_attempts("case-a")[0]["result"]["value"] == "ready-to-commit"
+
+    complete_path = store.commit_pending("case-a")
+    assert complete_path.name == "complete.json"
+    assert store.commit_pending("case-a") == complete_path
+    assert store.scan().succeeded == ("case-a",)
+
 
 def test_failed_attempt_cannot_be_marked_complete(tmp_path) -> None:
     store = ExperimentStore.create(tmp_path / "experiments", _manifest())

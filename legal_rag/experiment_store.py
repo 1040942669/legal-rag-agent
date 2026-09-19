@@ -862,6 +862,35 @@ class ExperimentStore:
         attempts = self._validated_case_attempts(case)
         return tuple(self._attempt_path(case, attempt) for attempt in sorted(attempts))
 
+    def load_attempts(self, case_id: str) -> tuple[dict[str, Any], ...]:
+        """Return validated attempt payloads in immutable history order."""
+
+        case = self._case(case_id)
+        attempts = self._validated_case_attempts(case)
+        return tuple(
+            _json_copy(attempts[attempt]["payload"]) for attempt in sorted(attempts)
+        )
+
+    def commit_pending(self, case_id: str) -> Path:
+        """Publish a completion proof for an already persisted succeeded attempt."""
+
+        case = self._case(case_id)
+        complete_path = self._case_directory(case) / "complete.json"
+        if _path_entry_exists(complete_path):
+            self.load_completed(case_id)
+            return complete_path
+        attempts = self._validated_case_attempts(case)
+        if not attempts:
+            raise ExperimentContractError(
+                f"cannot commit a case without a persisted attempt: {case_id}"
+            )
+        latest_attempt = max(attempts)
+        if attempts[latest_attempt]["payload"]["status"] != "succeeded":
+            raise ExperimentContractError(
+                f"cannot commit a case whose latest attempt did not succeed: {case_id}"
+            )
+        return self.mark_complete(case_id, attempt=latest_attempt)
+
     def _load_complete_marker(
         self,
         path: Path,
