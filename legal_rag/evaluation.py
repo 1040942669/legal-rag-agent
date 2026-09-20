@@ -5,31 +5,39 @@ import json
 import random
 import time
 from collections import defaultdict
-from dataclasses import dataclass, fields
+from dataclasses import fields
 from pathlib import Path
 from typing import Any
 
 from .adaptive import retrieve_adaptive
 from .chat import LegalChatAssistant
 from .evidence import check_evidence_sufficiency
-from .failure_analysis import label_retrieval_failure
+from .evaluation_contracts import validate_eval_case as validate_eval_case
+from .evaluation_scoring import (
+    CompletedCaseOutcome,
+    EvaluatedCase,
+    ModelUsageDelta,
+    citation_hit as citation_hit,
+    hit_at_k as hit_at_k,
+    keyword_coverage as keyword_coverage,
+    mean_reciprocal_rank as mean_reciprocal_rank,
+    metric_value as metric_value,
+    result_matches as result_matches,
+    score_completed_case,
+    stage_status as stage_status,
+    target_coverage as target_coverage,
+)
 from .judge import judge_answer
 from .llm import usage_delta, usage_snapshot
 from .models import (
-    ANSWER_MODES,
     EVALUATION_METRICS_SCHEMA_VERSION,
     EvalCase,
     EvalRecord,
-    SearchResult,
 )
 from .query import analyze_query
 from .query_understanding import CompletionClient
-from .retrieval import Retriever, format_sources
-from .tracing import (
-    JsonlTraceWriter,
-    build_retrieval_trace_record,
-    verification_result_to_trace,
-)
+from .retrieval import Retriever
+from .tracing import JsonlTraceWriter
 from .verifier import verify_answer
 
 
@@ -112,52 +120,6 @@ def validate_eval_cases(cases: list[EvalCase]) -> None:
                 f"expected {last_turn_index + 1}, got {case.turn_index}"
             )
         last_turn_index = case.turn_index
-
-
-def validate_eval_case(case: EvalCase) -> None:
-    """Validate one case without requiring it to start a session sequence."""
-
-    if not isinstance(case, EvalCase):
-        raise ValueError("evaluation case must be an EvalCase")
-    if not case.case_id:
-        raise ValueError(
-            f"evaluation case id must be non-empty and unique: {case.case_id!r}"
-        )
-    behavior = case.resolved_expected_behavior
-    if not isinstance(behavior, str) or behavior not in ANSWER_MODES:
-        raise ValueError(f"unknown expected_behavior for {case.case_id}: {behavior!r}")
-    if isinstance(case.turn_index, bool) or not isinstance(case.turn_index, int):
-        raise ValueError(f"turn_index must be an integer for {case.case_id}")
-    if case.turn_index < 0:
-        raise ValueError(f"turn_index must be non-negative for {case.case_id}")
-    if isinstance(case.schema_version, bool) or not isinstance(
-        case.schema_version, int
-    ):
-        raise ValueError(f"schema_version must be an integer for {case.case_id}")
-    if case.schema_version < 1:
-        raise ValueError(f"schema_version must be at least 1 for {case.case_id}")
-    group = case.session_group
-    if group is None:
-        if case.turn_index != 0:
-            raise ValueError(f"single-turn case {case.case_id} must use turn_index=0")
-    elif not isinstance(group, str) or not group.strip():
-        raise ValueError(f"session_group must be a non-empty string for {case.case_id}")
-
-
-def metric_value(value: Any, unavailable_reason: str | None = None) -> dict[str, Any]:
-    if value is None and not unavailable_reason:
-        raise ValueError("an unavailable metric must include an unavailable_reason")
-    return {"value": value, "unavailable_reason": unavailable_reason}
-
-
-def stage_status(status: str, reason: str | None = None) -> dict[str, str | None]:
-    return {"status": status, "reason": reason}
-
-
-@dataclass(frozen=True)
-class EvaluatedCase:
-    record: EvalRecord
-    trace_record: dict[str, Any]
 
 
 class _TraceCollector:
@@ -284,7 +246,6 @@ def _evaluate_cases(
     records: list[EvalRecord] = []
     active_session_group: str | None = None
     for case_index, case in enumerate(cases):
-        expected_behavior = case.resolved_expected_behavior
         assistant_client = getattr(assistant, "llm", None)
         assistant_usage_before = usage_snapshot(assistant_client)
         normalizer_usage_before = usage_snapshot(adaptive_llm_client)
@@ -309,12 +270,7 @@ def _evaluate_cases(
         structured_answer = None
         pre_fallback_answer = None
         pre_fallback_verification = None
-        service_status = stage_status("succeeded")
-        generation_status = (
-            stage_status("succeeded")
-            if generate
-            else stage_status("not_run", "retrieval_only")
-        )
+        generation_kind = "retrieval_only" if not generate else "service_error"
         try:
             if generate:
                 if assistant is None:
@@ -336,14 +292,18 @@ def _evaluate_cases(
                     None,
                 )
                 generation_error = getattr(assistant, "last_generation_error", None)
-                if generation_error:
-                    generation_status = stage_status("error", generation_error)
-                    service_status = stage_status("degraded", generation_error)
-                elif (
-                    getattr(structured_answer, "adapter_source", None) == "programmatic"
-                    and pre_fallback_verification is None
-                ):
-                    generation_status = stage_status("not_run", "programmatic_terminal")
+                generation_kind = getattr(assistant, "last_generation_kind", None)
+                if generation_kind is None:
+                    if generation_error:
+                        generation_kind = "generation_error"
+                    elif (
+                        getattr(structured_answer, "adapter_source", None)
+                        == "programmatic"
+                        and pre_fallback_verification is None
+                    ):
+                        generation_kind = "programmatic_terminal"
+                    else:
+                        generation_kind = "model"
             else:
                 adaptive_result = retrieve_adaptive(
                     case.question,
@@ -364,10 +324,15 @@ def _evaluate_cases(
                 evidence_check = adaptive_result.evidence_check
         except Exception:  # Keep evaluation running across model failures.
             results = []
+            answer = ""
             error = "evaluation service failed"
-            service_status = stage_status("error", "service_error")
-            if generate:
-                generation_status = stage_status("error", "service_error")
+            generation_error = None
+            evidence_check = None
+            verification = None
+            structured_answer = None
+            pre_fallback_answer = None
+            pre_fallback_verification = None
+            generation_kind = "service_error" if generate else "retrieval_only"
         if evidence_check is None:
             evidence_check = check_evidence_sufficiency(
                 case.question, results, analysis=analysis
@@ -380,7 +345,6 @@ def _evaluate_cases(
                 risk_flags=analysis.risk_flags,
             )
         latency_ms = int((time.perf_counter() - started) * 1000)
-        failure = label_retrieval_failure(results, case, top_k=top_k)
         judge_result = None
         if judge_client is not None and generate and not error and not generation_error:
             judge_result = judge_answer(
@@ -389,269 +353,6 @@ def _evaluate_cases(
                 answer=answer,
                 results=results,
             )
-        judge_succeeded = (
-            judge_result is not None and judge_result.status == "succeeded"
-        )
-        if not generate:
-            judge_status = stage_status("not_run", "retrieval_only")
-        elif error:
-            judge_status = stage_status("not_run", "service_error")
-        elif generation_error:
-            judge_status = stage_status("not_run", generation_error)
-        elif judge_client is None:
-            judge_status = stage_status("not_run", "judge_not_configured")
-        elif judge_succeeded:
-            judge_status = stage_status("succeeded")
-        else:
-            judge_status = stage_status(
-                "error",
-                judge_result.error_code if judge_result is not None else "judge_error",
-            )
-
-        if not generate:
-            verification_status = stage_status("not_run", "retrieval_only")
-        elif error:
-            verification_status = stage_status("not_run", "service_error")
-        elif verification is None:
-            verification_status = stage_status("not_run", "verification_not_available")
-        else:
-            verification_status = stage_status("succeeded")
-
-        execution = {
-            "service": service_status,
-            "generation": generation_status,
-            "verification": verification_status,
-            "judge": judge_status,
-        }
-        if not generate:
-            generation_attempt = {"attempted": False, "reason": "retrieval_only"}
-            final_response = {"value": None, "unavailable_reason": "retrieval_only"}
-        else:
-            attempted_mode = getattr(pre_fallback_answer, "answer_mode", None)
-            if attempted_mode is None:
-                attempted_mode = getattr(structured_answer, "answer_mode", None)
-            programmatic_terminal = (
-                getattr(structured_answer, "adapter_source", None) == "programmatic"
-                and not generation_error
-                and pre_fallback_verification is None
-            )
-            generation_attempt = {
-                "attempted": not bool(error) and not programmatic_terminal,
-                "status": (
-                    "rejected"
-                    if pre_fallback_verification is not None
-                    else "error"
-                    if error or generation_error
-                    else "not_run"
-                    if programmatic_terminal
-                    else "accepted"
-                ),
-                "reason": (
-                    "verification_failed"
-                    if pre_fallback_verification is not None
-                    else generation_error
-                    or ("service_error" if error else None)
-                    or ("programmatic_terminal" if programmatic_terminal else None)
-                ),
-                "answer_mode": attempted_mode,
-                "verification": (
-                    verification_result_to_trace(pre_fallback_verification)
-                    if pre_fallback_verification is not None
-                    else None
-                ),
-            }
-            if error:
-                final_response = {"value": None, "unavailable_reason": "service_error"}
-            else:
-                observed_mode_for_trace = getattr(
-                    structured_answer, "answer_mode", None
-                )
-                if observed_mode_for_trace is None and verification is not None:
-                    observed_mode_for_trace = verification.actual_answer_mode
-                final_response = {
-                    "value": {
-                        "answer_mode": observed_mode_for_trace,
-                        "verification": verification_result_to_trace(verification),
-                    },
-                    "unavailable_reason": None,
-                }
-
-        observed_answer_mode = getattr(structured_answer, "answer_mode", None)
-        if observed_answer_mode is None and verification is not None:
-            observed_answer_mode = verification.actual_answer_mode
-        if not generate:
-            answer_reason = "retrieval_only"
-        elif error:
-            answer_reason = "service_error"
-        else:
-            answer_reason = None
-        if verification is None:
-            verification_reason = (
-                "retrieval_only"
-                if not generate
-                else "service_error"
-                if error
-                else "verification_not_available"
-            )
-        else:
-            verification_reason = None
-        if judge_succeeded:
-            judge_reason = None
-        else:
-            judge_reason = str(judge_status["reason"] or "judge_not_available")
-
-        keyword_value = (
-            keyword_coverage(answer, case.keywords) if answer_reason is None else None
-        )
-        source_ids_exist_value = (
-            verification.evidence_catalog_valid and not verification.missing_source_ids
-            if verification is not None
-            else None
-        )
-        citation_ids_value = (
-            verification.citation_ids_valid if verification is not None else None
-        )
-        citation_valid_value = (
-            verification.citation_valid if verification is not None else None
-        )
-        verifier_value = verification.passed if verification is not None else None
-        semantic_value = (
-            verification.semantic_support_status if verification is not None else None
-        )
-        evidence_scope_value = (
-            verification.evidence_scope_valid if verification is not None else None
-        )
-        evidence_scope_reason = (
-            verification_reason
-            if verification is None
-            else "scope_check_not_configured"
-            if evidence_scope_value is None
-            else None
-        )
-        response_mode_value = (
-            bool(
-                observed_answer_mode == expected_behavior
-                and verification.response_mode_valid
-            )
-            if verification is not None and observed_answer_mode is not None
-            else None
-        )
-        if not generate:
-            refusal_value = None
-            refusal_reason = "retrieval_only"
-        elif expected_behavior == "out_of_scope":
-            refusal_value = (
-                bool(verification.refusal_present) if verification is not None else None
-            )
-            refusal_reason = verification_reason if refusal_value is None else None
-        else:
-            refusal_value = None
-            refusal_reason = "not_expected_to_refuse"
-        if expected_behavior in {"evidence_answer", "insufficient_evidence"}:
-            over_refusal_value = (
-                bool(verification.refusal_present) if verification is not None else None
-            )
-            over_refusal_reason = (
-                verification_reason if over_refusal_value is None else None
-            )
-        else:
-            over_refusal_value = None
-            over_refusal_reason = "not_expected_to_answer"
-
-        has_retrieval_gold = bool(case.expected_law or case.expected_articles)
-        no_gold_reason = None if has_retrieval_gold else "no_retrieval_gold"
-        canonical_metrics = {
-            "answer_text": metric_value(
-                answer if answer_reason is None else None, answer_reason
-            ),
-            "hit_at_3": metric_value(
-                hit_at_k(results, case, 3) if has_retrieval_gold else None,
-                no_gold_reason,
-            ),
-            "hit_at_5": metric_value(
-                hit_at_k(results, case, 5) if has_retrieval_gold else None,
-                no_gold_reason,
-            ),
-            "mrr": metric_value(
-                mean_reciprocal_rank(results, case) if has_retrieval_gold else None,
-                no_gold_reason,
-            ),
-            "target_coverage": metric_value(
-                target_coverage(results, case, top_k)
-                if case.expected_articles
-                else None,
-                None if case.expected_articles else "no_article_gold",
-            ),
-            "retrieval_target_hit": metric_value(
-                citation_hit(results, case) if has_retrieval_gold else None,
-                no_gold_reason,
-            ),
-            "citation_hit": metric_value(
-                citation_hit(results, case) if has_retrieval_gold else None,
-                no_gold_reason,
-            ),
-            "keyword_coverage": metric_value(keyword_value, answer_reason),
-            "schema_valid": metric_value(
-                verification.schema_valid if verification is not None else None,
-                verification_reason,
-            ),
-            "evidence_catalog_valid": metric_value(
-                verification.evidence_catalog_valid
-                if verification is not None
-                else None,
-                verification_reason,
-            ),
-            "source_ids_exist": metric_value(
-                source_ids_exist_value, verification_reason
-            ),
-            "citation_ids_valid": metric_value(citation_ids_value, verification_reason),
-            "citation_alignment_valid": metric_value(
-                verification.citation_alignment_valid
-                if verification is not None
-                else None,
-                verification_reason,
-            ),
-            "evidence_scope_valid": metric_value(
-                evidence_scope_value,
-                evidence_scope_reason,
-            ),
-            "citation_valid": metric_value(citation_valid_value, verification_reason),
-            "disclaimer_present": metric_value(
-                verification.disclaimer_present if verification is not None else None,
-                verification_reason,
-            ),
-            "response_mode_valid": metric_value(
-                verification.response_mode_valid if verification is not None else None,
-                verification_reason,
-            ),
-            "verifier_pass": metric_value(verifier_value, verification_reason),
-            "semantic_support_status": metric_value(
-                semantic_value, verification_reason
-            ),
-            "response_mode_correct": metric_value(
-                response_mode_value, verification_reason
-            ),
-            "refusal_recall_hit": metric_value(refusal_value, refusal_reason),
-            "refusal_correctness": metric_value(refusal_value, refusal_reason),
-            "over_refusal": metric_value(over_refusal_value, over_refusal_reason),
-            "judge_faithfulness": metric_value(
-                judge_result.faithfulness if judge_succeeded else None,
-                judge_reason,
-            ),
-            "judge_relevance": metric_value(
-                judge_result.relevance if judge_succeeded else None,
-                judge_reason,
-            ),
-            "judge_completeness": metric_value(
-                judge_result.completeness if judge_succeeded else None,
-                judge_reason,
-            ),
-            "judge_pass": metric_value(
-                judge_result.passed if judge_succeeded else None,
-                judge_reason,
-            ),
-        }
-
         assistant_usage = usage_delta(
             assistant_usage_before, usage_snapshot(assistant_client)
         )
@@ -660,145 +361,39 @@ def _evaluate_cases(
             usage_snapshot(adaptive_llm_client),
         )
         judge_usage = usage_delta(judge_usage_before, usage_snapshot(judge_client))
-        usage_parts = (assistant_usage, normalizer_usage, judge_usage)
-        if trace_writer:
-            trace_writer.write(
-                build_retrieval_trace_record(
-                    case_id=case.case_id,
-                    query=case.question,
-                    retriever=getattr(retriever, "name", "unknown"),
-                    top_k=top_k,
-                    results=results,
-                    latency_ms=latency_ms,
-                    analyzer=analysis.to_dict(),
-                    adaptive=adaptive_trace,
-                    evidence=evidence_check.to_dict(),
-                    verifier=(
-                        verification_result_to_trace(verification)
-                        if generate and verification is not None
-                        else None
-                    ),
-                    execution=execution,
-                    generation_attempt=generation_attempt,
-                    final_response=final_response,
-                    failure=failure.to_dict(),
-                    metadata=trace_metadata,
-                )
-            )
-        records.append(
-            EvalRecord(
-                case_id=case.case_id,
-                case_type=case.case_type,
+        evaluated = score_completed_case(
+            CompletedCaseOutcome(
+                case=case,
                 model=model,
                 retriever=getattr(retriever, "name", "unknown"),
                 chunk_strategy=chunk_strategy,
-                hit_at_3=hit_at_k(results, case, 3),
-                hit_at_5=hit_at_k(results, case, 5),
-                mrr=mean_reciprocal_rank(results, case),
-                target_coverage=target_coverage(results, case, top_k),
-                keyword_coverage=keyword_value if keyword_value is not None else -1.0,
-                citation_hit=citation_hit(results, case),
-                sufficiency_pass=int(evidence_check.sufficient),
-                citation_valid=(
-                    int(citation_valid_value)
-                    if citation_valid_value is not None
-                    else -1
-                ),
-                verifier_pass=int(verifier_value) if verifier_value is not None else -1,
-                refusal_correctness=(
-                    int(refusal_value) if refusal_value is not None else -1
-                ),
-                latency_ms=latency_ms,
-                answer=answer[:1200],
-                sources=format_sources(results),
+                top_k=top_k,
+                generate=generate,
+                results=tuple(results),
+                answer=answer,
+                analysis=analysis,
+                adaptive_trace=adaptive_trace,
+                evidence_check=evidence_check,
+                verification=verification,
+                structured_answer=structured_answer,
+                pre_fallback_answer=pre_fallback_answer,
+                pre_fallback_verification=pre_fallback_verification,
+                generation_kind=generation_kind,
+                generation_error=generation_error,
+                judge_configured=judge_client is not None,
+                judge_result=judge_result,
                 error=error,
-                failure_label=failure.label,
-                failure_reason=failure.reason,
-                judge_faithfulness=float(judge_result.faithfulness)
-                if judge_succeeded
-                else -1.0,
-                judge_relevance=float(judge_result.relevance)
-                if judge_succeeded
-                else -1.0,
-                judge_completeness=float(judge_result.completeness)
-                if judge_succeeded
-                else -1.0,
-                judge_pass=int(judge_result.passed) if judge_succeeded else -1,
-                judge_comment=judge_result.comment if judge_succeeded else "",
-                judge_error=judge_result.error
-                if judge_result and not judge_succeeded
-                else "",
-                assistant_llm_calls=int(assistant_usage["calls"]),
-                normalizer_llm_calls=int(normalizer_usage["calls"]),
-                judge_llm_calls=int(judge_usage["calls"]),
-                llm_failed_calls=sum(int(item["failed_calls"]) for item in usage_parts),
-                input_tokens=sum(int(item["input_tokens"]) for item in usage_parts),
-                output_tokens=sum(int(item["output_tokens"]) for item in usage_parts),
-                total_tokens=sum(int(item["total_tokens"]) for item in usage_parts),
-                token_usage_calls=sum(
-                    int(item["token_usage_calls"]) for item in usage_parts
-                ),
-                llm_latency_ms=round(
-                    sum(float(item["latency_ms"]) for item in usage_parts), 3
-                ),
-                metrics_schema_version=EVALUATION_METRICS_SCHEMA_VERSION,
-                expected_behavior=expected_behavior,
-                observed_answer_mode=observed_answer_mode,
-                execution=execution,
-                canonical_metrics=canonical_metrics,
-                generation_attempt=generation_attempt,
+                latency_ms=latency_ms,
+                assistant_usage=ModelUsageDelta.from_mapping(assistant_usage),
+                normalizer_usage=ModelUsageDelta.from_mapping(normalizer_usage),
+                judge_usage=ModelUsageDelta.from_mapping(judge_usage),
+                trace_metadata=trace_metadata,
             )
         )
+        if trace_writer:
+            trace_writer.write(evaluated.trace_record)
+        records.append(evaluated.record)
     return records
-
-
-def hit_at_k(results: list[SearchResult], case: EvalCase, k: int) -> int:
-    if not case.expected_law and not case.expected_articles:
-        return 0
-    return int(any(result_matches(result, case) for result in results[:k]))
-
-
-def mean_reciprocal_rank(results: list[SearchResult], case: EvalCase) -> float:
-    for result in results:
-        if result_matches(result, case):
-            return round(1 / result.rank, 4)
-    return 0.0
-
-
-def citation_hit(results: list[SearchResult], case: EvalCase) -> int:
-    if not case.expected_law and not case.expected_articles:
-        return 0
-    return int(any(result_matches(result, case) for result in results))
-
-
-def target_coverage(results: list[SearchResult], case: EvalCase, k: int = 5) -> float:
-    if not case.expected_articles:
-        return 0.0
-    found = set()
-    for result in results[:k]:
-        if case.expected_law and case.expected_law not in result.chunk.law_names:
-            continue
-        for article in case.expected_articles:
-            if article in result.chunk.article_numbers:
-                found.add(article)
-    return round(len(found) / len(case.expected_articles), 4)
-
-
-def result_matches(result: SearchResult, case: EvalCase) -> bool:
-    if not case.expected_law and not case.expected_articles:
-        return False
-    law_ok = not case.expected_law or case.expected_law in result.chunk.law_names
-    article_ok = not case.expected_articles or any(
-        article in result.chunk.article_numbers for article in case.expected_articles
-    )
-    return law_ok and article_ok
-
-
-def keyword_coverage(answer: str, keywords: list[str]) -> float:
-    if not keywords:
-        return 0.0
-    matched = sum(1 for keyword in keywords if keyword and keyword in answer)
-    return round(matched / len(keywords), 4)
 
 
 def write_eval_outputs(

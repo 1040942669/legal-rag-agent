@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from dataclasses import fields
 from typing import Any
 
-from .evaluation import validate_eval_case
+from .evaluation_contracts import validate_eval_case
 from .experiment_runtime import canonical_json_bytes
 from .json_utils import validate_json_unicode
 from .models import (
@@ -447,9 +447,7 @@ def _validate_generation_attempt(value: Any) -> dict[str, Any]:
     if status == "rejected" and verification is None:
         raise ValueError("rejected generation_attempt requires verification")
     if status != "rejected" and verification is not None:
-        raise ValueError(
-            "only a rejected generation_attempt may contain verification"
-        )
+        raise ValueError("only a rejected generation_attempt may contain verification")
     attempt.update(
         {
             "status": status,
@@ -488,13 +486,15 @@ def _validate_record_consistency(record: dict[str, Any]) -> None:
                 f"canonical metric {metric_name} conflicts with legacy {legacy_name}"
             )
 
-    if record["canonical_metrics"]["retrieval_target_hit"] != record[
-        "canonical_metrics"
-    ]["citation_hit"]:
+    if (
+        record["canonical_metrics"]["retrieval_target_hit"]
+        != record["canonical_metrics"]["citation_hit"]
+    ):
         raise ValueError("retrieval_target_hit and citation_hit must match")
-    if record["canonical_metrics"]["refusal_recall_hit"] != record[
-        "canonical_metrics"
-    ]["refusal_correctness"]:
+    if (
+        record["canonical_metrics"]["refusal_recall_hit"]
+        != record["canonical_metrics"]["refusal_correctness"]
+    ):
         raise ValueError("refusal recall compatibility metrics must match")
 
     for metric_name, legacy_name, sentinel in (
@@ -507,7 +507,10 @@ def _validate_record_consistency(record: dict[str, Any]) -> None:
         ("judge_completeness", "judge_completeness", -1.0),
         ("judge_pass", "judge_pass", -1),
     ):
-        if _canonical_value(record, metric_name) is None and record[legacy_name] != sentinel:
+        if (
+            _canonical_value(record, metric_name) is None
+            and record[legacy_name] != sentinel
+        ):
             raise ValueError(
                 f"unavailable canonical metric {metric_name} requires legacy sentinel"
             )
@@ -621,7 +624,12 @@ def eval_record_from_artifact(artifact: Mapping[str, Any]) -> EvalRecord:
     for name in {"hit_at_3", "hit_at_5", "citation_hit", "sufficiency_pass"}:
         if record[name] not in {0, 1}:
             raise ValueError(f"{name} must be 0 or 1")
-    for name in {"citation_valid", "verifier_pass", "refusal_correctness", "judge_pass"}:
+    for name in {
+        "citation_valid",
+        "verifier_pass",
+        "refusal_correctness",
+        "judge_pass",
+    }:
         if record[name] not in {-1, 0, 1}:
             raise ValueError(f"{name} must be -1, 0, or 1")
     for name in {

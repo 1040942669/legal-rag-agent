@@ -363,6 +363,7 @@ class LegalChatAssistant:
         self.last_rejected_original_source_ids: list[str] = []
         self.last_evidence_source_id_map: dict[str, str] = {}
         self.last_generation_error: str | None = None
+        self.last_generation_kind: str | None = None
         self.memory = ConversationMemory(token_limit=memory_token_limit)
         self._commit_lock = RLock()
         self._session_revision = 0
@@ -392,6 +393,7 @@ class LegalChatAssistant:
         self.last_rejected_original_source_ids = []
         self.last_evidence_source_id_map = {}
         self.last_generation_error = None
+        self.last_generation_kind = None
 
     def export_session_state(self) -> dict[str, Any]:
         """Export only durable conversation state, never per-attempt telemetry."""
@@ -870,6 +872,7 @@ class LegalChatAssistant:
         published_rejected_source_ids = list(deepcopy(retrieved.rejected_source_ids))
         published_source_id_map = dict(deepcopy(retrieved.source_id_map))
         published_generation_error = deepcopy(generated.generation_error)
+        published_generation_kind = deepcopy(generated.kind)
 
         canonical = self.verify_turn(generated)
         candidate_outputs = (
@@ -924,6 +927,7 @@ class LegalChatAssistant:
             self.last_rejected_original_source_ids = published_rejected_source_ids
             self.last_evidence_source_id_map = published_source_id_map
             self.last_generation_error = published_generation_error
+            self.last_generation_kind = published_generation_kind
             self._session_revision += 1
 
     def _verify_programmatic_answer(
