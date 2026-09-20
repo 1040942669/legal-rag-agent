@@ -15,6 +15,7 @@ from legal_rag.chat import (
     LegalChatAssistant,
 )
 from legal_rag.models import AnswerClaim, Chunk, SearchResult, StructuredAnswer
+from legal_rag.provider_errors import ProviderCallError
 
 
 def _result() -> SearchResult:
@@ -226,6 +227,34 @@ def test_generation_error_is_explicit_and_committed_only_after_verification() ->
 
     assert assistant.last_generation_error == "generation_error"
     assert len(assistant.memory.messages) == 2
+
+
+def test_typed_provider_errors_only_escape_strict_experiment_clients() -> None:
+    class Client:
+        def __init__(self, *, strict: bool) -> None:
+            self.propagate_provider_errors = strict
+
+        def complete(self, prompt: str) -> str:
+            raise ProviderCallError(
+                "timeout",
+                provider="test_provider",
+                operation="completion",
+            )
+
+    compatible, _, _ = _assistant()
+    compatible.llm = Client(strict=False)
+    retrieved = compatible.retrieve_turn(compatible.prepare_question("合成问题"))
+    generated = compatible.generate_turn(retrieved, generate=True)
+    assert generated.kind == "generation_error"
+    assert compatible.condense_with_llm_rewrite("追问", "上一问") == ""
+
+    strict, _, _ = _assistant()
+    strict.llm = Client(strict=True)
+    retrieved = strict.retrieve_turn(strict.prepare_question("合成问题"))
+    with pytest.raises(ProviderCallError):
+        strict.generate_turn(retrieved, generate=True)
+    with pytest.raises(ProviderCallError):
+        strict.condense_with_llm_rewrite("追问", "上一问")
 
 
 def test_commit_rejects_forged_verified_output_without_publishing_state() -> None:

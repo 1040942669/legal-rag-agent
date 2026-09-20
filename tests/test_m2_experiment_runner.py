@@ -412,11 +412,63 @@ def test_retryable_failure_is_preserved_and_uses_a_fresh_runtime(tmp_path) -> No
     assert summary.status == "succeeded"
     assert factory.factory_calls == 2
     assert [attempt["status"] for attempt in attempts] == ["failed", "succeeded"]
+    assert [attempt["cache_mode"] for attempt in attempts] == ["fresh", "cache"]
     assert attempts[0]["result"]["error"] == {
         "code": "provider_timeout",
         "retryable": True,
     }
     assert attempts[0]["result"]["call_ledger"]["actual"]["other"]["failed"] == 1
+
+
+def test_fresh_retry_cache_runtime_is_not_reused_for_the_next_session_turn(
+    tmp_path,
+) -> None:
+    manifest = _manifest(
+        case_specs=(("g-0", "group", 0), ("g-1", "group", 1)),
+        max_retries=1,
+    )
+    store = ExperimentStore.create(tmp_path / "experiments", manifest)
+    factory_modes: list[str] = []
+    resume_states: list[dict[str, Any] | None] = []
+    executions = 0
+
+    def factory(work_unit, resume_state, runner_controls):
+        nonlocal executions
+        factory_modes.append(runner_controls.cache_mode)
+        resume_states.append(resume_state)
+
+        class Runtime:
+            def execute(self, case, controls):
+                nonlocal executions
+                executions += 1
+                if executions == 1:
+                    raise CaseExecutionError("provider_timeout", retryable=True)
+                previous = [] if resume_state is None else list(resume_state["history"])
+                state = {"history": [*previous, case["case_id"]]}
+                return CaseExecution(
+                    output=state,
+                    stage_observations=_observations(
+                        origin=controls.cache_mode,
+                        source_other_calls=0,
+                    ),
+                    session_state_after=state,
+                )
+
+        return Runtime()
+
+    summary = _runner(store, manifest, factory).run()
+
+    assert summary.status == "succeeded"
+    assert factory_modes == ["fresh", "cache", "fresh"]
+    assert resume_states == [None, None, {"history": ["g-0"]}]
+    assert [attempt["cache_mode"] for attempt in store.load_attempts("g-0")] == [
+        "fresh",
+        "cache",
+    ]
+    assert store.load_attempts("g-1")[0]["cache_mode"] == "fresh"
+    assert store.load_completed("g-1")["result"]["output"] == {
+        "history": ["g-0", "g-1"]
+    }
 
 
 def test_nonretryable_failure_is_not_retried_on_run_or_resume(tmp_path) -> None:
@@ -1040,5 +1092,31 @@ def test_resume_rejects_replay_label_with_fresh_external_call_history(
         match="replay attempt cannot contain external calls",
     ):
         _runner(reopened, manifest, forbidden, cache_mode="replay").run()
+
+    assert forbidden.calls == 0
+
+
+def test_resume_rejects_model_usage_that_disagrees_with_call_ledger(
+    tmp_path,
+) -> None:
+    manifest = _manifest(case_specs=(("case-a", None, 0),))
+    root = tmp_path / "experiments"
+    store = ExperimentStore.create(root, manifest)
+    assert _runner(store, manifest, _HistoryFactory()).run().status == "succeeded"
+    attempt_path = store.attempt_paths("case-a")[0]
+    complete_path = attempt_path.parent / "complete.json"
+    attempt = json.loads(attempt_path.read_text(encoding="utf-8"))
+    attempt["payload"]["result"]["model_usage"]["assistant"]["calls"] = 1
+    attempt["payload_sha256"] = canonical_hash(attempt["payload"])
+    attempt_path.write_text(json.dumps(attempt), encoding="utf-8")
+    marker = json.loads(complete_path.read_text(encoding="utf-8"))
+    marker["payload"]["attempt_artifact_sha256"] = canonical_hash(attempt)
+    marker["payload_sha256"] = canonical_hash(marker["payload"])
+    complete_path.write_text(json.dumps(marker), encoding="utf-8")
+    forbidden = _ForbiddenFactory()
+
+    reopened = ExperimentStore.open(root, manifest["experiment_id"])
+    with pytest.raises(RunnerContractError, match="model usage disagrees"):
+        _runner(reopened, manifest, forbidden).run()
 
     assert forbidden.calls == 0

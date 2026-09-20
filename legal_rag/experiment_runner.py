@@ -23,7 +23,7 @@ from .experiment_runtime import (
 from .experiment_store import ArtifactInventory, ExperimentStore
 
 
-RUNNER_RESULT_SCHEMA_VERSION = 1
+RUNNER_RESULT_SCHEMA_VERSION = 2
 OBSERVATION_STAGES = (
     "query_analysis",
     "query_embedding",
@@ -46,6 +46,23 @@ _SAFE_ERROR_CODE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _T = TypeVar("_T")
 _ACTIVE_EXPERIMENTS_LOCK = threading.Lock()
 _ACTIVE_EXPERIMENTS: set[str] = set()
+MODEL_USAGE_ROLES = ("assistant", "normalizer", "judge")
+_MODEL_USAGE_FIELDS = frozenset(
+    {
+        "calls",
+        "failed_calls",
+        "input_tokens",
+        "output_tokens",
+        "total_tokens",
+        "token_usage_calls",
+        "latency_ms",
+    }
+)
+_MODEL_USAGE_ROLE_TO_CALL_KIND = {
+    "assistant": "generation",
+    "normalizer": "normalizer",
+    "judge": "judge",
+}
 
 
 class RunnerContractError(ValueError):
@@ -140,6 +157,83 @@ def _validated_counts(name: str, value: Mapping[str, Any]) -> dict[str, int]:
             raise RunnerContractError(f"{name}.{kind} must be a non-negative integer")
         counts[kind] = count
     return counts
+
+
+def _zero_model_usage() -> dict[str, int | float]:
+    return {
+        "calls": 0,
+        "failed_calls": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "total_tokens": 0,
+        "token_usage_calls": 0,
+        "latency_ms": 0.0,
+    }
+
+
+def _validated_model_usage(
+    name: str,
+    value: Mapping[str, Any],
+) -> dict[str, int | float]:
+    if not isinstance(value, Mapping) or set(value) != _MODEL_USAGE_FIELDS:
+        raise RunnerContractError(f"{name} fields are invalid")
+    result = _zero_model_usage()
+    for field_name in _MODEL_USAGE_FIELDS - {"latency_ms"}:
+        item = value[field_name]
+        if isinstance(item, bool) or not isinstance(item, int) or item < 0:
+            raise RunnerContractError(
+                f"{name}.{field_name} must be a non-negative integer"
+            )
+        result[field_name] = item
+    result["latency_ms"] = _require_non_negative_number(
+        f"{name}.latency_ms", value["latency_ms"]
+    )
+    calls = int(result["calls"])
+    failed_calls = int(result["failed_calls"])
+    token_usage_calls = int(result["token_usage_calls"])
+    if failed_calls > calls:
+        raise RunnerContractError(f"{name}.failed_calls cannot exceed calls")
+    if token_usage_calls > calls:
+        raise RunnerContractError(f"{name}.token_usage_calls cannot exceed calls")
+    token_fields = ("input_tokens", "output_tokens", "total_tokens")
+    if token_usage_calls == 0 and any(int(result[field]) for field in token_fields):
+        raise RunnerContractError(f"{name} tokens require a token usage record")
+    if int(result["total_tokens"]) < (
+        int(result["input_tokens"]) + int(result["output_tokens"])
+    ):
+        raise RunnerContractError(
+            f"{name}.total_tokens cannot be less than input plus output"
+        )
+    return result
+
+
+def _validated_model_usage_ledger(
+    value: Mapping[str, Any],
+) -> dict[str, dict[str, int | float]]:
+    if not isinstance(value, Mapping) or set(value) != set(MODEL_USAGE_ROLES):
+        raise RunnerContractError("model_usage roles are invalid")
+    return {
+        role: _validated_model_usage(f"model_usage.{role}", value[role])
+        for role in MODEL_USAGE_ROLES
+    }
+
+
+def _validate_model_usage_call_ledger(
+    model_usage: Mapping[str, Mapping[str, Any]],
+    actual_ledger: Mapping[str, Mapping[str, Any]],
+) -> None:
+    mismatched = []
+    for role, kind in _MODEL_USAGE_ROLE_TO_CALL_KIND.items():
+        usage = model_usage[role]
+        actual = actual_ledger[kind]
+        if usage["calls"] != actual["attempted"]:
+            mismatched.append(f"{role}.calls")
+        if usage["failed_calls"] != actual["failed"]:
+            mismatched.append(f"{role}.failed_calls")
+    if mismatched:
+        raise RunnerContractError(
+            "model usage disagrees with provider call ledger: " + ",".join(mismatched)
+        )
 
 
 @dataclass(frozen=True)
@@ -394,6 +488,7 @@ class AttemptControls:
             }
             for stage in OBSERVATION_STAGES
         }
+        self._model_usage = {role: _zero_model_usage() for role in MODEL_USAGE_ROLES}
 
     def call(self, stage: str, kind: str, operation: Callable[[], _T]) -> _T:
         if stage not in OBSERVATION_STAGES:
@@ -449,6 +544,43 @@ class AttemptControls:
                 for kind in EXTERNAL_CALL_KINDS
             }
         return attempted, failed
+
+    def record_model_usage(
+        self,
+        role: str,
+        usage: Mapping[str, Any],
+    ) -> None:
+        if role not in MODEL_USAGE_ROLES:
+            raise ExperimentContractError(f"unsupported model usage role: {role!r}")
+        try:
+            normalized = _validated_model_usage(f"model_usage.{role}", usage)
+        except RunnerContractError as error:
+            raise ExperimentContractError(str(error)) from error
+        with self._lock:
+            current = self._model_usage[role]
+            for field_name in _MODEL_USAGE_FIELDS - {"latency_ms"}:
+                current[field_name] = int(current[field_name]) + int(
+                    normalized[field_name]
+                )
+            current["latency_ms"] = float(current["latency_ms"]) + float(
+                normalized["latency_ms"]
+            )
+
+    def model_usage(self) -> dict[str, dict[str, int | float]]:
+        with self._lock:
+            snapshot = {
+                role: {
+                    **{
+                        field_name: int(self._model_usage[role][field_name])
+                        for field_name in _MODEL_USAGE_FIELDS - {"latency_ms"}
+                    },
+                    "latency_ms": round(
+                        float(self._model_usage[role]["latency_ms"]), 3
+                    ),
+                }
+                for role in MODEL_USAGE_ROLES
+            }
+        return _validated_model_usage_ledger(snapshot)
 
     def ledger(self) -> dict[str, Any]:
         result: dict[str, Any] = {}
@@ -1004,11 +1136,20 @@ class ExperimentRunner:
                 with self._result_lock:
                     self._terminal_failures.add(case_id)
                 return False, state_before, None
+            # A requested-fresh first attempt publishes exact immutable stages.
+            # Its retries reuse that successful prefix and execute only cache
+            # misses; recomputing a stochastic prefix could otherwise conflict
+            # with the entry just published by the failed attempt.
+            attempt_cache_mode = (
+                "cache"
+                if self.cache_mode == "fresh" and attempt_number > 1
+                else self.cache_mode
+            )
             attempt_started = time.perf_counter()
             controls = AttemptControls(
                 self._provider_controller,
                 self._stop_event,
-                cache_mode=self.cache_mode,
+                cache_mode=attempt_cache_mode,
             )
             with self._result_lock:
                 self._attempted.add(case_id)
@@ -1020,7 +1161,7 @@ class ExperimentRunner:
                             _json_copy(state_before)
                             if state_before is not None
                             else None,
-                            RunnerControls(self.cache_mode),
+                            RunnerControls(attempt_cache_mode),
                         ),
                         unit=unit,
                         attempt_number=attempt_number,
@@ -1098,7 +1239,7 @@ class ExperimentRunner:
                 status = "succeeded"
                 retryable = False
 
-            if self.cache_mode == "replay" and any(
+            if attempt_cache_mode == "replay" and any(
                 self._provider_controller.peaks.values()
             ):
                 error = CaseExecutionError(
@@ -1123,7 +1264,7 @@ class ExperimentRunner:
                 attempt=attempt_number,
                 status=status,
                 recorded_at=self.timestamp(),
-                cache_mode=self.cache_mode,
+                cache_mode=attempt_cache_mode,
                 execution_environment=self.execution_environment,
                 result=result,
             )
@@ -1131,7 +1272,10 @@ class ExperimentRunner:
                 self.store.mark_complete(case_id, attempt=attempt_number)
                 with self._result_lock:
                     self._completed.add(case_id)
-                return True, next_state, runtime
+                next_runtime = (
+                    runtime if attempt_cache_mode == self.cache_mode else None
+                )
+                return True, next_state, next_runtime
             if not retryable or attempt_number >= self.max_attempts:
                 with self._result_lock:
                     self._terminal_failures.add(case_id)
@@ -1161,7 +1305,7 @@ class ExperimentRunner:
         queue_wait_ms: float,
         attempt_started: float,
     ) -> tuple[dict[str, Any], dict[str, Any] | None]:
-        if self.cache_mode == "replay" and any(
+        if controls.cache_mode == "replay" and any(
             self._provider_controller.peaks.values()
         ):
             raise RunnerContractError(
@@ -1268,7 +1412,9 @@ class ExperimentRunner:
                 external_calls=attempted,
                 failed_external_calls=failed,
             )
-            _validate_stage_origin_for_cache_mode(normalized["origin"], self.cache_mode)
+            _validate_stage_origin_for_cache_mode(
+                normalized["origin"], controls.cache_mode
+            )
             result[stage] = normalized
         return result
 
@@ -1312,7 +1458,12 @@ class ExperimentRunner:
                     kind
                 ]
         actual_ledger = controls.ledger()
-        if self.cache_mode == "replay" and any(
+        model_usage = controls.model_usage()
+        _validate_model_usage_call_ledger(
+            model_usage,
+            actual_ledger,
+        )
+        if controls.cache_mode == "replay" and any(
             item["attempted"] for item in actual_ledger.values()
         ):
             raise RunnerContractError(
@@ -1338,6 +1489,7 @@ class ExperimentRunner:
                 "actual": actual_ledger,
                 "source": source_totals,
             },
+            "model_usage": model_usage,
             "timings_ms": {
                 "queue_wait": _require_non_negative_number(
                     "queue_wait_ms", queue_wait_ms
@@ -1372,6 +1524,7 @@ class ExperimentRunner:
             "output",
             "stage_observations",
             "call_ledger",
+            "model_usage",
             "timings_ms",
             "error",
         }
@@ -1464,6 +1617,10 @@ class ExperimentRunner:
         if expected_status == "succeeded":
             if not isinstance(result["output"], dict) or result["error"] is not None:
                 raise RunnerContractError("successful runner result is incomplete")
+            self._validate_persisted_model_usage(
+                result["model_usage"],
+                result["call_ledger"],
+            )
             return _json_copy(next_state) if next_state is not None else None
         if result["output"] is not None:
             raise RunnerContractError("failed runner result cannot contain output")
@@ -1476,7 +1633,29 @@ class ExperimentRunner:
             raise RunnerContractError("failed runner result error code is invalid")
         if not isinstance(error["retryable"], bool):
             raise RunnerContractError("failed runner retryable flag is invalid")
+        self._validate_persisted_model_usage(
+            result["model_usage"],
+            result["call_ledger"],
+        )
         return error["retryable"]
+
+    @staticmethod
+    def _validate_persisted_model_usage(
+        model_usage: Any,
+        call_ledger: Any,
+    ) -> None:
+        normalized = _validated_model_usage_ledger(model_usage)
+        if canonical_json_bytes(normalized) != canonical_json_bytes(model_usage):
+            raise RunnerContractError("persisted model usage is not canonical")
+        if not isinstance(call_ledger, dict):
+            raise RunnerContractError("persisted call ledger is invalid")
+        actual = call_ledger.get("actual")
+        if not isinstance(actual, dict):
+            raise RunnerContractError("persisted actual call ledger is invalid")
+        _validate_model_usage_call_ledger(
+            normalized,
+            actual,
+        )
 
     def _validate_persisted_observations(
         self,

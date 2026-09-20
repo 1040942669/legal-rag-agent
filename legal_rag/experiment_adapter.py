@@ -49,8 +49,10 @@ from .experiment_runner import (
     OBSERVATION_STAGES,
     AttemptControls,
     CaseExecution,
+    CaseExecutionError,
     RunnerContractError,
     RunnerControls,
+    RunnerStopped,
     StageObservation,
     WorkUnit,
 )
@@ -60,6 +62,7 @@ from .experiment_runtime import (
     ExperimentContractError,
     StageExecution,
     StageValue,
+    build_stage_cache_key,
     canonical_hash,
     canonical_json_bytes,
     validate_experiment_manifest,
@@ -67,6 +70,11 @@ from .experiment_runtime import (
 from .judge import JudgeResult, judge_answer
 from .llm import CompletionUsage, usage_delta, usage_snapshot
 from .models import EvalCase, VerificationContext
+from .provider_errors import (
+    MAX_PROVIDER_TIMEOUT_SECONDS,
+    ProviderCallError,
+    provider_call_error,
+)
 from .query import analyze_query
 from .retrieval import BM25Retriever, Retriever
 
@@ -243,6 +251,24 @@ class LegalEvaluationRuntimeFactory:
             if self.spec.adaptive_llm_client_factory is not None
             else None
         )
+        expected_timeouts = _manifest_provider_timeouts(self.spec.manifest)
+        actual_timeouts = {
+            "assistant": _provider_timeout_value(
+                "assistant", getattr(assistant.llm, "request_timeout", None)
+            ),
+            "judge": _provider_timeout_value(
+                "judge", getattr(judge_client, "request_timeout", None)
+            ),
+            "adaptive": _provider_timeout_value(
+                "adaptive", getattr(adaptive_client, "request_timeout", None)
+            ),
+        }
+        if canonical_json_bytes(actual_timeouts) != canonical_json_bytes(
+            expected_timeouts
+        ):
+            raise ExperimentContractError(
+                "provider request timeouts do not match manifest config.summary"
+            )
         if judge_client is not None:
             _require_completion_usage("judge completion client", judge_client)
         if adaptive_client is not None:
@@ -416,6 +442,7 @@ class CaseRuntime:
                     ),
                     phase="prepared artifact binding",
                 ),
+                observations=observations,
                 controls=controls,
             )
         )
@@ -451,6 +478,7 @@ class CaseRuntime:
             decoder=lambda artifact: retrieved_turn_from_artifact(
                 artifact, prepared=prepared
             ),
+            observations=observations,
             controls=controls,
         )
         normalizer_usage = ModelUsageDelta.from_mapping(
@@ -461,6 +489,7 @@ class CaseRuntime:
             normalizer_usage,
             controls,
             (("query_analysis", "normalizer"), ("retrieval", "normalizer")),
+            model_usage_role="normalizer",
         )
         retrieved_artifact = retrieved_turn_to_artifact(retrieved)
         evidence_hash = canonical_hash(retrieved_artifact)
@@ -490,6 +519,7 @@ class CaseRuntime:
             decoder=lambda artifact: generated_turn_from_artifact(
                 artifact, retrieved=retrieved
             ),
+            observations=observations,
             controls=controls,
         )
         assistant_usage = ModelUsageDelta.from_mapping(
@@ -503,6 +533,7 @@ class CaseRuntime:
             assistant_usage,
             controls,
             (("generation", "generation"),),
+            model_usage_role="assistant",
         )
         if generated.generation_error is not None:
             observations["generation"] = _observation_from_execution(
@@ -531,6 +562,7 @@ class CaseRuntime:
             decoder=lambda artifact: verified_turn_from_artifact(
                 artifact, generated=generated
             ),
+            observations=observations,
             controls=controls,
         )
         # A cache checksum proves bytes, not that current verifier code agrees.
@@ -592,6 +624,7 @@ class CaseRuntime:
                     )
                 ),
                 decoder=_judge_result_from_artifact,
+                observations=observations,
                 controls=controls,
             )
             judge_usage = ModelUsageDelta.from_mapping(
@@ -602,6 +635,7 @@ class CaseRuntime:
                 judge_usage,
                 controls,
                 (("judge", "judge"),),
+                model_usage_role="judge",
             )
             if judge_result.status == "error":
                 observations["judge"] = _observation_from_execution(
@@ -763,6 +797,7 @@ class CaseRuntime:
                     analyze_query(case.question)
                 ),
                 decoder=query_analysis_from_artifact,
+                observations=observations,
                 controls=controls,
             )
         )
@@ -817,6 +852,7 @@ class CaseRuntime:
                 decoder=lambda artifact: _retrieval_only_from_artifact(
                     artifact, analysis_artifact
                 ),
+                observations=observations,
                 controls=controls,
             )
         )
@@ -828,6 +864,7 @@ class CaseRuntime:
             normalizer_usage,
             controls,
             (("retrieval", "normalizer"),),
+            model_usage_role="normalizer",
         )
         observations["generation"] = StageObservation.not_run("retrieval_only")
         observations["verification"] = StageObservation.not_run("retrieval_only")
@@ -926,9 +963,16 @@ class CaseRuntime:
         artifact_kind: str,
         producer: Callable[[], Mapping[str, Any]],
         decoder: Callable[[Mapping[str, Any]], _T],
+        observations: Mapping[str, StageObservation],
         controls: AttemptControls,
     ) -> tuple[_T, StageObservation, StageExecution]:
         before, _ = controls.stage_counts(observation_stage)
+        cache_key = build_stage_cache_key(
+            self.spec.manifest,
+            cache_stage,
+            input_payload,
+        )
+        started = time.perf_counter()
 
         def produce_value() -> StageValue:
             artifact = _json_object(producer())
@@ -939,13 +983,56 @@ class CaseRuntime:
                 external_calls=delta,
             )
 
-        execution = self.spec.cache.execute(
-            manifest=self.spec.manifest,
-            stage=cache_stage,
-            input_payload=input_payload,
-            mode=self.cache_mode,
-            producer=produce_value,
-        )
+        def failed_stage_observations(
+            error_code: str,
+            *,
+            downstream_reason: str,
+        ) -> dict[str, StageObservation]:
+            failed = dict(observations)
+            failed[observation_stage] = StageObservation(
+                status="error",
+                origin="fresh",
+                duration_ms=round((time.perf_counter() - started) * 1000, 3),
+                cache_key=cache_key,
+                source_external_calls={},
+                error_code=error_code,
+            )
+            for stage, observation in tuple(failed.items()):
+                if (
+                    observation.status == "not_run"
+                    and observation.unavailable_reason == "stage_not_executed"
+                ):
+                    failed[stage] = StageObservation.not_run(downstream_reason)
+            return failed
+
+        try:
+            execution = self.spec.cache.execute(
+                manifest=self.spec.manifest,
+                stage=cache_stage,
+                input_payload=input_payload,
+                mode=self.cache_mode,
+                producer=produce_value,
+            )
+        except RunnerStopped as error:
+            raise CaseExecutionError(
+                "controlled_interrupt",
+                retryable=True,
+                interrupted=True,
+                stage_observations=failed_stage_observations(
+                    "controlled_interrupt",
+                    downstream_reason="upstream_controlled_interrupt",
+                ),
+            ) from error
+        except ProviderCallError as error:
+            persisted_code = f"provider_{error.error_code}"
+            raise CaseExecutionError(
+                persisted_code,
+                retryable=error.retryable,
+                stage_observations=failed_stage_observations(
+                    persisted_code,
+                    downstream_reason="upstream_provider_failure",
+                ),
+            ) from error
         artifact = _artifact_from_envelope(execution.payload, artifact_kind)
         restored = decoder(artifact)
         observation = _observation_from_execution(execution)
@@ -1095,12 +1182,80 @@ class _ControlledCompletionClient:
     def usage(self) -> Any:
         return getattr(self._client, "usage", None)
 
+    @property
+    def propagate_provider_errors(self) -> bool:
+        """Request strict provider failures only inside the experiment runner."""
+
+        return True
+
+    @property
+    def propagate_control_errors(self) -> bool:
+        """Prevent runner stop/contract failures from entering fallback artifacts."""
+
+        return True
+
     def complete(self, prompt: str) -> Any:
-        return self._controls.call(
-            self._stage,
-            self._kind,
-            lambda: self._client.complete(prompt),
-        )
+        usage_before = usage_snapshot(self._client)
+        attempted_before, failed_before = self._controls.stage_counts(self._stage)
+
+        def dispatch() -> Any:
+            try:
+                return self._client.complete(prompt)
+            except (
+                ProviderCallError,
+                RunnerStopped,
+                RunnerContractError,
+                ExperimentContractError,
+            ):
+                raise
+            except Exception as error:
+                safe_error = provider_call_error(
+                    error,
+                    provider="completion_client",
+                    operation=self._kind,
+                )
+            raise safe_error from None
+
+        try:
+            return self._controls.call(
+                self._stage,
+                self._kind,
+                dispatch,
+            )
+        finally:
+            attempted_after, failed_after = self._controls.stage_counts(self._stage)
+            usage = usage_delta(usage_before, usage_snapshot(self._client))
+            attempted = attempted_after[self._kind] - attempted_before[self._kind]
+            failed = failed_after[self._kind] - failed_before[self._kind]
+            role = "assistant" if self._kind == "generation" else self._kind
+            persisted_usage = {**usage, "calls": attempted, "failed_calls": failed}
+            try:
+                self._controls.record_model_usage(role, persisted_usage)
+            except ExperimentContractError as error:
+                # The attempt ledger is authoritative for dispatch counts.  If a
+                # malformed client usage object cannot be retained safely, keep
+                # those counts and fail closed without persisting invented tokens.
+                self._controls.record_model_usage(
+                    role,
+                    {
+                        "calls": attempted,
+                        "failed_calls": failed,
+                        "input_tokens": 0,
+                        "output_tokens": 0,
+                        "total_tokens": 0,
+                        "token_usage_calls": 0,
+                        "latency_ms": 0.0,
+                    },
+                )
+                usage_record_error: ExperimentContractError | None = error
+            else:
+                usage_record_error = None
+            if usage["calls"] != attempted or usage["failed_calls"] != failed:
+                raise ExperimentContractError(
+                    "completion usage disagrees with its controlled provider call"
+                )
+            if usage_record_error is not None:
+                raise usage_record_error
 
 
 class _ProviderForbiddenCompletionClient:
@@ -1145,6 +1300,8 @@ def _validate_usage_ledger(
     usage: ModelUsageDelta,
     controls: AttemptControls,
     bindings: tuple[tuple[str, str], ...],
+    *,
+    model_usage_role: str | None = None,
 ) -> None:
     attempted = 0
     failed = 0
@@ -1156,6 +1313,14 @@ def _validate_usage_ledger(
         raise ExperimentContractError(
             f"{name} CompletionUsage disagrees with the attempt call ledger"
         )
+    if model_usage_role is not None:
+        recorded = controls.model_usage().get(model_usage_role)
+        if recorded is None or canonical_json_bytes(recorded) != canonical_json_bytes(
+            asdict(usage)
+        ):
+            raise ExperimentContractError(
+                f"{name} CompletionUsage disagrees with persisted attempt usage"
+            )
 
 
 def _base_observations() -> dict[str, StageObservation]:
@@ -1905,6 +2070,7 @@ def _validate_spec(spec: EvaluationRuntimeSpec) -> EvaluationRuntimeSpec:
             "spec.generate must match manifest config.summary.generate"
         )
     _manifest_assistant_runtime(manifest)
+    _manifest_provider_timeouts(manifest)
     execution_mode = manifest["execution_mode"]
     allowed_execution_modes = (
         {"smoke-generation", "full-regression"}
@@ -1995,6 +2161,35 @@ def _json_object(value: Mapping[str, Any]) -> dict[str, Any]:
     return copied
 
 
+def _provider_timeout_value(name: str, value: Any) -> float | None:
+    if value is None:
+        return None
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+        or value <= 0
+        or value > MAX_PROVIDER_TIMEOUT_SECONDS
+    ):
+        raise ExperimentContractError(
+            f"provider timeout {name!r} must be null or a bounded positive number"
+        )
+    return float(value)
+
+
+def _manifest_provider_timeouts(manifest: Mapping[str, Any]) -> dict[str, float | None]:
+    summary = manifest["config"]["summary"]
+    value = summary.get("provider_timeouts")
+    required = {"assistant", "judge", "adaptive"}
+    if not isinstance(value, Mapping) or set(value) != required:
+        raise ExperimentContractError(
+            "manifest config.summary.provider_timeouts fields are invalid"
+        )
+    return {
+        name: _provider_timeout_value(name, value[name]) for name in sorted(required)
+    }
+
+
 def _manifest_assistant_runtime(manifest: Mapping[str, Any]) -> dict[str, Any]:
     summary = manifest["config"]["summary"]
     required = {
@@ -2063,6 +2258,10 @@ def _require_completion_usage(name: str, client: Any) -> CompletionUsage:
     if not isinstance(usage, CompletionUsage):
         raise ExperimentContractError(
             f"{name} must expose an isolated CompletionUsage ledger"
+        )
+    if getattr(client, "hidden_retries_disabled", None) is not True:
+        raise ExperimentContractError(
+            f"{name} must declare hidden_retries_disabled=True"
         )
     return usage
 

@@ -63,17 +63,23 @@ def build_parser() -> argparse.ArgumentParser:
         prog="legal-rag",
         description="RAG assistant for versioned Chinese law text snapshots.",
     )
-    parser.add_argument("--config", default="configs/default.yaml", help="Path to config YAML.")
+    parser.add_argument(
+        "--config", default="configs/default.yaml", help="Path to config YAML."
+    )
     subparsers = parser.add_subparsers(dest="command")
 
-    profile = subparsers.add_parser("profile-data", help="Profile the law dataset before chunking.")
+    profile = subparsers.add_parser(
+        "profile-data", help="Profile the law dataset before chunking."
+    )
     profile.add_argument("--data-dir", default=None)
     profile.add_argument("--readme", default=None)
     profile.add_argument("--profile-dir", default=None)
     profile.add_argument("--report-dir", default=None)
     profile.set_defaults(handler=handle_profile_data)
 
-    build = subparsers.add_parser("build-index", help="Build chunk artifacts after profile-data.")
+    build = subparsers.add_parser(
+        "build-index", help="Build chunk artifacts after profile-data."
+    )
     build.add_argument("--data-dir", default=None)
     build.add_argument("--profile-path", default=None)
     build.add_argument("--index-root", default=None)
@@ -106,7 +112,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     embeddings.add_argument("--index-dir", default=None)
     embeddings.add_argument("--chunk-strategy", default=None)
-    embeddings.add_argument("--embedding", default=None, help="Embedding key from config.")
+    embeddings.add_argument(
+        "--embedding", default=None, help="Embedding key from config."
+    )
     embeddings.add_argument("--embedding-cache-root", default=None)
     embeddings.add_argument("--batch-size", type=int, default=None)
     embeddings.add_argument("--device", default=None)
@@ -127,20 +135,36 @@ def build_parser() -> argparse.ArgumentParser:
     )
     cache_health.set_defaults(handler=handle_cache_health)
 
-    chat = subparsers.add_parser("chat", help="Start an interactive legal chat session.")
+    chat = subparsers.add_parser(
+        "chat", help="Start an interactive legal chat session."
+    )
     chat.add_argument("--index-dir", default=None)
     chat.add_argument("--chunk-strategy", default=None)
     chat.add_argument("--retriever", default=None)
-    chat.add_argument("--embedding", default=None, help="Embedding key for dense/rrf retrieval.")
+    chat.add_argument(
+        "--embedding", default=None, help="Embedding key for dense/rrf retrieval."
+    )
     chat.add_argument("--embedding-cache-dir", default=None)
-    chat.add_argument("--reranker", default=None, help="Reranker key from config, or `none`.")
+    chat.add_argument(
+        "--reranker", default=None, help="Reranker key from config, or `none`."
+    )
     chat.add_argument("--rerank-top-n", type=int, default=None)
     chat.add_argument("--model", default=None)
     chat.add_argument("--top-k", type=int, default=None)
     chat.add_argument("--trace-path", default=None)
-    chat.add_argument("--no-generate", action="store_true", help="Return retrieval results only.")
-    chat.add_argument("--adaptive", action="store_true", help="Enable controlled adaptive retrieval for complex inputs.")
-    chat.add_argument("--adaptive-use-llm", action="store_true", help="Use Ollama for strict JSON query normalization.")
+    chat.add_argument(
+        "--no-generate", action="store_true", help="Return retrieval results only."
+    )
+    chat.add_argument(
+        "--adaptive",
+        action="store_true",
+        help="Enable controlled adaptive retrieval for complex inputs.",
+    )
+    chat.add_argument(
+        "--adaptive-use-llm",
+        action="store_true",
+        help="Use Ollama for strict JSON query normalization.",
+    )
     chat.add_argument("--adaptive-max-queries", type=int, default=None)
     chat.add_argument("--adaptive-per-plan-top-k", type=int, default=None)
     chat.add_argument("--normalizer-retries", type=int, default=None)
@@ -151,23 +175,39 @@ def build_parser() -> argparse.ArgumentParser:
     )
     chat.set_defaults(handler=handle_chat)
 
-    eval_parser = subparsers.add_parser("evaluate", help="Run retrieval or generation evaluation.")
+    eval_parser = subparsers.add_parser(
+        "evaluate", help="Run retrieval or generation evaluation."
+    )
     eval_parser.add_argument("--index-dir", default=None)
     eval_parser.add_argument("--chunk-strategy", default=None)
     eval_parser.add_argument("--retriever", default=None)
-    eval_parser.add_argument("--embedding", default=None, help="Embedding key for dense/rrf retrieval.")
+    eval_parser.add_argument(
+        "--embedding", default=None, help="Embedding key for dense/rrf retrieval."
+    )
     eval_parser.add_argument("--embedding-cache-dir", default=None)
-    eval_parser.add_argument("--reranker", default=None, help="Reranker key from config, or `none`.")
+    eval_parser.add_argument(
+        "--reranker", default=None, help="Reranker key from config, or `none`."
+    )
     eval_parser.add_argument("--rerank-top-n", type=int, default=None)
     eval_parser.add_argument("--cases", default="eval_cases/legal_eval_cases_v2.jsonl")
     eval_parser.add_argument("--model", default=None)
-    eval_parser.add_argument("--models", default=None, help="Comma-separated models or `all`.")
+    eval_parser.add_argument(
+        "--models", default=None, help="Comma-separated models or `all`."
+    )
     eval_parser.add_argument("--top-k", type=int, default=None)
     eval_parser.add_argument("--generate", action="store_true")
     eval_parser.add_argument("--prefix", default=None)
     eval_parser.add_argument("--trace-path", default=None)
-    eval_parser.add_argument("--adaptive", action="store_true", help="Enable controlled adaptive retrieval for complex inputs.")
-    eval_parser.add_argument("--adaptive-use-llm", action="store_true", help="Use Ollama for strict JSON query normalization.")
+    eval_parser.add_argument(
+        "--adaptive",
+        action="store_true",
+        help="Enable controlled adaptive retrieval for complex inputs.",
+    )
+    eval_parser.add_argument(
+        "--adaptive-use-llm",
+        action="store_true",
+        help="Use Ollama for strict JSON query normalization.",
+    )
     eval_parser.add_argument("--adaptive-max-queries", type=int, default=None)
     eval_parser.add_argument("--adaptive-per-plan-top-k", type=int, default=None)
     eval_parser.add_argument("--normalizer-retries", type=int, default=None)
@@ -176,7 +216,9 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Score generated answers with an LLM judge (requires --generate).",
     )
-    eval_parser.add_argument("--judge-model", default=None, help="Override judge model name.")
+    eval_parser.add_argument(
+        "--judge-model", default=None, help="Override judge model name."
+    )
     eval_parser.add_argument(
         "--input-cost-per-million",
         type=float,
@@ -195,15 +237,23 @@ def build_parser() -> argparse.ArgumentParser:
         "experiment-matrix",
         help="Run a reproducible retrieval experiment matrix and write CSV/JSON/Markdown summaries.",
     )
-    matrix.add_argument("--chunk-strategies", default="article", help="Comma-separated keys.")
-    matrix.add_argument("--retrievers", default="bm25", help="Comma-separated retriever keys.")
-    matrix.add_argument("--embeddings", default=None, help="Comma-separated embedding keys.")
+    matrix.add_argument(
+        "--chunk-strategies", default="article", help="Comma-separated keys."
+    )
+    matrix.add_argument(
+        "--retrievers", default="bm25", help="Comma-separated retriever keys."
+    )
+    matrix.add_argument(
+        "--embeddings", default=None, help="Comma-separated embedding keys."
+    )
     matrix.add_argument(
         "--adaptive-modes",
         default="direct",
         help="Comma-separated `direct` and/or `adaptive`.",
     )
-    matrix.add_argument("--rerankers", default="none", help="Comma-separated reranker keys.")
+    matrix.add_argument(
+        "--rerankers", default="none", help="Comma-separated reranker keys."
+    )
     matrix.add_argument(
         "--rerank-top-n",
         type=int,
@@ -239,7 +289,8 @@ def handle_build_index(args: argparse.Namespace) -> int:
     config = load_config(args.config)
     data_dir = resolve_path(args.data_dir or config["data"]["dataset_dir"])
     profile_path = resolve_path(
-        args.profile_path or Path(config["artifacts"]["profile_dir"]) / "data_profile.json"
+        args.profile_path
+        or Path(config["artifacts"]["profile_dir"]) / "data_profile.json"
     )
     index_root = resolve_path(args.index_root or config["artifacts"]["index_dir"])
     strategy = args.chunk_strategy or config["chunking"]["default_strategy"]
@@ -272,7 +323,9 @@ def handle_baseline(args: argparse.Namespace) -> int:
     retriever_kind = "bm25"
 
     profile = profile_dataset(data_dir, readme)
-    profile_path, profile_report_path = write_profile_outputs(profile, profile_dir, report_dir)
+    profile_path, profile_report_path = write_profile_outputs(
+        profile, profile_dir, report_dir
+    )
     index_metadata = build_index(
         dataset_dir=data_dir,
         profile_path=profile_path,
@@ -333,7 +386,9 @@ def handle_build_embeddings(args: argparse.Namespace) -> int:
     index_dir = resolve_index_dir(args.index_dir, config, strategy)
     chunks_path = resolve_chunks_path(index_dir)
     model_config = resolve_embedding_model(config, args.embedding)
-    cache_root = resolve_path(args.embedding_cache_root or config["embedding"]["cache_dir"])
+    cache_root = resolve_path(
+        args.embedding_cache_root or config["embedding"]["cache_dir"]
+    )
     batch_size = args.batch_size or int(config["embedding"]["batch_size"])
     device = args.device or config["embedding"].get("device", "auto")
 
@@ -359,7 +414,9 @@ def handle_cache_health(args: argparse.Namespace) -> int:
     cache_dir = (
         resolve_path(args.embedding_cache_dir)
         if args.embedding_cache_dir
-        else embedding_cache_dir(config["embedding"]["cache_dir"], strategy, model_config.key).resolve()
+        else embedding_cache_dir(
+            config["embedding"]["cache_dir"], strategy, model_config.key
+        ).resolve()
     )
     report = inspect_embedding_cache(
         cache_dir,
@@ -437,9 +494,7 @@ def build_chat_response_trace(
     final_mode = getattr(structured_answer, "answer_mode", None)
     if final_mode is None and final_verification is not None:
         final_mode = getattr(final_verification, "actual_answer_mode", None)
-    final_verification_payload = (
-        verification_result_to_trace(final_verification)
-    )
+    final_verification_payload = verification_result_to_trace(final_verification)
     final_response = {
         "value": {
             "answer_mode": final_mode,
@@ -501,7 +556,7 @@ def handle_chat(args: argparse.Namespace) -> int:
         top_k=top_k,
         memory_token_limit=int(config["chat"]["memory_token_limit"]),
         ollama_base_url=config["chat"]["ollama_base_url"],
-        request_timeout=int(config["chat"]["request_timeout"]),
+        request_timeout=config["chat"]["request_timeout"],
         adaptive_enabled=adaptive_options["enabled"],
         adaptive_use_llm=adaptive_options["use_llm"],
         adaptive_max_queries=adaptive_options["max_queries"],
@@ -545,7 +600,9 @@ def handle_chat(args: argparse.Namespace) -> int:
                     latency_ms=latency_ms,
                     analyzer=analysis.to_dict(),
                     adaptive=adaptive_trace,
-                    evidence=assistant.last_evidence_check.to_dict() if assistant.last_evidence_check else {},
+                    evidence=assistant.last_evidence_check.to_dict()
+                    if assistant.last_evidence_check
+                    else {},
                     verifier=response_trace["verifier"],
                     execution=response_trace["execution"],
                     generation_attempt=response_trace["generation_attempt"],
@@ -608,13 +665,16 @@ def handle_evaluate(args: argparse.Namespace) -> int:
     judge_client = None
     if getattr(args, "judge", False):
         if not args.generate:
-            raise ValueError("--judge requires --generate (it scores generated answers).")
+            raise ValueError(
+                "--judge requires --generate (it scores generated answers)."
+            )
         judge_config = config.get("judge", {})
         judge_client = SiliconFlowClient(
-            model=args.judge_model or judge_config.get("model", "deepseek-ai/DeepSeek-V3"),
+            model=args.judge_model
+            or judge_config.get("model", "deepseek-ai/DeepSeek-V3"),
             base_url=judge_config.get("api_base_url", "https://api.siliconflow.cn/v1"),
             api_key_env=judge_config.get("api_key_env", "SILICONFLOW_API_KEY"),
-            request_timeout=int(judge_config.get("request_timeout", 120)),
+            request_timeout=judge_config.get("request_timeout", 120),
             temperature=float(judge_config.get("temperature", 0.0)),
         )
         metadata["judge_model"] = judge_client.model
@@ -647,7 +707,9 @@ def handle_evaluate(args: argparse.Namespace) -> int:
         _, peak_bytes = tracemalloc.get_traced_memory()
         tracemalloc.stop()
         metadata.setdefault("retriever_build_seconds", retriever_build_seconds)
-        metadata.setdefault("retriever_build_peak_mb", round(peak_bytes / (1024 * 1024), 1))
+        metadata.setdefault(
+            "retriever_build_peak_mb", round(peak_bytes / (1024 * 1024), 1)
+        )
         assistant = None
         adaptive_llm_client = None
         if args.generate:
@@ -657,7 +719,7 @@ def handle_evaluate(args: argparse.Namespace) -> int:
                 top_k=top_k,
                 memory_token_limit=int(config["chat"]["memory_token_limit"]),
                 ollama_base_url=config["chat"]["ollama_base_url"],
-                request_timeout=int(config["chat"]["request_timeout"]),
+                request_timeout=config["chat"]["request_timeout"],
                 adaptive_enabled=adaptive_options["enabled"],
                 adaptive_use_llm=adaptive_options["use_llm"],
                 adaptive_max_queries=adaptive_options["max_queries"],
@@ -668,7 +730,7 @@ def handle_evaluate(args: argparse.Namespace) -> int:
             adaptive_llm_client = OllamaClient(
                 model=args.model or config["models"]["default"],
                 base_url=config["chat"]["ollama_base_url"],
-                request_timeout=int(config["chat"]["request_timeout"]),
+                request_timeout=config["chat"]["request_timeout"],
             )
         records = evaluate(
             cases=cases,
@@ -834,8 +896,12 @@ def create_retriever(
             bm25_k1=float(config["retrieval"].get("bm25_k1", 1.5)),
             bm25_b=float(config["retrieval"].get("bm25_b", 0.75)),
             bm25_law_boost=float(config["retrieval"].get("bm25_law_boost", 40.0)),
-            bm25_article_boost=float(config["retrieval"].get("bm25_article_boost", 80.0)),
-            deprecated_penalty=float(config["retrieval"].get("deprecated_penalty", 1.0)),
+            bm25_article_boost=float(
+                config["retrieval"].get("bm25_article_boost", 80.0)
+            ),
+            deprecated_penalty=float(
+                config["retrieval"].get("deprecated_penalty", 1.0)
+            ),
         )
     return wrap_with_reranker(
         retriever,
@@ -899,7 +965,9 @@ def build_eval_metadata(
         "adaptive_use_llm": bool((adaptive_options or {}).get("use_llm", False)),
         "adaptive_max_queries": (adaptive_options or {}).get("max_queries", 3),
         "adaptive_per_plan_top_k": (adaptive_options or {}).get("per_plan_top_k"),
-        "adaptive_normalizer_retries": (adaptive_options or {}).get("normalizer_retries", 0),
+        "adaptive_normalizer_retries": (adaptive_options or {}).get(
+            "normalizer_retries", 0
+        ),
         "reranker": reranker_config.key if reranker_config else "none",
         "rerank_candidate_top_n": rerank_top_n if reranker_config else None,
         **retrieval_metadata(config),
@@ -917,14 +985,18 @@ def build_eval_metadata(
         metadata["embedding_key"] = model_config.key
         try:
             metadata["embedding_cache_dir"] = str(
-                resolve_embedding_cache_dir(embedding_cache_dir, config, strategy, model_config.key)
+                resolve_embedding_cache_dir(
+                    embedding_cache_dir, config, strategy, model_config.key
+                )
             )
         except FileNotFoundError:
             metadata["embedding_cache_dir"] = embedding_cache_dir or ""
     return metadata
 
 
-def chunking_config_from_args(config: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+def chunking_config_from_args(
+    config: dict[str, Any], args: argparse.Namespace
+) -> dict[str, Any]:
     chunking_config = dict(config["chunking"])
     if getattr(args, "neighbor_window", None) is not None:
         chunking_config["neighbor_window"] = args.neighbor_window
@@ -943,17 +1015,30 @@ def retrieval_metadata(config: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def adaptive_options_from_args(config: dict[str, Any], args: argparse.Namespace) -> dict[str, Any]:
+def adaptive_options_from_args(
+    config: dict[str, Any], args: argparse.Namespace
+) -> dict[str, Any]:
     adaptive_config = config.get("adaptive", {})
-    use_llm = bool(adaptive_config.get("use_llm", False) or getattr(args, "adaptive_use_llm", False))
-    enabled = bool(adaptive_config.get("enabled", False) or getattr(args, "adaptive", False) or use_llm)
+    use_llm = bool(
+        adaptive_config.get("use_llm", False)
+        or getattr(args, "adaptive_use_llm", False)
+    )
+    enabled = bool(
+        adaptive_config.get("enabled", False)
+        or getattr(args, "adaptive", False)
+        or use_llm
+    )
     max_queries = getattr(args, "adaptive_max_queries", None)
     per_plan_top_k = getattr(args, "adaptive_per_plan_top_k", None)
     normalizer_retries = getattr(args, "normalizer_retries", None)
     return {
         "enabled": enabled,
         "use_llm": use_llm,
-        "max_queries": int(max_queries if max_queries is not None else adaptive_config.get("max_queries", 3)),
+        "max_queries": int(
+            max_queries
+            if max_queries is not None
+            else adaptive_config.get("max_queries", 3)
+        ),
         "per_plan_top_k": (
             int(per_plan_top_k)
             if per_plan_top_k is not None
@@ -976,7 +1061,9 @@ def resolve_embedding_cache_dir(
     if cache_dir:
         resolved = resolve_path(cache_dir)
     else:
-        resolved = embedding_cache_dir(config["embedding"]["cache_dir"], strategy, embedding_key).resolve()
+        resolved = embedding_cache_dir(
+            config["embedding"]["cache_dir"], strategy, embedding_key
+        ).resolve()
     if not resolved.exists():
         raise FileNotFoundError(
             f"Embedding cache not found: {resolved}. "

@@ -4,6 +4,7 @@ import unittest
 from legal_rag.adaptive import retrieve_adaptive, retrieve_and_merge_plans
 from legal_rag.models import Chunk, NormalizedQuery, RetrievalPlan, SearchResult
 from legal_rag.planning import build_retrieval_plans
+from legal_rag.provider_errors import ProviderCallError
 from legal_rag.query import analyze_query, should_use_adaptive
 from legal_rag.query_understanding import (
     normalize_query,
@@ -109,11 +110,51 @@ class QueryUnderstandingTest(unittest.TestCase):
         self.assertEqual(normalized.raw_response, "")
         self.assertNotIn("SECRET_PROVIDER_TOKEN", payload)
 
+    def test_typed_provider_error_only_propagates_for_strict_experiment_client(
+        self,
+    ) -> None:
+        class Client:
+            def __init__(self, *, strict: bool) -> None:
+                self.calls = 0
+                self.propagate_provider_errors = strict
+
+            def complete(self, prompt: str) -> str:
+                self.calls += 1
+                raise ProviderCallError(
+                    "timeout",
+                    provider="test_provider",
+                    operation="normalizer",
+                )
+
+        analysis = analyze_query("这个事情有没有依据？")
+        compatible = Client(strict=False)
+        normalized = normalize_query(
+            analysis.original_query,
+            analysis=analysis,
+            llm_client=compatible,
+            use_llm=True,
+            max_retries=1,
+        )
+        self.assertEqual(compatible.calls, 2)
+        self.assertEqual(normalized.source, "rules:llm_error")
+
+        strict = Client(strict=True)
+        with self.assertRaises(ProviderCallError):
+            normalize_query(
+                analysis.original_query,
+                analysis=analysis,
+                llm_client=strict,
+                use_llm=True,
+                max_retries=1,
+            )
+        self.assertEqual(strict.calls, 1)
+
     def test_llm_normalizer_rejects_non_finite_and_boolean_confidence(self) -> None:
         confidence_values = ("true", "NaN", "Infinity", "-Infinity")
 
         for confidence in confidence_values:
             with self.subTest(confidence=confidence):
+
                 class ConstantClient:
                     def complete(self, prompt: str) -> str:
                         return (
@@ -179,7 +220,9 @@ class QueryUnderstandingTest(unittest.TestCase):
             confidence=0.6,
         )
 
-        plans, trace = build_retrieval_plans(normalized, max_queries=2, per_plan_top_k=4)
+        plans, trace = build_retrieval_plans(
+            normalized, max_queries=2, per_plan_top_k=4
+        )
 
         self.assertEqual(len(plans), 2)
         self.assertEqual(trace["truncated_count"], 2)
@@ -196,8 +239,12 @@ class QueryUnderstandingTest(unittest.TestCase):
             def retrieve(self, query: str, top_k: int = 5):
                 if "押金" in query:
                     return [
-                        SearchResult(chunk=chunk_a, score=2.0, rank=1, retriever="bm25"),
-                        SearchResult(chunk=chunk_b, score=1.0, rank=2, retriever="bm25"),
+                        SearchResult(
+                            chunk=chunk_a, score=2.0, rank=1, retriever="bm25"
+                        ),
+                        SearchResult(
+                            chunk=chunk_b, score=1.0, rank=2, retriever="bm25"
+                        ),
                     ]
                 return [
                     SearchResult(chunk=chunk_b, score=3.0, rank=1, retriever="bm25"),
@@ -209,7 +256,9 @@ class QueryUnderstandingTest(unittest.TestCase):
             RetrievalPlan("q2", "肖像", [], [], ["肖像"], 2, "test"),
         ]
 
-        merged, trace = retrieve_and_merge_plans(StaticRetriever(), plans, final_top_k=2)
+        merged, trace = retrieve_and_merge_plans(
+            StaticRetriever(), plans, final_top_k=2
+        )
 
         self.assertEqual(len(merged), 2)
         self.assertEqual(trace["deduped_count"], 2)

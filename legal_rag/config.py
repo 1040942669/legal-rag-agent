@@ -61,7 +61,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "api_base_url": "https://api.siliconflow.cn/v1",
                 "api_key_env": "SILICONFLOW_API_KEY",
                 "dimensions": None,
-                "max_retries": 3,
+                "max_retries": 0,
+                "request_timeout": 120,
                 "query_prefix": "Instruct: Given a legal question, retrieve relevant Chinese law provisions.\nQuery: ",
                 "document_prefix": "",
                 "embed_with_metadata": True,
@@ -84,7 +85,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "api_base_url": "https://api.siliconflow.cn/v1",
                 "api_key_env": "SILICONFLOW_API_KEY",
                 "dimensions": None,
-                "max_retries": 3,
+                "max_retries": 0,
+                "request_timeout": 120,
                 "query_prefix": "Instruct: Given a legal question, retrieve relevant Chinese law provisions.\nQuery: ",
                 "document_prefix": "",
             },
@@ -228,7 +230,9 @@ def _parse_simple_yaml(text: str) -> dict[str, Any]:
         if line.startswith("- "):
             item = _parse_scalar(line[2:])
             if not isinstance(parent, list):
-                raise ValueError("List item found outside a list in fallback YAML parser.")
+                raise ValueError(
+                    "List item found outside a list in fallback YAML parser."
+                )
             parent.append(item)
             continue
 

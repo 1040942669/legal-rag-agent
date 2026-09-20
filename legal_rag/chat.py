@@ -19,6 +19,7 @@ from .models import (
     VerificationContext,
     VerificationResult,
 )
+from .provider_errors import should_propagate_controlled_error
 from .query import (
     QueryAnalysis,
     analyze_query,
@@ -335,7 +336,7 @@ class LegalChatAssistant:
         top_k: int = 5,
         memory_token_limit: int = 2000,
         ollama_base_url: str = "http://localhost:11434",
-        request_timeout: int = 180,
+        request_timeout: float = 180,
         adaptive_enabled: bool = False,
         adaptive_use_llm: bool = False,
         adaptive_max_queries: int = 3,
@@ -652,7 +653,9 @@ class LegalChatAssistant:
         )
         try:
             raw_answer = self.llm.complete(prompt)
-        except Exception:
+        except Exception as exc:
+            if should_propagate_controlled_error(exc, self.llm):
+                raise
             answer = programmatic_answer(
                 "当前无法连接生成模型，因此无法给出可靠结论。",
                 answer_mode="insufficient_evidence",
@@ -1026,7 +1029,9 @@ class LegalChatAssistant:
         )
         try:
             rewritten = self.llm.complete(prompt).strip().strip("\"'“”")
-        except Exception:
+        except Exception as exc:
+            if should_propagate_controlled_error(exc, self.llm):
+                raise
             return ""
         if 0 < len(rewritten) <= 120 and "\n" not in rewritten:
             return rewritten
