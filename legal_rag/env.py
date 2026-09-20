@@ -13,12 +13,9 @@ def env_flag_enabled(name: str) -> bool:
 
 
 def live_model_calls_allowed() -> bool:
-    """Preserve normal operation unless the live-call switch is explicitly set."""
+    """Allow live model calls only after an explicit affirmative opt-in."""
 
-    value = os.environ.get("ALLOW_LIVE_MODEL_CALLS")
-    if value is None:
-        return True
-    return value.strip().casefold() in _TRUE_VALUES
+    return env_flag_enabled("ALLOW_LIVE_MODEL_CALLS")
 
 
 def require_live_model_calls_allowed(operation: str) -> None:
@@ -30,7 +27,9 @@ def require_live_model_calls_allowed(operation: str) -> None:
         )
 
 
-def load_dotenv(path: str | Path | None = None, *, override: bool = False) -> Path | None:
+def load_dotenv(
+    path: str | Path | None = None, *, override: bool = False
+) -> Path | None:
     if env_flag_enabled("LEGAL_RAG_DISABLE_DOTENV"):
         return None
     env_path = Path(path) if path else find_project_dotenv()

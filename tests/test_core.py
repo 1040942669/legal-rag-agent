@@ -15,7 +15,7 @@ from legal_rag.embeddings import (
     SiliconFlowEmbeddingEncoder,
     resolve_embedding_model,
 )
-from legal_rag.env import clean_env_value, load_dotenv
+from legal_rag.env import clean_env_value, live_model_calls_allowed, load_dotenv
 from legal_rag.evaluation import render_eval_report
 from legal_rag.failure_analysis import label_retrieval_failure
 from legal_rag.indexing import build_index
@@ -89,7 +89,9 @@ class CoreTest(unittest.TestCase):
     def test_chunk_diagnostics_summarizes_lengths_and_anomalies(self) -> None:
         data_dir = self.make_dataset()
         articles = parse_law_file(data_dir / "中华人民共和国民法典.txt")
-        chunks = build_chunks(articles, "neighbor", neighbor_window=2, neighbor_stride=1)
+        chunks = build_chunks(
+            articles, "neighbor", neighbor_window=2, neighbor_stride=1
+        )
         diagnostics = build_chunk_diagnostics(chunks, strategy="neighbor")
 
         self.assertEqual(diagnostics["strategy"], "neighbor")
@@ -98,7 +100,9 @@ class CoreTest(unittest.TestCase):
         self.assertIn("article_span_length", diagnostics)
 
     def test_query_analyzer_extracts_law_article_and_risk_flags(self) -> None:
-        analysis = analyze_query("《中华人民共和国民法典》第一百一十九条规定了什么？我很急！")
+        analysis = analyze_query(
+            "《中华人民共和国民法典》第一百一十九条规定了什么？我很急！"
+        )
 
         self.assertIn("中华人民共和国民法典", analysis.law_names)
         self.assertIn("第一百一十九条", analysis.article_numbers)
@@ -130,7 +134,9 @@ class CoreTest(unittest.TestCase):
 
             def retrieve(self, query: str, top_k: int = 5):
                 return [
-                    SearchResult(chunk=chunk, score=1.0 / rank, rank=rank, retriever=self.name)
+                    SearchResult(
+                        chunk=chunk, score=1.0 / rank, rank=rank, retriever=self.name
+                    )
                     for rank, chunk in enumerate(self.ordered_chunks[:top_k], start=1)
                 ]
 
@@ -173,7 +179,9 @@ class CoreTest(unittest.TestCase):
         )
 
         self.assertEqual(label_retrieval_failure(results, hit_case).label, "hit")
-        self.assertEqual(label_retrieval_failure(results, wrong_law_case).label, "wrong_law")
+        self.assertEqual(
+            label_retrieval_failure(results, wrong_law_case).label, "wrong_law"
+        )
 
     def test_trace_writer_records_retrieval_schema(self) -> None:
         data_dir = self.make_dataset()
@@ -237,7 +245,10 @@ class CoreTest(unittest.TestCase):
         with patch.dict(os.environ, {"ALLOW_LIVE_MODEL_CALLS": "false"}, clear=False):
             for label, invoke in (
                 ("ollama", lambda: OllamaClient(model="test").complete("prompt")),
-                ("siliconflow", lambda: SiliconFlowClient(model="test").complete("prompt")),
+                (
+                    "siliconflow",
+                    lambda: SiliconFlowClient(model="test").complete("prompt"),
+                ),
                 (
                     "sentence-transformer",
                     lambda: SentenceTransformerEncoder(embedding_config),
@@ -247,6 +258,24 @@ class CoreTest(unittest.TestCase):
                 with self.subTest(provider=label):
                     with self.assertRaisesRegex(RuntimeError, "ALLOW_LIVE_MODEL_CALLS"):
                         invoke()
+
+    def test_live_model_calls_default_to_fail_closed(self) -> None:
+        for value in (None, "", "false", "0", "unexpected"):
+            with self.subTest(value=value):
+                with patch.dict(os.environ, {}, clear=False):
+                    os.environ.pop("ALLOW_LIVE_MODEL_CALLS", None)
+                    if value is not None:
+                        os.environ["ALLOW_LIVE_MODEL_CALLS"] = value
+                    self.assertFalse(live_model_calls_allowed())
+
+        for value in ("1", "true", "YES", " on "):
+            with self.subTest(value=value):
+                with patch.dict(
+                    os.environ,
+                    {"ALLOW_LIVE_MODEL_CALLS": value},
+                    clear=False,
+                ):
+                    self.assertTrue(live_model_calls_allowed())
 
     def test_manifest_writer_records_reproducibility_fields(self) -> None:
         manifest_path = self.make_workspace_temp() / "manifest.json"

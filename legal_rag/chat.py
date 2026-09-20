@@ -344,6 +344,7 @@ class LegalChatAssistant:
         normalizer_retries: int = 0,
         condense_with_llm: bool = False,
         verification_context: VerificationContext | None = None,
+        completion_client: Any | None = None,
     ) -> None:
         self.retriever = retriever
         self.model = model
@@ -368,10 +369,14 @@ class LegalChatAssistant:
         self.memory = ConversationMemory(token_limit=memory_token_limit)
         self._commit_lock = RLock()
         self._session_revision = 0
-        self.llm = build_completion_client(
-            model,
-            ollama_base_url=ollama_base_url,
-            request_timeout=request_timeout,
+        self.llm = (
+            completion_client
+            if completion_client is not None
+            else build_completion_client(
+                model,
+                ollama_base_url=ollama_base_url,
+                request_timeout=request_timeout,
+            )
         )
 
     def reset_memory(self) -> None:

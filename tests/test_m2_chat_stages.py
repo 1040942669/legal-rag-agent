@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+import legal_rag.chat as chat_module
 from legal_rag.chat import (
     STRUCTURED_ANSWER_PARSER_VERSION,
     ConversationMemory,
@@ -70,6 +71,28 @@ class _AnswerClient:
             },
             ensure_ascii=False,
         )
+
+
+def test_explicit_completion_client_avoids_provider_client_construction(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _AnswerClient()
+
+    def forbidden_provider_factory(*_args, **_kwargs):
+        raise AssertionError("provider client construction was not expected")
+
+    monkeypatch.setattr(
+        chat_module,
+        "build_completion_client",
+        forbidden_provider_factory,
+    )
+    assistant = LegalChatAssistant(
+        _DeterministicRetriever(),
+        model="provider-disabled-fixture",
+        completion_client=client,
+    )
+
+    assert assistant.llm is client
 
 
 def _assistant(
