@@ -5,7 +5,7 @@ import math
 import re
 import threading
 import time
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -468,12 +468,16 @@ class AttemptControls:
         stop_event: threading.Event,
         *,
         cache_mode: str,
+        external_calls_allowed: bool,
     ) -> None:
         if cache_mode not in CACHE_MODES:
             raise ExperimentContractError(f"unsupported cache mode: {cache_mode!r}")
+        if not isinstance(external_calls_allowed, bool):
+            raise ExperimentContractError("external_calls_allowed must be a boolean")
         self._provider_controller = provider_controller
         self._stop_event = stop_event
         self._cache_mode = cache_mode
+        self._external_calls_allowed = external_calls_allowed
         self._lock = threading.Lock()
         self._by_stage = {
             stage: {
@@ -498,6 +502,11 @@ class AttemptControls:
         if self._cache_mode == "replay":
             raise ExperimentContractError(
                 "replay mode forbids external calls before provider dispatch"
+            )
+        if not self._external_calls_allowed:
+            raise ExperimentContractError(
+                "manifest execution policy forbids external calls before "
+                "provider dispatch"
             )
         if self._stop_event.is_set():
             raise RunnerStopped("experiment stop requested")
@@ -532,6 +541,10 @@ class AttemptControls:
     @property
     def cache_mode(self) -> str:
         return self._cache_mode
+
+    @property
+    def external_calls_allowed(self) -> bool:
+        return self._external_calls_allowed
 
     def stage_counts(self, stage: str) -> tuple[dict[str, int], dict[str, int]]:
         with self._lock:
@@ -624,10 +637,77 @@ class _UnitPlan:
 
 
 @dataclass(frozen=True)
-class _ValidatedAttemptHistory:
+class ValidatedSessionCheckpoint:
+    """Validated immutable-session linkage carried by one runner attempt.
+
+    The nested state is a canonical defensive copy of the persisted JSON.  The
+    validator never restores a runtime or writes to the experiment store.
+    """
+
+    previous_case_id: str | None
+    state_before_sha256: str
+    state_after: dict[str, Any] | None
+    state_after_sha256: str | None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "previous_case_id": self.previous_case_id,
+            "state_before_sha256": self.state_before_sha256,
+            "state_after": (
+                _json_copy(self.state_after) if self.state_after is not None else None
+            ),
+            "state_after_sha256": self.state_after_sha256,
+        }
+
+
+@dataclass(frozen=True)
+class ValidatedRunnerAttempt:
+    """Read-only validated view over one persisted runner result artifact."""
+
+    attempt_number: int
+    case_id: str
+    status: str
+    cache_mode: str
+    output: dict[str, Any] | None
+    session_checkpoint: ValidatedSessionCheckpoint | None
+    stage_observations: Mapping[str, Any]
+    call_ledger: Mapping[str, Any]
+    model_usage: Mapping[str, Any]
+    timings_ms: Mapping[str, Any]
+    error: dict[str, Any] | None
+
+    @property
+    def retryable(self) -> bool | None:
+        return None if self.error is None else self.error["retryable"]
+
+    @property
+    def session_state_after(self) -> dict[str, Any] | None:
+        checkpoint = self.session_checkpoint
+        if checkpoint is None or checkpoint.state_after is None:
+            return None
+        return _json_copy(checkpoint.state_after)
+
+
+@dataclass(frozen=True)
+class ValidatedAttemptHistory:
+    """Validated ordered attempt history for one manifest case."""
+
+    case_id: str
+    attempts: tuple[ValidatedRunnerAttempt, ...]
     latest_status: str
     state_after: dict[str, Any] | None
     latest_retryable: bool | None
+
+
+@dataclass(frozen=True)
+class ValidatedWorkUnitHistory:
+    """Validated contiguous case/session history for one work unit."""
+
+    work_unit_id: str
+    case_histories: tuple[ValidatedAttemptHistory, ...]
+    completed_prefix_length: int
+    state_after: dict[str, Any] | None
+    complete: bool
 
 
 def plan_work_units(manifest: Mapping[str, Any]) -> tuple[WorkUnit, ...]:
@@ -725,6 +805,441 @@ def plan_work_units(manifest: Mapping[str, Any]) -> tuple[WorkUnit, ...]:
     return tuple(units)
 
 
+def _validate_persisted_model_usage(
+    model_usage: Any,
+    call_ledger: Any,
+) -> dict[str, dict[str, int | float]]:
+    normalized = _validated_model_usage_ledger(model_usage)
+    if canonical_json_bytes(normalized) != canonical_json_bytes(model_usage):
+        raise RunnerContractError("persisted model usage is not canonical")
+    if not isinstance(call_ledger, dict):
+        raise RunnerContractError("persisted call ledger is invalid")
+    actual = call_ledger.get("actual")
+    if not isinstance(actual, dict):
+        raise RunnerContractError("persisted actual call ledger is invalid")
+    _validate_model_usage_call_ledger(normalized, actual)
+    return normalized
+
+
+def _validate_persisted_observations(
+    observations: Any,
+    call_ledger: Any,
+    *,
+    attempt_cache_mode: str,
+) -> dict[str, dict[str, Any]]:
+    if not isinstance(observations, dict) or set(observations) != set(
+        OBSERVATION_STAGES
+    ):
+        raise RunnerContractError("persisted stage observations are invalid")
+    normalized_observations: dict[str, dict[str, Any]] = {}
+    stage_attempted = _zero_counts()
+    stage_failed = _zero_counts()
+    source_totals = _zero_counts()
+    for stage in OBSERVATION_STAGES:
+        payload = observations[stage]
+        if not isinstance(payload, dict) or set(payload) != {
+            "status",
+            "origin",
+            "duration_ms",
+            "cache_key",
+            "external_calls",
+            "failed_external_calls",
+            "source_external_calls",
+            "error_code",
+            "unavailable_reason",
+        }:
+            raise RunnerContractError("persisted stage observation fields are invalid")
+        observation = StageObservation(
+            status=payload["status"],
+            origin=payload["origin"],
+            duration_ms=payload["duration_ms"],
+            cache_key=payload["cache_key"],
+            source_external_calls=payload["source_external_calls"],
+            error_code=payload["error_code"],
+            unavailable_reason=payload["unavailable_reason"],
+        )
+        normalized = observation.to_dict(
+            external_calls=payload["external_calls"],
+            failed_external_calls=payload["failed_external_calls"],
+        )
+        _validate_stage_origin_for_cache_mode(normalized["origin"], attempt_cache_mode)
+        if normalized != payload:
+            raise RunnerContractError("persisted stage observation is not canonical")
+        normalized_observations[stage] = normalized
+        for kind in EXTERNAL_CALL_KINDS:
+            stage_attempted[kind] += normalized["external_calls"][kind]
+            stage_failed[kind] += normalized["failed_external_calls"][kind]
+            source_totals[kind] += normalized["source_external_calls"][kind]
+    if not isinstance(call_ledger, dict) or set(call_ledger) != {
+        "actual",
+        "source",
+    }:
+        raise RunnerContractError("persisted call ledger fields are invalid")
+    source = _validated_counts("call_ledger.source", call_ledger["source"])
+    if source != source_totals:
+        raise RunnerContractError("persisted source call totals are inconsistent")
+    actual = call_ledger["actual"]
+    if not isinstance(actual, dict) or set(actual) != set(EXTERNAL_CALL_KINDS):
+        raise RunnerContractError("persisted actual call ledger is invalid")
+    for kind in EXTERNAL_CALL_KINDS:
+        item = actual[kind]
+        if not isinstance(item, dict) or set(item) != {
+            "attempted",
+            "succeeded",
+            "failed",
+            "duration_ms",
+            "provider_wait_ms",
+        }:
+            raise RunnerContractError("persisted provider ledger fields are invalid")
+        for field_name in ("attempted", "succeeded", "failed"):
+            value = item[field_name]
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise RunnerContractError("persisted provider counts are invalid")
+        if item["attempted"] != item["succeeded"] + item["failed"]:
+            raise RunnerContractError("persisted provider call counts do not balance")
+        if (
+            item["attempted"] != stage_attempted[kind]
+            or item["failed"] != stage_failed[kind]
+        ):
+            raise RunnerContractError(
+                "persisted provider stage totals are inconsistent"
+            )
+        if attempt_cache_mode == "replay" and item["attempted"] != 0:
+            raise RunnerContractError(
+                "persisted replay attempt cannot contain external calls"
+            )
+        _require_non_negative_number("provider duration", item["duration_ms"])
+        _require_non_negative_number("provider wait", item["provider_wait_ms"])
+    return normalized_observations
+
+
+def validate_persisted_runner_attempt(
+    attempt_payload: Mapping[str, Any],
+    *,
+    case: Mapping[str, Any],
+    unit: WorkUnit,
+    state_before: Mapping[str, Any] | None,
+    expected_attempt_number: int | None = None,
+) -> ValidatedRunnerAttempt:
+    """Validate one store-loaded attempt without constructing or mutating runtime state.
+
+    ``attempt_payload`` is expected to be a payload returned by
+    :meth:`ExperimentStore.load_attempts`; envelope, manifest and filesystem
+    integrity remain the store's responsibility.  This function validates the
+    runner-owned result contract and returns a defensive JSON view for
+    aggregation or resume planning.
+    """
+
+    if not isinstance(attempt_payload, Mapping):
+        raise RunnerContractError("persisted attempt must be an object")
+    case_id = case.get("case_id")
+    _require_non_empty_string("case_id", case_id)
+    matching_indexes = [
+        index for index, item in enumerate(unit.cases) if item.get("case_id") == case_id
+    ]
+    if len(matching_indexes) != 1:
+        raise RunnerContractError("persisted case is not uniquely bound to work unit")
+    case_index = matching_indexes[0]
+    expected_identity = {
+        "case_id": case_id,
+        "case_hash": case.get("case_hash"),
+        "ordinal": case.get("ordinal"),
+    }
+    for field_name, expected_value in expected_identity.items():
+        actual_value = attempt_payload.get(field_name)
+        if (
+            type(actual_value) is not type(expected_value)
+            or actual_value != expected_value
+        ):
+            raise RunnerContractError(
+                f"persisted attempt identity mismatch for {field_name}"
+            )
+    attempt_number = attempt_payload.get("attempt")
+    if (
+        isinstance(attempt_number, bool)
+        or not isinstance(attempt_number, int)
+        or attempt_number < 1
+    ):
+        raise RunnerContractError("persisted attempt number is invalid")
+    if (
+        expected_attempt_number is not None
+        and attempt_number != expected_attempt_number
+    ):
+        raise RunnerContractError("persisted attempt history is not contiguous")
+    status = attempt_payload.get("status")
+    if status != "succeeded" and status not in ATTEMPT_TERMINAL_STATUSES:
+        raise RunnerContractError("persisted attempt status is unsupported")
+    cache_mode = attempt_payload.get("cache_mode")
+    if cache_mode not in CACHE_MODES:
+        raise RunnerContractError("persisted attempt cache mode is invalid")
+
+    result = attempt_payload.get("result")
+    required = {
+        "runner_schema_version",
+        "case",
+        "work_unit",
+        "session_checkpoint",
+        "output",
+        "stage_observations",
+        "call_ledger",
+        "model_usage",
+        "timings_ms",
+        "error",
+    }
+    if not isinstance(result, dict) or set(result) != required:
+        raise RunnerContractError(
+            f"persisted runner result fields are invalid for {case_id}"
+        )
+    if (
+        type(result["runner_schema_version"]) is not int
+        or result["runner_schema_version"] != RUNNER_RESULT_SCHEMA_VERSION
+    ):
+        raise RunnerContractError("persisted runner result schema is unsupported")
+    expected_case = {
+        "case_id": case_id,
+        "case_hash": case["case_hash"],
+        "ordinal": case["ordinal"],
+        "session_group": unit.session_group,
+        "turn_index": case.get("turn_index", 0),
+    }
+    expected_unit = {
+        "work_unit_id": unit.work_unit_id,
+        "group_identity_hash": unit.group_identity_hash,
+    }
+    if canonical_json_bytes(result["case"]) != canonical_json_bytes(
+        expected_case
+    ) or canonical_json_bytes(result["work_unit"]) != canonical_json_bytes(
+        expected_unit
+    ):
+        raise RunnerContractError("persisted runner case/work-unit identity mismatch")
+
+    observations = _validate_persisted_observations(
+        result["stage_observations"],
+        result["call_ledger"],
+        attempt_cache_mode=cache_mode,
+    )
+    timings = result["timings_ms"]
+    if not isinstance(timings, dict) or set(timings) != {
+        "queue_wait",
+        "end_to_end",
+        "persistence_included",
+    }:
+        raise RunnerContractError("persisted timing fields are invalid")
+    normalized_timings = {
+        "queue_wait": _require_non_negative_number("queue_wait", timings["queue_wait"]),
+        "end_to_end": _require_non_negative_number("end_to_end", timings["end_to_end"]),
+        "persistence_included": timings["persistence_included"],
+    }
+    if normalized_timings["persistence_included"] is not False:
+        raise RunnerContractError(
+            "runner end_to_end timing must explicitly exclude persistence"
+        )
+
+    checkpoint_payload = result["session_checkpoint"]
+    checkpoint: ValidatedSessionCheckpoint | None
+    if unit.session_group is None:
+        if checkpoint_payload is not None:
+            raise RunnerContractError("single case persisted unexpected session state")
+        checkpoint = None
+    else:
+        if not isinstance(checkpoint_payload, dict) or set(checkpoint_payload) != {
+            "previous_case_id",
+            "state_before_sha256",
+            "state_after",
+            "state_after_sha256",
+        }:
+            raise RunnerContractError("persisted session checkpoint is invalid")
+        expected_previous = (
+            unit.cases[case_index - 1]["case_id"] if case_index > 0 else None
+        )
+        if checkpoint_payload["previous_case_id"] != expected_previous:
+            raise RunnerContractError("session checkpoint predecessor mismatch")
+        state_before_copy = (
+            _json_copy(dict(state_before)) if state_before is not None else None
+        )
+        if checkpoint_payload["state_before_sha256"] != canonical_hash(
+            state_before_copy
+        ):
+            raise RunnerContractError("session checkpoint state chain is broken")
+        next_state = checkpoint_payload["state_after"]
+        if status == "succeeded":
+            if not isinstance(next_state, dict):
+                raise RunnerContractError(
+                    "successful session checkpoint must contain state_after"
+                )
+            if checkpoint_payload["state_after_sha256"] != canonical_hash(next_state):
+                raise RunnerContractError("session checkpoint checksum mismatch")
+            state_after = _json_copy(next_state)
+        else:
+            if (
+                next_state is not None
+                or checkpoint_payload["state_after_sha256"] is not None
+            ):
+                raise RunnerContractError(
+                    "failed session attempt cannot advance session state"
+                )
+            state_after = None
+        checkpoint = ValidatedSessionCheckpoint(
+            previous_case_id=expected_previous,
+            state_before_sha256=checkpoint_payload["state_before_sha256"],
+            state_after=state_after,
+            state_after_sha256=checkpoint_payload["state_after_sha256"],
+        )
+
+    normalized_usage = _validate_persisted_model_usage(
+        result["model_usage"], result["call_ledger"]
+    )
+    if status == "succeeded":
+        if not isinstance(result["output"], dict) or result["error"] is not None:
+            raise RunnerContractError("successful runner result is incomplete")
+        output = _json_copy(result["output"])
+        error_payload = None
+    else:
+        if result["output"] is not None:
+            raise RunnerContractError("failed runner result cannot contain output")
+        error_payload = result["error"]
+        if not isinstance(error_payload, dict) or set(error_payload) != {
+            "code",
+            "retryable",
+        }:
+            raise RunnerContractError("failed runner result error is invalid")
+        if not isinstance(error_payload["code"], str) or not _SAFE_ERROR_CODE.fullmatch(
+            error_payload["code"]
+        ):
+            raise RunnerContractError("failed runner result error code is invalid")
+        if not isinstance(error_payload["retryable"], bool):
+            raise RunnerContractError("failed runner retryable flag is invalid")
+        error_payload = _json_copy(error_payload)
+        output = None
+
+    return ValidatedRunnerAttempt(
+        attempt_number=attempt_number,
+        case_id=case_id,
+        status=status,
+        cache_mode=cache_mode,
+        output=output,
+        session_checkpoint=checkpoint,
+        stage_observations=_json_copy(observations),
+        call_ledger=_json_copy(result["call_ledger"]),
+        model_usage=_json_copy(normalized_usage),
+        timings_ms=_json_copy(normalized_timings),
+        error=error_payload,
+    )
+
+
+def validate_persisted_attempt_history(
+    attempts: Sequence[Mapping[str, Any]],
+    *,
+    case: Mapping[str, Any],
+    unit: WorkUnit,
+    state_before: Mapping[str, Any] | None,
+) -> ValidatedAttemptHistory:
+    """Validate one case's contiguous retry history as a pure operation."""
+
+    if isinstance(attempts, (str, bytes)) or not isinstance(attempts, Sequence):
+        raise RunnerContractError("persisted attempt history must be a sequence")
+    if not attempts:
+        raise RunnerContractError(
+            f"persisted case has no attempt: {case.get('case_id')}"
+        )
+    validated_attempts: list[ValidatedRunnerAttempt] = []
+    latest_retryable: bool | None = None
+    state_after = _json_copy(state_before) if state_before is not None else None
+    for index, payload in enumerate(attempts):
+        attempt = validate_persisted_runner_attempt(
+            payload,
+            case=case,
+            unit=unit,
+            state_before=state_before,
+            expected_attempt_number=index + 1,
+        )
+        if attempt.status == "succeeded":
+            if index != len(attempts) - 1:
+                raise RunnerContractError(
+                    "succeeded attempt must be the final attempt in its history"
+                )
+            state_after = attempt.session_state_after
+            latest_retryable = None
+        else:
+            retryable = attempt.retryable
+            if not isinstance(retryable, bool):
+                raise RunnerContractError(
+                    "failed attempt did not contain a retry decision"
+                )
+            if index != len(attempts) - 1 and not retryable:
+                raise RunnerContractError(
+                    "non-retryable attempt cannot be followed by another attempt"
+                )
+            latest_retryable = retryable
+        validated_attempts.append(attempt)
+    return ValidatedAttemptHistory(
+        case_id=case["case_id"],
+        attempts=tuple(validated_attempts),
+        latest_status=validated_attempts[-1].status,
+        state_after=_json_copy(state_after) if state_after is not None else None,
+        latest_retryable=latest_retryable,
+    )
+
+
+def validate_persisted_work_unit_history(
+    unit: WorkUnit,
+    attempts_by_case: Mapping[str, Sequence[Mapping[str, Any]]],
+) -> ValidatedWorkUnitHistory:
+    """Validate a work unit's attempted prefix and complete session hash chain.
+
+    Missing histories are permitted for the not-yet-run suffix.  Once a case is
+    missing or has not succeeded, any later turn with attempts is rejected.
+    """
+
+    if not isinstance(attempts_by_case, Mapping):
+        raise RunnerContractError("persisted work-unit histories must be an object")
+    known_case_ids = set(unit.case_ids)
+    unknown_case_ids = set(attempts_by_case) - known_case_ids
+    if unknown_case_ids:
+        raise RunnerContractError(
+            "persisted work-unit histories contain unknown cases: "
+            + ",".join(sorted(unknown_case_ids))
+        )
+    histories: list[ValidatedAttemptHistory] = []
+    state: dict[str, Any] | None = None
+    completed_prefix_length = 0
+    prefix_stopped = False
+    for case in unit.cases:
+        raw_attempts = attempts_by_case.get(case["case_id"], ())
+        if isinstance(raw_attempts, (str, bytes)) or not isinstance(
+            raw_attempts, Sequence
+        ):
+            raise RunnerContractError("persisted attempt history must be a sequence")
+        if not raw_attempts:
+            prefix_stopped = True
+            continue
+        if prefix_stopped:
+            raise RunnerContractError(
+                "later session turns cannot have attempts before their predecessor"
+            )
+        history = validate_persisted_attempt_history(
+            raw_attempts,
+            case=case,
+            unit=unit,
+            state_before=state,
+        )
+        histories.append(history)
+        if history.latest_status != "succeeded":
+            prefix_stopped = True
+            continue
+        completed_prefix_length += 1
+        state = (
+            _json_copy(history.state_after) if history.state_after is not None else None
+        )
+    return ValidatedWorkUnitHistory(
+        work_unit_id=unit.work_unit_id,
+        case_histories=tuple(histories),
+        completed_prefix_length=completed_prefix_length,
+        state_after=_json_copy(state) if state is not None else None,
+        complete=completed_prefix_length == len(unit.cases),
+    )
+
+
 class ExperimentRunner:
     """Resume-safe work-unit scheduler over immutable case artifacts.
 
@@ -751,6 +1266,18 @@ class ExperimentRunner:
         if cache_mode not in CACHE_MODES:
             raise ExperimentContractError(f"unsupported cache mode: {cache_mode!r}")
         self.cache_mode = cache_mode
+        execution_policy = self.manifest["execution_policy"]
+        policy_contract = execution_policy["contract"]
+        if policy_contract == "registered_mode_v1":
+            self.external_calls_allowed = execution_policy["external_calls_allowed"]
+        elif policy_contract == "unregistered_test_fixture":
+            # Test-only manifests preserve the pre-registry fake-provider harness.
+            # They are visibly non-publishable and never receive a registry proof.
+            self.external_calls_allowed = True
+        else:  # pragma: no cover - validate_experiment_manifest owns this shape
+            raise ExperimentContractError(
+                "unsupported manifest execution policy contract"
+            )
         if not isinstance(execution_environment, Mapping):
             raise ExperimentContractError("execution_environment must be an object")
         self.execution_environment = _json_copy(dict(execution_environment))
@@ -994,59 +1521,12 @@ class ExperimentRunner:
         case: Mapping[str, Any],
         unit: WorkUnit,
         state_before: dict[str, Any] | None,
-    ) -> _ValidatedAttemptHistory:
-        attempts = self.store.load_attempts(case["case_id"])
-        if not attempts:
-            raise RunnerContractError(
-                f"persisted case has no attempt: {case['case_id']}"
-            )
-        state_after = state_before
-        latest_retryable: bool | None = None
-        for index, payload in enumerate(attempts):
-            status = payload.get("status")
-            if status == "succeeded":
-                if index != len(attempts) - 1:
-                    raise RunnerContractError(
-                        "succeeded attempt must be the final attempt in its history"
-                    )
-                validated_state = self._validate_persisted_result(
-                    payload,
-                    case=case,
-                    unit=unit,
-                    state_before=state_before,
-                    expected_status="succeeded",
-                )
-                if validated_state is not None and not isinstance(
-                    validated_state, dict
-                ):
-                    raise RunnerContractError(
-                        "successful attempt returned an invalid session state"
-                    )
-                state_after = validated_state
-                latest_retryable = None
-                continue
-            if status not in ATTEMPT_TERMINAL_STATUSES:
-                raise RunnerContractError("persisted attempt status is unsupported")
-            retryable = self._validate_persisted_result(
-                payload,
-                case=case,
-                unit=unit,
-                state_before=state_before,
-                expected_status=status,
-            )
-            if not isinstance(retryable, bool):
-                raise RunnerContractError(
-                    "failed attempt did not contain a retry decision"
-                )
-            if index != len(attempts) - 1 and not retryable:
-                raise RunnerContractError(
-                    "non-retryable attempt cannot be followed by another attempt"
-                )
-            latest_retryable = retryable
-        return _ValidatedAttemptHistory(
-            latest_status=attempts[-1]["status"],
-            state_after=_json_copy(state_after) if state_after is not None else None,
-            latest_retryable=latest_retryable,
+    ) -> ValidatedAttemptHistory:
+        return validate_persisted_attempt_history(
+            self.store.load_attempts(case["case_id"]),
+            case=case,
+            unit=unit,
+            state_before=state_before,
         )
 
     @staticmethod
@@ -1150,6 +1630,7 @@ class ExperimentRunner:
                 self._provider_controller,
                 self._stop_event,
                 cache_mode=attempt_cache_mode,
+                external_calls_allowed=self.external_calls_allowed,
             )
             with self._result_lock:
                 self._attempted.add(case_id)
@@ -1501,257 +1982,3 @@ class ExperimentRunner:
             },
             "error": error,
         }
-
-    def _validate_persisted_result(
-        self,
-        attempt_payload: Mapping[str, Any],
-        *,
-        case: Mapping[str, Any],
-        unit: WorkUnit,
-        state_before: dict[str, Any] | None,
-        expected_status: str,
-    ) -> dict[str, Any] | bool | None:
-        if attempt_payload.get("status") != expected_status:
-            raise RunnerContractError(
-                f"persisted attempt status mismatch for {case['case_id']}"
-            )
-        result = attempt_payload.get("result")
-        required = {
-            "runner_schema_version",
-            "case",
-            "work_unit",
-            "session_checkpoint",
-            "output",
-            "stage_observations",
-            "call_ledger",
-            "model_usage",
-            "timings_ms",
-            "error",
-        }
-        if not isinstance(result, dict) or set(result) != required:
-            raise RunnerContractError(
-                f"persisted runner result fields are invalid for {case['case_id']}"
-            )
-        if (
-            type(result["runner_schema_version"]) is not int
-            or result["runner_schema_version"] != RUNNER_RESULT_SCHEMA_VERSION
-        ):
-            raise RunnerContractError("persisted runner result schema is unsupported")
-        expected_case = {
-            "case_id": case["case_id"],
-            "case_hash": case["case_hash"],
-            "ordinal": case["ordinal"],
-            "session_group": unit.session_group,
-            "turn_index": case.get("turn_index", 0),
-        }
-        expected_unit = {
-            "work_unit_id": unit.work_unit_id,
-            "group_identity_hash": unit.group_identity_hash,
-        }
-        if canonical_json_bytes(result["case"]) != canonical_json_bytes(
-            expected_case
-        ) or canonical_json_bytes(result["work_unit"]) != canonical_json_bytes(
-            expected_unit
-        ):
-            raise RunnerContractError(
-                "persisted runner case/work-unit identity mismatch"
-            )
-        attempt_cache_mode = attempt_payload.get("cache_mode")
-        if attempt_cache_mode not in CACHE_MODES:
-            raise RunnerContractError("persisted attempt cache mode is invalid")
-        self._validate_persisted_observations(
-            result["stage_observations"],
-            result["call_ledger"],
-            attempt_cache_mode=attempt_cache_mode,
-        )
-        timings = result["timings_ms"]
-        if not isinstance(timings, dict) or set(timings) != {
-            "queue_wait",
-            "end_to_end",
-            "persistence_included",
-        }:
-            raise RunnerContractError("persisted timing fields are invalid")
-        _require_non_negative_number("queue_wait", timings["queue_wait"])
-        _require_non_negative_number("end_to_end", timings["end_to_end"])
-        if timings["persistence_included"] is not False:
-            raise RunnerContractError(
-                "runner end_to_end timing must explicitly exclude persistence"
-            )
-        checkpoint = result["session_checkpoint"]
-        if unit.session_group is None:
-            if checkpoint is not None:
-                raise RunnerContractError(
-                    "single case persisted unexpected session state"
-                )
-            next_state = None
-        else:
-            if not isinstance(checkpoint, dict) or set(checkpoint) != {
-                "previous_case_id",
-                "state_before_sha256",
-                "state_after",
-                "state_after_sha256",
-            }:
-                raise RunnerContractError("persisted session checkpoint is invalid")
-            index = next(
-                index
-                for index, item in enumerate(unit.cases)
-                if item["case_id"] == case["case_id"]
-            )
-            expected_previous = unit.cases[index - 1]["case_id"] if index > 0 else None
-            if checkpoint["previous_case_id"] != expected_previous:
-                raise RunnerContractError("session checkpoint predecessor mismatch")
-            if checkpoint["state_before_sha256"] != canonical_hash(state_before):
-                raise RunnerContractError("session checkpoint state chain is broken")
-            next_state = checkpoint["state_after"]
-            if expected_status == "succeeded":
-                if not isinstance(next_state, dict):
-                    raise RunnerContractError(
-                        "successful session checkpoint must contain state_after"
-                    )
-                if checkpoint["state_after_sha256"] != canonical_hash(next_state):
-                    raise RunnerContractError("session checkpoint checksum mismatch")
-            elif next_state is not None or checkpoint["state_after_sha256"] is not None:
-                raise RunnerContractError(
-                    "failed session attempt cannot advance session state"
-                )
-        if expected_status == "succeeded":
-            if not isinstance(result["output"], dict) or result["error"] is not None:
-                raise RunnerContractError("successful runner result is incomplete")
-            self._validate_persisted_model_usage(
-                result["model_usage"],
-                result["call_ledger"],
-            )
-            return _json_copy(next_state) if next_state is not None else None
-        if result["output"] is not None:
-            raise RunnerContractError("failed runner result cannot contain output")
-        error = result["error"]
-        if not isinstance(error, dict) or set(error) != {"code", "retryable"}:
-            raise RunnerContractError("failed runner result error is invalid")
-        if not isinstance(error["code"], str) or not _SAFE_ERROR_CODE.fullmatch(
-            error["code"]
-        ):
-            raise RunnerContractError("failed runner result error code is invalid")
-        if not isinstance(error["retryable"], bool):
-            raise RunnerContractError("failed runner retryable flag is invalid")
-        self._validate_persisted_model_usage(
-            result["model_usage"],
-            result["call_ledger"],
-        )
-        return error["retryable"]
-
-    @staticmethod
-    def _validate_persisted_model_usage(
-        model_usage: Any,
-        call_ledger: Any,
-    ) -> None:
-        normalized = _validated_model_usage_ledger(model_usage)
-        if canonical_json_bytes(normalized) != canonical_json_bytes(model_usage):
-            raise RunnerContractError("persisted model usage is not canonical")
-        if not isinstance(call_ledger, dict):
-            raise RunnerContractError("persisted call ledger is invalid")
-        actual = call_ledger.get("actual")
-        if not isinstance(actual, dict):
-            raise RunnerContractError("persisted actual call ledger is invalid")
-        _validate_model_usage_call_ledger(
-            normalized,
-            actual,
-        )
-
-    def _validate_persisted_observations(
-        self,
-        observations: Any,
-        call_ledger: Any,
-        *,
-        attempt_cache_mode: str,
-    ) -> None:
-        if not isinstance(observations, dict) or set(observations) != set(
-            OBSERVATION_STAGES
-        ):
-            raise RunnerContractError("persisted stage observations are invalid")
-        stage_attempted = _zero_counts()
-        stage_failed = _zero_counts()
-        source_totals = _zero_counts()
-        for stage in OBSERVATION_STAGES:
-            payload = observations[stage]
-            if not isinstance(payload, dict) or set(payload) != {
-                "status",
-                "origin",
-                "duration_ms",
-                "cache_key",
-                "external_calls",
-                "failed_external_calls",
-                "source_external_calls",
-                "error_code",
-                "unavailable_reason",
-            }:
-                raise RunnerContractError(
-                    "persisted stage observation fields are invalid"
-                )
-            observation = StageObservation(
-                status=payload["status"],
-                origin=payload["origin"],
-                duration_ms=payload["duration_ms"],
-                cache_key=payload["cache_key"],
-                source_external_calls=payload["source_external_calls"],
-                error_code=payload["error_code"],
-                unavailable_reason=payload["unavailable_reason"],
-            )
-            normalized = observation.to_dict(
-                external_calls=payload["external_calls"],
-                failed_external_calls=payload["failed_external_calls"],
-            )
-            _validate_stage_origin_for_cache_mode(
-                normalized["origin"], attempt_cache_mode
-            )
-            if normalized != payload:
-                raise RunnerContractError(
-                    "persisted stage observation is not canonical"
-                )
-            for kind in EXTERNAL_CALL_KINDS:
-                stage_attempted[kind] += normalized["external_calls"][kind]
-                stage_failed[kind] += normalized["failed_external_calls"][kind]
-                source_totals[kind] += normalized["source_external_calls"][kind]
-        if not isinstance(call_ledger, dict) or set(call_ledger) != {
-            "actual",
-            "source",
-        }:
-            raise RunnerContractError("persisted call ledger fields are invalid")
-        source = _validated_counts("call_ledger.source", call_ledger["source"])
-        if source != source_totals:
-            raise RunnerContractError("persisted source call totals are inconsistent")
-        actual = call_ledger["actual"]
-        if not isinstance(actual, dict) or set(actual) != set(EXTERNAL_CALL_KINDS):
-            raise RunnerContractError("persisted actual call ledger is invalid")
-        for kind in EXTERNAL_CALL_KINDS:
-            item = actual[kind]
-            if not isinstance(item, dict) or set(item) != {
-                "attempted",
-                "succeeded",
-                "failed",
-                "duration_ms",
-                "provider_wait_ms",
-            }:
-                raise RunnerContractError(
-                    "persisted provider ledger fields are invalid"
-                )
-            for field_name in ("attempted", "succeeded", "failed"):
-                value = item[field_name]
-                if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-                    raise RunnerContractError("persisted provider counts are invalid")
-            if item["attempted"] != item["succeeded"] + item["failed"]:
-                raise RunnerContractError(
-                    "persisted provider call counts do not balance"
-                )
-            if (
-                item["attempted"] != stage_attempted[kind]
-                or item["failed"] != stage_failed[kind]
-            ):
-                raise RunnerContractError(
-                    "persisted provider stage totals are inconsistent"
-                )
-            if attempt_cache_mode == "replay" and item["attempted"] != 0:
-                raise RunnerContractError(
-                    "persisted replay attempt cannot contain external calls"
-                )
-            _require_non_negative_number("provider duration", item["duration_ms"])
-            _require_non_negative_number("provider wait", item["provider_wait_ms"])

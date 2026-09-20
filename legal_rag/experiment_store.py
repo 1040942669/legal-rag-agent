@@ -324,6 +324,7 @@ def _write_immutable_json(
 def _compatibility_projection(manifest: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "execution_mode": manifest["execution_mode"],
+        "execution_policy": manifest["execution_policy"],
         "code": manifest["code"],
         "config_hash": manifest["config"]["sha256"],
         "corpus": manifest["corpus"],

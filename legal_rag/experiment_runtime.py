@@ -18,12 +18,33 @@ from .json_utils import (
     validate_json_unicode,
 )
 
-
-EXPERIMENT_MANIFEST_SCHEMA_VERSION = 1
+EXPERIMENT_MANIFEST_SCHEMA_VERSION = 2
 STAGE_CACHE_SCHEMA_VERSION = 1
 EXECUTION_MODES = frozenset(
     {"offline", "retrieval", "smoke-generation", "full-regression"}
 )
+REGISTERED_EXECUTION_MODE_POLICIES = {
+    "offline": {
+        "generation": "forbidden",
+        "judge": "forbidden",
+        "external_calls": "forbidden",
+    },
+    "retrieval": {
+        "generation": "forbidden",
+        "judge": "forbidden",
+        "external_calls": "explicit_opt_in",
+    },
+    "smoke-generation": {
+        "generation": "required",
+        "judge": "optional",
+        "external_calls": "explicit_opt_in",
+    },
+    "full-regression": {
+        "generation": "required",
+        "judge": "optional",
+        "external_calls": "explicit_opt_in",
+    },
+}
 CACHE_MODES = frozenset({"fresh", "cache", "replay"})
 STAGES = frozenset(
     {
@@ -392,6 +413,179 @@ def _stage_contracts(
     }
 
 
+def _validate_registered_dataset_contract(
+    dataset: dict[str, Any],
+    *,
+    execution_mode: str,
+    default_cache_mode: str,
+    config: dict[str, Any],
+    contracts: dict[str, Any],
+) -> dict[str, Any]:
+    """Bind a registry-produced dataset to the manifest execution mode."""
+
+    role = dataset["role"]
+    registry = dataset.get("registry")
+    if registry is None:
+        if role != "test_fixture":
+            raise ExperimentContractError(
+                "non-test datasets must include a verified registry contract"
+            )
+        return {"contract": "unregistered_test_fixture"}
+    if role not in {"legacy_regression", "synthetic_fixture"}:
+        raise ExperimentContractError("registered dataset role is unsupported")
+    if dataset.get("case_schema_version") != 1:
+        raise ExperimentContractError(
+            "registered dataset case schema version is unsupported"
+        )
+    registry_payload = _require_mapping("dataset.registry", registry)
+    if set(registry_payload) != {
+        "schema_version",
+        "file_sha256",
+        "frozen_at",
+        "immutable",
+        "exposure_status",
+        "is_holdout",
+        "gold_legal_authority_status",
+    }:
+        raise ExperimentContractError("dataset.registry fields are invalid")
+    if (
+        type(registry_payload["schema_version"]) is not int
+        or registry_payload["schema_version"] != 1
+    ):
+        raise ExperimentContractError("dataset registry schema version is unsupported")
+    for field_name in ("file_sha256",):
+        value = registry_payload[field_name]
+        if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
+            raise ExperimentContractError(
+                f"dataset.registry.{field_name} must be a lowercase SHA-256"
+            )
+    _require_non_empty_string(
+        "dataset.registry.frozen_at", registry_payload["frozen_at"]
+    )
+    if registry_payload["immutable"] is not True:
+        raise ExperimentContractError("registered dataset must be immutable")
+    if registry_payload["is_holdout"] is not False:
+        raise ExperimentContractError(
+            "registry schema v1 does not support holdout data"
+        )
+    expected_exposure = {
+        "legacy_regression": "repeated_development",
+        "synthetic_fixture": "synthetic",
+    }[role]
+    if registry_payload["exposure_status"] != expected_exposure:
+        raise ExperimentContractError(
+            "dataset role and exposure status are inconsistent"
+        )
+    expected_authority = {
+        "legacy_regression": "not_authoritatively_reviewed",
+        "synthetic_fixture": "not_applicable_synthetic_content",
+    }[role]
+    if registry_payload["gold_legal_authority_status"] != expected_authority:
+        raise ExperimentContractError(
+            "dataset role and legal authority status are inconsistent"
+        )
+
+    source = _require_mapping("dataset.source", dataset.get("source"))
+    if set(source) != {"path", "file_hash_normalization"}:
+        raise ExperimentContractError("dataset.source fields are invalid")
+    _require_non_empty_string("dataset.source.path", source["path"])
+    if source["file_hash_normalization"] != "utf8_lf_v1":
+        raise ExperimentContractError(
+            "dataset source file hash normalization is unsupported"
+        )
+
+    allowed_modes = dataset.get("allowed_modes")
+    if (
+        not isinstance(allowed_modes, list)
+        or not allowed_modes
+        or any(mode not in EXECUTION_MODES for mode in allowed_modes)
+        or len(set(allowed_modes)) != len(allowed_modes)
+    ):
+        raise ExperimentContractError("dataset.allowed_modes is invalid")
+    if execution_mode not in allowed_modes:
+        raise ExperimentContractError(
+            f"registered dataset does not allow execution mode {execution_mode!r}"
+        )
+    if execution_mode == "offline" and role != "synthetic_fixture":
+        raise ExperimentContractError(
+            "offline mode requires a registered synthetic_fixture dataset"
+        )
+
+    case_count = dataset.get("case_count")
+    if (
+        isinstance(case_count, bool)
+        or not isinstance(case_count, int)
+        or case_count < 1
+    ):
+        raise ExperimentContractError(
+            "registered dataset.case_count must be a positive integer"
+        )
+    cases = dataset.get("cases")
+    if not isinstance(cases, list) or len(cases) != case_count:
+        raise ExperimentContractError(
+            "registered dataset.case_count does not match cases"
+        )
+    case_set_hash = dataset.get("case_set_hash")
+    if (
+        not isinstance(case_set_hash, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", case_set_hash)
+        or case_set_hash != canonical_hash(cases)
+    ):
+        raise ExperimentContractError("registered dataset.case_set_hash is invalid")
+    artifact_set_hash = dataset.get("case_artifact_set_sha256")
+    if not isinstance(artifact_set_hash, str) or not re.fullmatch(
+        r"[0-9a-f]{64}", artifact_set_hash
+    ):
+        raise ExperimentContractError(
+            "registered dataset.case_artifact_set_sha256 is invalid"
+        )
+    case_file_hash = dataset.get("case_file_hash")
+    if not isinstance(case_file_hash, str) or not re.fullmatch(
+        r"[0-9a-f]{64}", case_file_hash
+    ):
+        raise ExperimentContractError("registered dataset.case_file_hash is invalid")
+    if execution_mode == "smoke-generation" and case_count > 30:
+        raise ExperimentContractError(
+            "smoke-generation requires a fixed dataset of at most 30 cases"
+        )
+
+    policy = REGISTERED_EXECUTION_MODE_POLICIES[execution_mode]
+    generate = _require_boolean("config_summary.generate", config.get("generate"))
+    expected_generate = policy["generation"] == "required"
+    if generate is not expected_generate:
+        raise ExperimentContractError(
+            f"registered {execution_mode} mode requires "
+            f"config_summary.generate={expected_generate!r}"
+        )
+    judge = _require_mapping("contracts.judge", contracts.get("judge"))
+    judge_enabled = _require_boolean("contracts.judge.enabled", judge.get("enabled"))
+    if policy["judge"] == "forbidden" and judge_enabled:
+        raise ExperimentContractError(
+            f"registered {execution_mode} mode forbids judge calls"
+        )
+    external_calls_allowed = _require_boolean(
+        "config_summary.allow_external_calls",
+        config.get("allow_external_calls"),
+    )
+    if policy["external_calls"] == "forbidden" and external_calls_allowed:
+        raise ExperimentContractError(
+            f"registered {execution_mode} mode forbids external calls"
+        )
+    if default_cache_mode == "replay" and external_calls_allowed:
+        raise ExperimentContractError(
+            "registered replay mode must declare zero external calls"
+        )
+    return {
+        "contract": "registered_mode_v1",
+        "generation": policy["generation"],
+        "judge": policy["judge"],
+        "external_calls": policy["external_calls"],
+        "generate": generate,
+        "judge_enabled": judge_enabled,
+        "external_calls_allowed": external_calls_allowed,
+    }
+
+
 def build_experiment_manifest(
     *,
     experiment_id: str,
@@ -469,6 +663,13 @@ def build_experiment_manifest(
         raise ExperimentContractError(
             "dataset.case_schema_version must be a positive integer"
         )
+    execution_policy = _validate_registered_dataset_contract(
+        dataset_payload,
+        execution_mode=execution_mode,
+        default_cache_mode=default_cache_mode,
+        config=config_payload,
+        contracts=contract_payload,
+    )
     concurrency = runtime_payload.get("concurrency")
     if (
         isinstance(concurrency, bool)
@@ -501,6 +702,7 @@ def build_experiment_manifest(
     )
     compatibility_payload = {
         "execution_mode": execution_mode,
+        "execution_policy": execution_policy,
         "code": code_payload,
         "config_hash": canonical_hash(config_payload),
         "corpus": corpus_payload,
@@ -514,6 +716,7 @@ def build_experiment_manifest(
         "experiment_id": experiment_id,
         "created_at": created_at,
         "execution_mode": execution_mode,
+        "execution_policy": execution_policy,
         "cache_policy": {
             "default_mode": default_cache_mode,
             "allowed_modes": sorted(CACHE_MODES),
@@ -541,7 +744,10 @@ def validate_experiment_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
     """Rebuild and compare a manifest so stale stored fingerprints fail closed."""
 
     payload = _require_mapping("manifest", manifest)
-    if payload.get("manifest_schema_version") != EXPERIMENT_MANIFEST_SCHEMA_VERSION:
+    if (
+        type(payload.get("manifest_schema_version")) is not int
+        or payload.get("manifest_schema_version") != EXPERIMENT_MANIFEST_SCHEMA_VERSION
+    ):
         raise ExperimentContractError("unsupported experiment manifest schema version")
     cache_policy = _require_mapping(
         "manifest.cache_policy", payload.get("cache_policy")

@@ -1,0 +1,2 @@
+{"id":"synthetic_offline_amber_token","type":"synthetic_lookup","question":"在完全虚构的《星河数据测试规则》中，琥珀令牌应存放在哪里？","expected_law":"星河数据测试规则（虚构）","expected_articles":["第二条"],"keywords":["琥珀令牌","虚构测试沙盒"],"expected_behavior":"evidence_answer","schema_version":1}
+{"id":"synthetic_offline_real_law_refusal","type":"refusal","question":"请根据这个合成夹具回答真实婚姻法律问题。","expected_law":"","expected_articles":[],"keywords":["合成夹具","真实法律"],"expected_behavior":"out_of_scope","schema_version":1}
