@@ -36,3 +36,4 @@ llm_agent_interview_reference.md
 /Chinese-Laws/.git/
 /Chinese-Laws/Chinese-Laws.zip
 *.egg-info/
+/build/

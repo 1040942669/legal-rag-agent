@@ -20,6 +20,14 @@ dependencies = [
 [project.scripts]
 legal-rag = "legal_rag.cli:main"
 
+[project.optional-dependencies]
+database = [
+    "alembic>=1.15,<2",
+    "pgvector>=0.4,<1",
+    "psycopg[binary]>=3.2,<4",
+    "sqlalchemy>=2.0,<3",
+]
+
 [tool.uv]
 package = true
 
@@ -35,3 +43,6 @@ dev = [
 [tool.setuptools.packages.find]
 include = ["legal_rag*"]
 exclude = ["configs*", "reports*", "artifacts*", "eval_cases*", "tests*"]
+
+[tool.setuptools.package-data]
+"legal_rag.storage.alembic" = ["script.py.mako"]
