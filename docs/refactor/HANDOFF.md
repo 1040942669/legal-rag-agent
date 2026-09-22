@@ -12,7 +12,7 @@
 - Tag / Release：`v0.2.0` / [GitHub Release](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.2.0)，发布时间 `2026-09-19T18:59:07Z`；非 draft、非 prerelease、无附件。
 - M1 回执分支为 `codex/m1-release-receipt`，从已发布的 `origin/master` 创建；软件 Tag 不包含也不需要包含后续回执提交。
 - M1 终态为 `released`；机器可读回执 [PR #6](https://github.com/1040942669/legal-rag-agent/pull/6) 已于 `2026-09-19T19:16:26Z` 普通合并，merge `fee92b4457dc68edc413608fb3a0d263af740922` 的 [master CI 35463832520](https://github.com/1040942669/legal-rag-agent/actions/runs/35463832520) 成功。Issue #4 和 Milestone 2 均已关闭。
-- M2 软件已发布，独立回执正在 `codex/m2-release-receipt` 落库；M3-M7 尚未开始。每个阶段仍独立测试、PR、合并、Tag、Release 和回执。
+- M2 软件已发布，独立回执正在 [PR #10](https://github.com/1040942669/legal-rag-agent/pull/10) 落库；初始回执 head `f087f8e5fc07f77ed1e318b3c666bae9373dae92` 的 [CI 35688433212](https://github.com/1040942669/legal-rag-agent/actions/runs/35688433212) 已成功。M3-M7 尚未开始。
 
 ## M2 启动边界
 
@@ -140,7 +140,7 @@
 | M1 package | `0.2.0` verified build + Python 3.12.13 isolated install/import passed；hash 见上文 |
 | M1 PR / master CI | [run 35462691374](https://github.com/1040942669/legal-rag-agent/actions/runs/35462691374) / [run 35462786212](https://github.com/1040942669/legal-rag-agent/actions/runs/35462786212) / success |
 | M1 Issue / Milestone | [#4](https://github.com/1040942669/legal-rag-agent/issues/4) / [Milestone 2](https://github.com/1040942669/legal-rag-agent/milestone/2) |
-| M2 receipt | `docs/refactor/receipts/M2.json` 已生成于 `codex/m2-release-receipt`；receipt PR 尚待创建/合并 |
+| M2 receipt | [PR #10](https://github.com/1040942669/legal-rag-agent/pull/10)；初始 head `f087f8e...` / [CI 35688433212](https://github.com/1040942669/legal-rag-agent/actions/runs/35688433212) success；待最终 head CI 与合并 |
 | 阻塞 | 无软件阻塞；只剩文档回执正常流程 |
 | 下一条可执行动作 | 推送并合并 M2 回执 PR，核验其 master CI，再用最终文档 PR 记录 merge 事实并关闭 Issue #8 / Milestone 3；不得开始 M3 |
 
