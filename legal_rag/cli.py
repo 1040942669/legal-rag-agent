@@ -50,7 +50,8 @@ def main(argv: list[str] | None = None) -> int:
     if not hasattr(args, "handler"):
         parser.print_help()
         return 1
-    load_dotenv()
+    if getattr(args, "load_dotenv", True):
+        load_dotenv()
     try:
         return args.handler(args)
     except Exception as exc:
@@ -66,6 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--config", default="configs/default.yaml", help="Path to config YAML."
     )
+    parser.set_defaults(load_dotenv=True)
     subparsers = parser.add_subparsers(dest="command")
 
     profile = subparsers.add_parser(
@@ -267,7 +269,194 @@ def build_parser() -> argparse.ArgumentParser:
     matrix.add_argument("--fail-fast", action="store_true")
     matrix.set_defaults(handler=handle_experiment_matrix)
 
+    experiment = subparsers.add_parser(
+        "experiment",
+        help="Plan, run, resume, aggregate, or exactly replay an M2 experiment.",
+    )
+    experiment.set_defaults(load_dotenv=False)
+    experiment_commands = experiment.add_subparsers(
+        dest="experiment_command",
+        required=True,
+    )
+
+    plan = experiment_commands.add_parser(
+        "plan",
+        help="Validate and print a manifest without creating an experiment.",
+    )
+    _add_experiment_plan_arguments(plan)
+    plan.set_defaults(handler=handle_experiment_plan, load_dotenv=False)
+
+    run = experiment_commands.add_parser(
+        "run",
+        help="Create and execute a new provider-free experiment.",
+    )
+    _add_experiment_plan_arguments(run, run_command=True)
+    run.add_argument("--stop-after-completed", type=int, default=None)
+    run.set_defaults(handler=handle_experiment_run, load_dotenv=False)
+
+    resume = experiment_commands.add_parser(
+        "resume",
+        help="Resume a compatible existing experiment without re-running completed cases.",
+    )
+    _add_experiment_storage_arguments(resume, include_cache=True, include_corpus=True)
+    resume.add_argument("--experiment-id", required=True)
+    resume.add_argument(
+        "--cache-mode",
+        choices=["fresh", "cache", "replay"],
+        default="cache",
+    )
+    resume.add_argument("--stop-after-completed", type=int, default=None)
+    resume.set_defaults(handler=handle_experiment_resume, load_dotenv=False)
+
+    aggregate = experiment_commands.add_parser(
+        "aggregate",
+        help="Publish deterministic reports from persisted artifacts only.",
+    )
+    _add_experiment_storage_arguments(aggregate)
+    aggregate.add_argument("--experiment-id", required=True)
+    aggregate.set_defaults(handler=handle_experiment_aggregate, load_dotenv=False)
+
+    replay = experiment_commands.add_parser(
+        "replay",
+        help="Create a new experiment using exact cached stage artifacts only.",
+    )
+    _add_experiment_storage_arguments(replay, include_cache=True, include_corpus=True)
+    replay.add_argument("--source-experiment-id", required=True)
+    replay.add_argument("--experiment-id", required=True)
+    replay.set_defaults(handler=handle_experiment_replay, load_dotenv=False)
+
     return parser
+
+
+def _add_experiment_storage_arguments(
+    parser: argparse.ArgumentParser,
+    *,
+    include_cache: bool = False,
+    include_corpus: bool = False,
+) -> None:
+    parser.add_argument("--repository-root", default=None)
+    parser.add_argument("--experiment-root", default=None)
+    parser.add_argument("--registry", default=None)
+    if include_cache:
+        parser.add_argument("--cache-root", default=None)
+    if include_corpus:
+        parser.add_argument("--corpus", default=None)
+
+
+def _add_experiment_plan_arguments(
+    parser: argparse.ArgumentParser,
+    *,
+    run_command: bool = False,
+) -> None:
+    _add_experiment_storage_arguments(
+        parser,
+        include_cache=run_command,
+        include_corpus=True,
+    )
+    parser.add_argument("--experiment-id", required=True)
+    parser.add_argument(
+        "--mode",
+        choices=["offline", "retrieval", "smoke-generation", "full-regression"],
+        default="offline",
+    )
+    parser.add_argument("--dataset-id", default=None)
+    parser.add_argument(
+        "--cache-mode",
+        choices=(["fresh", "cache"] if run_command else ["fresh", "cache", "replay"]),
+        default="fresh",
+    )
+    parser.add_argument("--top-k", type=int, default=3)
+    parser.add_argument("--concurrency", type=int, default=1)
+    parser.add_argument("--max-retries", type=int, default=0)
+    parser.add_argument("--random-seed", type=int, default=42)
+    if not run_command:
+        parser.add_argument("--judge", action="store_true")
+
+
+def _experiment_plan_kwargs(args: argparse.Namespace) -> dict[str, Any]:
+    return {
+        "experiment_id": args.experiment_id,
+        "mode": args.mode,
+        "dataset_id": args.dataset_id,
+        "cache_mode": args.cache_mode,
+        "repository_root": args.repository_root,
+        "registry_path": args.registry,
+        "corpus_path": args.corpus,
+        "top_k": args.top_k,
+        "concurrency": args.concurrency,
+        "max_retries": args.max_retries,
+        "random_seed": args.random_seed,
+    }
+
+
+def handle_experiment_plan(args: argparse.Namespace) -> int:
+    from .experiment_lifecycle import build_lifecycle_plan, plan_json
+
+    plan = build_lifecycle_plan(
+        **_experiment_plan_kwargs(args),
+        judge_enabled=args.judge,
+        allow_external_calls=False,
+    )
+    print(plan_json(plan))
+    return 0
+
+
+def handle_experiment_run(args: argparse.Namespace) -> int:
+    from .experiment_lifecycle import execution_json, run_experiment
+
+    execution = run_experiment(
+        **_experiment_plan_kwargs(args),
+        experiment_root=args.experiment_root,
+        cache_root=args.cache_root,
+        stop_after_completed=args.stop_after_completed,
+    )
+    print(execution_json(execution))
+    return 0 if execution.summary.status == "succeeded" else 3
+
+
+def handle_experiment_resume(args: argparse.Namespace) -> int:
+    from .experiment_lifecycle import execution_json, resume_experiment
+
+    execution = resume_experiment(
+        experiment_id=args.experiment_id,
+        cache_mode=args.cache_mode,
+        repository_root=args.repository_root,
+        experiment_root=args.experiment_root,
+        cache_root=args.cache_root,
+        registry_path=args.registry,
+        corpus_path=args.corpus,
+        stop_after_completed=args.stop_after_completed,
+    )
+    print(execution_json(execution))
+    return 0 if execution.summary.status == "succeeded" else 3
+
+
+def handle_experiment_aggregate(args: argparse.Namespace) -> int:
+    from .experiment_lifecycle import aggregate_experiment_by_id, publication_json
+
+    publication = aggregate_experiment_by_id(
+        experiment_id=args.experiment_id,
+        repository_root=args.repository_root,
+        experiment_root=args.experiment_root,
+    )
+    print(publication_json(publication))
+    return 0
+
+
+def handle_experiment_replay(args: argparse.Namespace) -> int:
+    from .experiment_lifecycle import execution_json, replay_experiment
+
+    execution = replay_experiment(
+        source_experiment_id=args.source_experiment_id,
+        experiment_id=args.experiment_id,
+        repository_root=args.repository_root,
+        experiment_root=args.experiment_root,
+        cache_root=args.cache_root,
+        registry_path=args.registry,
+        corpus_path=args.corpus,
+    )
+    print(execution_json(execution))
+    return 0
 
 
 def handle_profile_data(args: argparse.Namespace) -> int:

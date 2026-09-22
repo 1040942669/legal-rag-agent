@@ -58,6 +58,9 @@ from .experiment_runner import (
 )
 from .experiment_runtime import (
     EXTERNAL_CALL_KINDS,
+    CacheConflictError,
+    CacheCorruptionError,
+    CacheMissError,
     ExactStageCache,
     ExperimentContractError,
     StageExecution,
@@ -987,11 +990,12 @@ class CaseRuntime:
             error_code: str,
             *,
             downstream_reason: str,
+            origin: str = "fresh",
         ) -> dict[str, StageObservation]:
             failed = dict(observations)
             failed[observation_stage] = StageObservation(
                 status="error",
-                origin="fresh",
+                origin=origin,
                 duration_ms=round((time.perf_counter() - started) * 1000, 3),
                 cache_key=cache_key,
                 source_external_calls={},
@@ -1031,6 +1035,36 @@ class CaseRuntime:
                 stage_observations=failed_stage_observations(
                     persisted_code,
                     downstream_reason="upstream_provider_failure",
+                ),
+            ) from error
+        except CacheMissError as error:
+            raise CaseExecutionError(
+                "replay_cache_miss",
+                retryable=False,
+                stage_observations=failed_stage_observations(
+                    "replay_cache_miss",
+                    downstream_reason="upstream_replay_cache_miss",
+                    origin="replay",
+                ),
+            ) from error
+        except CacheCorruptionError as error:
+            raise CaseExecutionError(
+                "cache_corruption",
+                retryable=False,
+                stage_observations=failed_stage_observations(
+                    "cache_corruption",
+                    downstream_reason="upstream_cache_corruption",
+                    origin=self.cache_mode,
+                ),
+            ) from error
+        except CacheConflictError as error:
+            raise CaseExecutionError(
+                "cache_conflict",
+                retryable=False,
+                stage_observations=failed_stage_observations(
+                    "cache_conflict",
+                    downstream_reason="upstream_cache_conflict",
+                    origin=self.cache_mode,
                 ),
             ) from error
         artifact = _artifact_from_envelope(execution.payload, artifact_kind)

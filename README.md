@@ -249,6 +249,38 @@ uv run python -m legal_rag.cli evaluate `
 
 首次运行 `bge_v2_m3` 需要下载/加载约 2.29 GB 模型。它目前是实验能力，不是默认链路；只有完整 A/B 同时提升质量且 P95 可接受时才会晋升为默认。
 
+### M2 实验生命周期（开发中）
+
+草稿 PR #9 已提供 `plan / run / resume / aggregate / replay` 五个显式入口。当前可执行后端是 provider-free BM25；`offline` 使用 2 条完全虚构的合成 case，`retrieval` 必须显式给出本地语料路径。`smoke-generation` 与 `full-regression` 可以生成计划，但在没有预算闸门和显式 provider 配置时会失败关闭，不会读取 `.env` 或尝试模型请求。
+
+这些命令要求在 Git 源码工作区运行，因为 manifest 会记录真实 HEAD、dirty 状态、未跟踪文件摘要和分阶段实现指纹。默认原始工件、精确阶段缓存和聚合报告均写入被 Git 忽略的 `artifacts/experiments/`。
+
+```powershell
+# 只校验并打印 manifest，不创建实验目录
+uv run python -m legal_rag.cli experiment plan `
+  --experiment-id offline-demo `
+  --mode offline
+
+# 新建并执行；已有同名实验会被拒绝，必须显式 resume
+uv run python -m legal_rag.cli experiment run `
+  --experiment-id offline-demo `
+  --mode offline
+
+uv run python -m legal_rag.cli experiment resume `
+  --experiment-id offline-demo
+
+# 只读取持久工件，发布内容寻址的 JSON、JSONL、CSV 和 Markdown
+uv run python -m legal_rag.cli experiment aggregate `
+  --experiment-id offline-demo
+
+# 创建新的 experiment_id，只允许精确缓存命中，任何 miss 都失败关闭
+uv run python -m legal_rag.cli experiment replay `
+  --source-experiment-id offline-demo `
+  --experiment-id offline-demo-replay
+```
+
+回放不会退化为 fresh，也不会复用源实验目录。新实验的 attempt 会保留 `replay` 来源、原始 source call provenance、实际外部调用 0 和独立计时；聚合器不会调用 retriever、assistant 或 provider，也不会把损坏 case 补成成功。
+
 ## 测试与复现边界
 
 ```powershell
@@ -292,7 +324,7 @@ ARCHITECTURE_DECISION_LOG.md       关键架构决策和反例
 
 截至 2026-09-18，旧 Phase 0-4B 路线实现了可复现 baseline、检索诊断与 trace、受控查询理解、最多一轮补检索、规则 verifier、v3 评测集、reranker adapter、embedding cache v2 和自动实验矩阵。旧 Phase 编号与当前 M0-M7 里程碑不一一对应；旧路线的 reranker/cache A/B 仍是未完成的实验项，不代表当前发布主线的下一步。
 
-当前 M0-M7 主线以 [MASTER_PLAN](docs/refactor/MASTER_PLAN.md)、[STATE](docs/refactor/STATE.json) 和 [HANDOFF](docs/refactor/HANDOFF.md) 为权威来源。M0 已于 2026-09-19 作为 [v0.1.1](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.1.1) 发布并远端核验；M1 已于 2026-09-20 作为 [v0.2.0](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.2.0) 发布并远端核验，发布回执已通过独立文档 [PR #6](https://github.com/1040942669/legal-rag-agent/pull/6) 落库。M2 正在 [草稿 PR #9](https://github.com/1040942669/legal-rag-agent/pull/9) 中分子任务实现，目前已完成实验身份与精确缓存、不可变逐 case artifact，以及通用断点续跑/并发 runner 基础；真实评测适配器、聚合/CLI、M2 累积门禁和 `v0.3.0` 发布尚未完成。M3-M7 尚未开始。
+当前 M0-M7 主线以 [MASTER_PLAN](docs/refactor/MASTER_PLAN.md)、[STATE](docs/refactor/STATE.json) 和 [HANDOFF](docs/refactor/HANDOFF.md) 为权威来源。M0 已于 2026-09-19 作为 [v0.1.1](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.1.1) 发布并远端核验；M1 已于 2026-09-20 作为 [v0.2.0](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.2.0) 发布并远端核验，发布回执已通过独立文档 [PR #6](https://github.com/1040942669/legal-rag-agent/pull/6) 落库。M2 正在 [草稿 PR #9](https://github.com/1040942669/legal-rag-agent/pull/9) 中分子任务实现，目前已完成实验身份与精确缓存、不可变逐 case artifact、真实评测适配、provider 错误分类、数据集注册、只读聚合，以及 provider-free 的生命周期 CLI；M2 累积门禁、候选冻结和 `v0.3.0` 发布仍未完成。M3-M7 尚未开始。
 
 ## 文档导航
 
