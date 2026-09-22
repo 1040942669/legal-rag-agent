@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -862,6 +863,88 @@ class ExperimentStore:
             return ()
         attempts = self._validated_case_attempts(case)
         return tuple(self._attempt_path(case, attempt) for attempt in sorted(attempts))
+
+    def case_artifact_evidence(self, case_id: str) -> dict[str, Any]:
+        """Return content identities for every physical artifact in one case directory.
+
+        Unlike :meth:`load_attempts`, this read-only view remains available when a
+        regular artifact file is malformed.  It never follows reparse points and
+        never publishes file contents; callers receive only names, byte sizes, and
+        SHA-256 digests.  Aggregation uses the result to ensure corrupt bytes,
+        session checkpoints, and completion proofs participate in content identity.
+        """
+
+        case = self._case(case_id)
+        case_directory = self._case_directory(case)
+        relative_directory = case_directory.relative_to(self.directory).as_posix()
+        existing_directory = self._validate_existing_case_directory(case)
+        if existing_directory is None:
+            return {
+                "artifact_evidence_schema_version": 1,
+                "case_path": relative_directory,
+                "entries": [],
+                "physical_attempt_file_count": 0,
+                "completion_artifact_sha256": None,
+            }
+
+        entries: list[dict[str, Any]] = []
+        physical_attempt_file_count = 0
+        completion_artifact_sha256: str | None = None
+        for path in sorted(existing_directory.iterdir(), key=lambda item: item.name):
+            if _TEMP_FILE.fullmatch(path.name):
+                continue
+            relative_path = path.relative_to(self.directory).as_posix()
+            is_attempt_file = _ATTEMPT_FILE.fullmatch(path.name) is not None
+            if is_attempt_file:
+                physical_attempt_file_count += 1
+            if (
+                _is_reparse_point(path)
+                or not path.is_file()
+                or not path.resolve().is_relative_to(self.directory.resolve())
+            ):
+                entries.append(
+                    {
+                        "name": path.name,
+                        "path": relative_path,
+                        "kind": "unsafe",
+                        "size_bytes": None,
+                        "sha256": None,
+                    }
+                )
+                continue
+            try:
+                digest_builder = hashlib.sha256()
+                size_bytes = 0
+                with path.open("rb") as artifact_file:
+                    while chunk := artifact_file.read(1024 * 1024):
+                        digest_builder.update(chunk)
+                        size_bytes += len(chunk)
+            except OSError as exc:
+                raise ArtifactCorruptionError(
+                    "artifact_evidence_read_failed",
+                    path,
+                    f"case artifact evidence could not be read: {path}",
+                ) from exc
+            digest = digest_builder.hexdigest()
+            entries.append(
+                {
+                    "name": path.name,
+                    "path": relative_path,
+                    "kind": "regular_file",
+                    "size_bytes": size_bytes,
+                    "sha256": digest,
+                }
+            )
+            if path.name == "complete.json":
+                completion_artifact_sha256 = digest
+
+        return {
+            "artifact_evidence_schema_version": 1,
+            "case_path": relative_directory,
+            "entries": entries,
+            "physical_attempt_file_count": physical_attempt_file_count,
+            "completion_artifact_sha256": completion_artifact_sha256,
+        }
 
     def load_attempts(self, case_id: str) -> tuple[dict[str, Any], ...]:
         """Return validated attempt payloads in immutable history order."""
