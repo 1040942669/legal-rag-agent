@@ -5,16 +5,16 @@
   "repository": {
     "full_name": "1040942669/legal-rag-agent",
     "observed_default_branch": "master",
-    "observed_baseline_commit": "00ec3ad5b193a7442e427486e8bfade2dbabd482",
+    "observed_baseline_commit": "6cd07d982ffeecec3632ff47c8473118585a9693",
     "observed_on": "2026-09-22",
-    "workspace_head": "6decc0f2e675300f1a175f7ab49c85852d35b38d",
-    "workspace_head_note": "Verified M2 receipt merge. This STATE update is a later documentation-only finalization commit and does not move the v0.3.0 tag; read the finalization branch for its exact tip.",
-    "workspace_branch": "codex/m2-release-finalize",
+    "workspace_head": "68f89ed0cd1393d8acda7570a83bb0714f57a868",
+    "workspace_head_note": "M3 module A implementation commit. The later documentation commit records this tested implementation and does not mean M3 or v0.4.0 has been released.",
+    "workspace_branch": "codex/m3-storage-snapshots",
     "workspace_dirty": false,
     "remote_tags_checked": true
   },
-  "execution_status": "released",
-  "active_milestone": "M2",
+  "execution_status": "in_progress",
+  "active_milestone": "M3",
   "last_verified_release": {
     "milestone_id": "M2",
     "version": "v0.3.0",
@@ -246,7 +246,7 @@
         "ci_scope": "cumulative M2 gate passed on exact final PR head and release-target master push",
         "live_model_calls": 0,
         "remaining_release_steps": [],
-        "completion_note": "Software PR, release-target CI, annotated tag, GitHub Release, receipt PR, receipt merge CI, Issue #8 and Milestone 3 are complete. M3 remains not_started."
+        "completion_note": "Software PR, release-target CI, annotated tag, GitHub Release, receipt PR, receipt merge CI, Issue #8 and Milestone 3 are complete. M3 has since started; this does not alter the released M2 objects."
       },
       "blockers": []
     },
@@ -255,22 +255,52 @@
       "name": "数据库与语料版本",
       "planned_version": "v0.4.0",
       "required": true,
-      "status": "not_started",
-      "branch": null,
-      "issue_url": null,
-      "milestone_url": null,
-      "pr_url": null,
+      "status": "in_progress",
+      "branch": "codex/m3-storage-snapshots",
+      "issue_url": "https://github.com/1040942669/legal-rag-agent/issues/12",
+      "milestone_url": "https://github.com/1040942669/legal-rag-agent/milestone/4",
+      "pr_url": "https://github.com/1040942669/legal-rag-agent/pull/13",
       "candidate_sha": null,
       "release_target_sha": null,
       "tag": null,
       "release_url": null,
       "remote_release_verified": false,
       "tests": {
-        "status": "not_run",
-        "passed": null,
-        "failed": null,
-        "skipped": null,
-        "report_path": null
+        "status": "module_a_passed",
+        "passed": 21,
+        "failed": 0,
+        "skipped": 0,
+        "full_regression_passed": 560,
+        "full_regression_subtests_passed": 157,
+        "ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/35697224230",
+        "ci_sha": "68f89ed0cd1393d8acda7570a83bb0714f57a868",
+        "ci_status": "passed_on_module_a_implementation_head",
+        "report_path": "reports/refactor/M3.md"
+      },
+      "interim_progress": {
+        "latest_implementation_sha": "68f89ed0cd1393d8acda7570a83bb0714f57a868",
+        "completed_subtasks": [
+          "A1: versioned corpus, law version, article, chunk, embedding profile, import receipt, index build and active pointer schema",
+          "A2: canonical import bundle validation and content/profile hashes",
+          "A3: transactional idempotent PostgreSQL/pgvector importer with rollback and no-overwrite conflicts",
+          "A4: packaged Alembic migration resources and pinned PostgreSQL 18 plus pgvector 0.8.6 CI integration job"
+        ],
+        "targeted_tests_passed": 21,
+        "targeted_unit_tests_passed": 12,
+        "targeted_integration_tests_passed": 9,
+        "local_pgvector_version": "0.8.1",
+        "ci_pgvector_version": "0.8.6",
+        "full_regression_passed": 560,
+        "full_regression_subtests_passed": 157,
+        "ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/35697224230",
+        "ci_status": "passed",
+        "live_model_calls": 0,
+        "remaining_release_steps": [
+          "M3-B exact pgvector retrieval equivalence and scope filters",
+          "M3-C exact article/version lookup and atomic snapshot activation/rollback",
+          "M3-D optional ANN underfill behavior, migration/restart coverage, cumulative gate and release"
+        ],
+        "completion_note": "Only M3 module A is accepted. M3, v0.4.0, its tag and GitHub Release are not complete or published."
       },
       "blockers": []
     },
@@ -371,5 +401,5 @@
       "blockers": []
     }
   ],
-  "next_action": "Stop after M2. Do not start M3 until the user explicitly authorizes the next milestone."
+  "next_action": "Continue M3 on PR #13 with module B: exact pgvector retrieval equivalence and mandatory scope filters. Do not mark M3 released or create v0.4.0 until M3-T01 through M3-T08 and the cumulative release gate pass."
 }

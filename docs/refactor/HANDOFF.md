@@ -2,6 +2,10 @@
 
 ## 当前真实状态
 
+- M3 已按用户授权启动，当前状态是 `in_progress`，不是 `released`。工作分支为 `codex/m3-storage-snapshots`，基线为 `6cd07d982ffeecec3632ff47c8473118585a9693`，模块 A 实现提交为 `68f89ed0cd1393d8acda7570a83bb0714f57a868`。
+- M3 跟踪对象为 [Issue #12](https://github.com/1040942669/legal-rag-agent/issues/12)、[Milestone 4](https://github.com/1040942669/legal-rag-agent/milestone/4) 和 draft [PR #13](https://github.com/1040942669/legal-rag-agent/pull/13)。模块 A 已推送，未合并，也没有创建 `v0.4.0` Tag 或 GitHub Release。
+- 模块 A 已建立版本化语料/法条/分块/embedding schema、事务导入、不可变导入回执、Alembic 迁移与数据库 CI。定向测试为 12 项单元测试和 9 项真实 PostgreSQL 集成测试；本地 PostgreSQL 18.1 + pgvector 0.8.1 全通过，完整回归为 `560 passed, 157 subtests passed`。
+- 实现 head `68f89ed...` 的 [CI 35697224230](https://github.com/1040942669/legal-rag-agent/actions/runs/35697224230) 已成功：离线 Python 3.12.13 job 与锁定 PostgreSQL 18 + pgvector 0.8.6 integration job 均通过。M3 仍需完成 exact 检索/过滤、法条版本查询、快照原子激活/回滚、ANN 边界、升级/重启与累计发布门禁。
 - M2 软件与文档状态均为 `released`。最终 PR head 为 `170da868831e2730ea15d56ed88ad24b1159e67b`；[PR #9](https://github.com/1040942669/legal-rag-agent/pull/9) 于 `2026-09-22T04:32:15Z` 普通合并，release target 为 `da7023a659672121fd772364e475870a0167e1be`。
 - M2 的 [Issue #8](https://github.com/1040942669/legal-rag-agent/issues/8) 于 `2026-09-22T05:04:04Z` 关闭，[Milestone 3](https://github.com/1040942669/legal-rag-agent/milestone/3) 于 `2026-09-22T05:04:05Z` 关闭。annotated `v0.3.0` 已发布并远端核验：[GitHub Release](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.3.0)，发布时间 `2026-09-22T04:36:35Z`，非 draft、非 prerelease、附件 0。
 - tag object `191bbf7dd26bf4010731309aa7d8bdfc40d9a50b` peeled 到 `da7023a659672121fd772364e475870a0167e1be`，与远端 `master` 和 Release target 一致。软件 Tag 不会为后续回执移动。
@@ -12,14 +16,29 @@
 - Tag / Release：`v0.2.0` / [GitHub Release](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.2.0)，发布时间 `2026-09-19T18:59:07Z`；非 draft、非 prerelease、无附件。
 - M1 回执分支为 `codex/m1-release-receipt`，从已发布的 `origin/master` 创建；软件 Tag 不包含也不需要包含后续回执提交。
 - M1 终态为 `released`；机器可读回执 [PR #6](https://github.com/1040942669/legal-rag-agent/pull/6) 已于 `2026-09-19T19:16:26Z` 普通合并，merge `fee92b4457dc68edc413608fb3a0d263af740922` 的 [master CI 35463832520](https://github.com/1040942669/legal-rag-agent/actions/runs/35463832520) 成功。Issue #4 和 Milestone 2 均已关闭。
-- M2 独立回执 [PR #10](https://github.com/1040942669/legal-rag-agent/pull/10) 已普通合并：最终 head `4ba8282a7ed6eba61a31f2cf2fcd88c7a5811dfc`，merge `6decc0f2e675300f1a175f7ab49c85852d35b38d`；最终 PR CI 与 merge 后 [master CI 35689024928](https://github.com/1040942669/legal-rag-agent/actions/runs/35689024928) 均成功。M3-M7 尚未开始。
+- M2 独立回执 [PR #10](https://github.com/1040942669/legal-rag-agent/pull/10) 已普通合并：最终 head `4ba8282a7ed6eba61a31f2cf2fcd88c7a5811dfc`，merge `6decc0f2e675300f1a175f7ab49c85852d35b38d`；最终 PR CI 与 merge 后 [master CI 35689024928](https://github.com/1040942669/legal-rag-agent/actions/runs/35689024928) 均成功。M3 已启动，M4-M7 尚未开始。
+
+## M3 启动边界
+
+- 计划版本：`v0.4.0`；只实现 PostgreSQL/pgvector 持久化、版本化语料快照、精确检索等价、全路径范围过滤、法条版本查询、原子激活/回滚、受控 ANN 和 M3-T01 至 M3-T08。
+- 原离线 CLI 路径继续可用；只有显式选择数据库 profile 才要求数据库。正确性顺序是：先导入同一批已缓存 float32 向量，再证明 exact 等价和过滤闭包，最后才把 ANN 作为可关闭优化。
+- 模块 A 只提供 schema、迁移、导入和一致性基础，不能被解释为 M3 整体完成、检索质量提升、生产数据库部署或 `v0.4.0` 候选冻结。
+- 默认仍禁止真实模型和付费调用；测试使用合成数据与已有缓存向量契约，不读取或上传私密 `.env`、完整私人语料或本地产物。
+
+## M3 当前进展与下一步
+
+- 数据模型覆盖 corpus snapshot、law/version/article、chunk 与多对多 article 映射、embedding profile、chunk embedding、导入回执、index build 和按 scope 的 active snapshot pointer；跨表约束确保 active pointer 不能指向错误租户/集合范围。
+- 导入 bundle 先做 canonical 校验：ID、顺序闭包、维度、float32、有限数、关系引用、content hash、profile-sensitive bundle hash 均显式验证。重复导入必须完全匹配才幂等；冲突数据拒绝覆盖。
+- importer 在单一事务和 PostgreSQL advisory lock 内运行；任一后段写入失败会整体回滚。集成测试覆盖首次导入、重复导入、并发导入、实际向量回读、维度 trigger、冲突和失败回滚。
+- Alembic 环境与 revision 作为 wheel package data 打包；CI 从 fresh database 升级到 head，运行 9 项集成测试并检查 wheel 中迁移资源。CI 镜像以 digest 锁定 pgvector 0.8.6；本地证据为 pgvector 0.8.1，两者不能混写。
+- 下一步是 M3-B：实现 pgvector exact 检索与现有 dense 基线的等价适配，统一 score 方向、稳定并列排序、scope/filter fail-closed，并覆盖 M3-T02/M3-T04 的核心路径。完成并推送后再进入法条查询、激活/回滚和 ANN，不提前发布。
 
 ## M2 启动边界
 
 - 只实现实验分层、精确复用、回放、逐 case 原子结果、断点续评、并发 fake 隔离、分层计时与 `M2-T01` 至 `M2-T08`。
 - 复用 v3 120 条评测集与固定 30 条生成子集；它们标记为 `legacy_regression`，不冒充新的盲测集。
 - 默认离线、并发 1、真实模型调用关闭；dense query embedding 或 adaptive normalizer 是否产生外部调用必须由 manifest 与调用账本显式记录，不能笼统写成 retrieval-only 永远零调用。
-- 本阶段不引入 PostgreSQL/pgvector、FastAPI、LangGraph、Redis/Celery、UI 或生产部署；这些仍属于 M3-M7。
+- M2 阶段本身没有引入 PostgreSQL/pgvector、FastAPI、LangGraph、Redis/Celery、UI 或生产部署；PostgreSQL/pgvector 基础现已在后续 M3-A 引入，其他能力仍属于后续里程碑。
 - 发布前必须累计通过 M0、M1 和 M2 门禁；发布 `v0.3.0` 后另以文档回执记录真实远端状态，不移动软件 Tag。
 
 ## M2 当前进展与唯一下一步
@@ -34,7 +53,7 @@
 - 候选文件定向 Ruff、compileall、diff check 和门禁高置信凭证扫描通过。额外的全仓 Ruff 仍有本分支未修改的 `legal_rag/indexing.py` F841；它不是 M2 门禁或本次改动引入的问题，不在候选冻结中扩大为无关重构。
 - 已知边界仍包括：跨进程/分布式唯一所有权未提供；生命周期命令依赖 Git 源码工作区；直接执行只覆盖 provider-free BM25；真实 provider、完整法律语料和法律质量未运行。
 - 最终 PR head 的 [CI 35686885130](https://github.com/1040942669/legal-rag-agent/actions/runs/35686885130) 与 release target 的 [master CI 35687258856](https://github.com/1040942669/legal-rag-agent/actions/runs/35687258856) 均为 25/25、`548 passed, 157 subtests passed`、JUnit 705/0/0/0。两份 artifact digest 与 JSON hash 已写入 STATE、M2 报告和机器可读回执。
-- M2 唯一剩余动作是合并这份事后事实的最终文档收口；完成后停止。不得修改 `v0.3.0`，也不得自动开始 M3。
+- M2 已完全收口，不得修改 `v0.3.0`。当前执行焦点已经转到获授权的 M3；M2 的历史证据不随 M3 分支移动。
 
 ## M1 启动边界
 
@@ -92,8 +111,8 @@
 
 - 没有运行在线或本地生成模型、Embedding、reranker、LLM judge、真实法律语料实验或付费调用。
 - 没有读取/上传 `.env` 值、完整语料、Embedding cache、私人课程/简历/面试材料或大型产物。
-- 没有引入数据库、FastAPI、LangGraph、Redis/Celery，没有部署生产。
-- M1 软件、发布回执和 Milestone 收尾均已完成；没有重复发版或移动 Tag。M2 软件也已通过 PR #9 合并并发布为 `v0.3.0`，当前只剩独立回执与 Issue/Milestone 收尾。
+- 已在 M3 工作分支引入可选 PostgreSQL/pgvector 基础，但没有生产部署、完整语料迁移、FastAPI、LangGraph、Redis/Celery 或 M4 以后的能力。
+- M1、M2 软件、发布回执和 Milestone 收尾均已完成；没有重复发版或移动既有 Tag。M3 只有模块 A 通过，尚未合并或发布。
 - 本地门禁 JSON、下载的 CI JSON 与包构建物只保存在被忽略的本地 `.tmp`；它们没有进入 Git 或 Release 附件。GitHub Actions 产物按平台保留策略远端保存。
 - 没有把历史 203 部法律或模型质量数字冒充 M0 新实测。
 
@@ -123,7 +142,12 @@
 
 | 项目 | 当前值 |
 |---|---|
-| 当前里程碑 | M2 / `released`（软件、Release、回执、Issue 与 Milestone 均已核验收尾） |
+| 当前里程碑 | M3 / `in_progress`；仅模块 A 已验收，未发布 |
+| M3 branch / base | `codex/m3-storage-snapshots` / `6cd07d982ffeecec3632ff47c8473118585a9693` |
+| M3 Issue / Milestone / PR | [#12](https://github.com/1040942669/legal-rag-agent/issues/12) / [Milestone 4](https://github.com/1040942669/legal-rag-agent/milestone/4) / draft [PR #13](https://github.com/1040942669/legal-rag-agent/pull/13) |
+| M3-A implementation / CI | `68f89ed0cd1393d8acda7570a83bb0714f57a868` / [run 35697224230](https://github.com/1040942669/legal-rag-agent/actions/runs/35697224230) success |
+| M3-A 测试 | 12 unit + 9 PostgreSQL integration；完整回归 560 passed + 157 subtests；CI pgvector 0.8.6 与本地 pgvector 0.8.1 均通过 |
+| M3 Tag / Release | 未创建；`v0.4.0` 仍是计划版本 |
 | M2 branch / base | `codex/m2-experiment-lifecycle` / `00ec3ad5b193a7442e427486e8bfade2dbabd482` |
 | M2 Issue / Milestone | [#8](https://github.com/1040942669/legal-rag-agent/issues/8) / [Milestone 3](https://github.com/1040942669/legal-rag-agent/milestone/3) |
 | M2 PR / Tag / Release | [PR #9](https://github.com/1040942669/legal-rag-agent/pull/9) merged / `v0.3.0` / [published](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.3.0) |
@@ -142,8 +166,8 @@
 | M1 Issue / Milestone | [#4](https://github.com/1040942669/legal-rag-agent/issues/4) / [Milestone 2](https://github.com/1040942669/legal-rag-agent/milestone/2) |
 | M2 receipt | [PR #10](https://github.com/1040942669/legal-rag-agent/pull/10) merged；final `4ba8282...` / merge `6decc0f...` / final PR 与 master CI success |
 | 阻塞 | 无 |
-| 下一条可执行动作 | 本最终文档 PR 通过并合并后停止；M3 保持 `not_started`，等待用户明确授权 |
+| 下一条可执行动作 | 在 PR #13 继续 M3-B：exact pgvector 等价与所有检索路径的范围过滤；M3-T01 至 T08 全通过后才冻结/发布 |
 
 ## 完成说明
 
-`v0.3.0` 的 `release_target_sha` 固定为 `da7023a659672121fd772364e475870a0167e1be`。即使 `master` 已因回执 merge 前进到 `6decc0f2e675300f1a175f7ab49c85852d35b38d` 并将继续包含本收口文档，annotated Tag 仍 peeled 到软件 target；回执与收口 PR 都不属于新的软件版本。M2 已完成，M3 未启动。
+`v0.3.0` 的 `release_target_sha` 固定为 `da7023a659672121fd772364e475870a0167e1be`。即使 `master` 已因回执 merge 前进到 `6decc0f2e675300f1a175f7ab49c85852d35b38d`，annotated Tag 仍 peeled 到软件 target。M2 已完成；M3 正在 draft PR #13 中分模块推进，目前只有模块 A 获得测试与 CI 证据，尚未合并、打 Tag 或发布。
