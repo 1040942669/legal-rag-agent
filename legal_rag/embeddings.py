@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import time
 from dataclasses import dataclass
+from numbers import Real
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +14,12 @@ from .chunking import load_chunks
 from .env import load_dotenv, require_live_model_calls_allowed
 from .manifest import new_run_id, summarize_path, write_artifact_manifest
 from .models import Chunk
+from .provider_errors import (
+    ProviderCallError,
+    provider_call_error,
+    raise_sanitized_provider_error,
+    validate_timeout_seconds,
+)
 
 EMBEDDING_CACHE_SCHEMA_VERSION = 2
 
@@ -27,12 +35,41 @@ class EmbeddingModelConfig:
     api_base_url: str = ""
     api_key_env: str = ""
     dimensions: int | None = None
-    max_retries: int = 3
+    # Deprecated compatibility field. SDK-level retries are always normalized to
+    # zero so the outer experiment ledger owns every retry.
+    max_retries: int = 0
     query_prefix: str = ""
     document_prefix: str = ""
     # Prepend law names and article numbers to the chunk text before embedding.
     # LlamaIndex does this by default and it markedly improves legal retrieval.
     embed_with_metadata: bool = False
+    # Retained after the legacy max_retries field to preserve positional callers.
+    # Provider SDK retries are disabled; orchestration owns any explicit retry.
+    request_timeout: float = 120
+
+    def __post_init__(self) -> None:
+        if self.dimensions is not None and (
+            type(self.dimensions) is not int or self.dimensions <= 0
+        ):
+            raise ProviderCallError(
+                "configuration",
+                provider="siliconflow",
+                operation="embedding",
+                cause_type="InvalidDimensions",
+            )
+        if type(self.max_retries) is not int or self.max_retries != 0:
+            raise ProviderCallError(
+                "configuration",
+                provider="siliconflow",
+                operation="embedding",
+                cause_type="InvalidRetryConfiguration",
+            )
+        timeout = validate_timeout_seconds(
+            self.request_timeout,
+            provider="siliconflow",
+            operation="embedding",
+        )
+        object.__setattr__(self, "request_timeout", timeout)
 
 
 @dataclass(frozen=True)
@@ -88,7 +125,9 @@ class CacheHealthReport:
 
 
 class SentenceTransformerEncoder:
-    def __init__(self, model_config: EmbeddingModelConfig, *, device: str = "auto") -> None:
+    def __init__(
+        self, model_config: EmbeddingModelConfig, *, device: str = "auto"
+    ) -> None:
         require_live_model_calls_allowed("sentence-transformer embedding")
         try:
             from sentence_transformers import SentenceTransformer  # type: ignore
@@ -124,55 +163,169 @@ class SentenceTransformerEncoder:
 
 
 class SiliconFlowEmbeddingEncoder:
-    def __init__(self, model_config: EmbeddingModelConfig) -> None:
+    def __init__(
+        self,
+        model_config: EmbeddingModelConfig,
+        *,
+        client: Any | None = None,
+        expected_dimension: int | None = None,
+    ) -> None:
         require_live_model_calls_allowed("SiliconFlow embedding")
+        if expected_dimension is not None and (
+            type(expected_dimension) is not int or expected_dimension <= 0
+        ):
+            raise ProviderCallError(
+                "configuration",
+                provider="siliconflow",
+                operation="embedding",
+                cause_type="InvalidExpectedDimension",
+            )
+        if (
+            expected_dimension is not None
+            and model_config.dimensions is not None
+            and expected_dimension != model_config.dimensions
+        ):
+            raise ProviderCallError(
+                "configuration",
+                provider="siliconflow",
+                operation="embedding",
+                cause_type="DimensionContractMismatch",
+            )
+        self.model_config = model_config
+        self._observed_dimension: int | None = (
+            expected_dimension
+            if expected_dimension is not None
+            else model_config.dimensions
+        )
+        if client is not None:
+            self.client = client
+            return
         try:
             from openai import OpenAI  # type: ignore
         except ModuleNotFoundError as exc:
-            raise RuntimeError("SiliconFlow embedding requires openai. Run `uv sync` first.") from exc
+            error = ProviderCallError(
+                "configuration",
+                provider="siliconflow",
+                operation="embedding",
+                cause_type=type(exc).__name__,
+            )
+        else:
+            error = None
+        if error is not None:
+            raise_sanitized_provider_error(error)
 
         api_key_env = model_config.api_key_env or "SILICONFLOW_API_KEY"
         load_dotenv()
         api_key = os.environ.get(api_key_env)
         if not api_key:
-            raise RuntimeError(
-                f"Missing SiliconFlow API key. Set `{api_key_env}` in your environment or project .env file."
+            raise ProviderCallError(
+                "configuration",
+                provider="siliconflow",
+                operation="embedding",
+                cause_type="MissingApiKey",
             )
-        self.model_config = model_config
-        self.client = OpenAI(
-            api_key=api_key,
-            base_url=model_config.api_base_url or "https://api.siliconflow.cn/v1",
-            max_retries=model_config.max_retries,
-        )
+        try:
+            self.client = OpenAI(
+                api_key=api_key,
+                base_url=model_config.api_base_url or "https://api.siliconflow.cn/v1",
+                timeout=model_config.request_timeout,
+                max_retries=0,
+            )
+        except ProviderCallError as exc:
+            error = exc
+        except Exception as exc:
+            error = ProviderCallError(
+                "configuration",
+                provider="siliconflow",
+                operation="embedding",
+                cause_type=type(exc).__name__,
+            )
+        else:
+            error = None
+        if error is not None:
+            api_key = "<redacted>"
+            raise_sanitized_provider_error(error)
 
-    def encode_documents(self, texts: list[str], *, batch_size: int) -> list[list[float]]:
+    def encode_documents(
+        self, texts: list[str], *, batch_size: int
+    ) -> list[list[float]]:
         require_live_model_calls_allowed("SiliconFlow embedding")
         vectors: list[list[float]] = []
-        for start in range(0, len(texts), batch_size):
-            batch = texts[start : start + batch_size]
-            response = self._create_embeddings(
-                [self.model_config.document_prefix + text for text in batch]
-            )
-            vectors.extend([item.embedding for item in response.data])
-            print(f"Embedded {min(start + len(batch), len(texts))}/{len(texts)}", flush=True)
-        return vectors
+        try:
+            for start in range(0, len(texts), batch_size):
+                batch = texts[start : start + batch_size]
+                batch_vectors = self._create_embeddings(
+                    [self.model_config.document_prefix + text for text in batch]
+                )
+                vectors.extend(batch_vectors)
+                print(
+                    f"Embedded {min(start + len(batch), len(texts))}/{len(texts)}",
+                    flush=True,
+                )
+            return vectors
+        except ProviderCallError as exc:
+            error = exc
+        texts = []
+        batch = []
+        batch_vectors = []
+        vectors = []
+        raise_sanitized_provider_error(error)
 
     def encode_query(self, text: str) -> list[float]:
         require_live_model_calls_allowed("SiliconFlow embedding")
-        response = self._create_embeddings([self.model_config.query_prefix + text])
-        return list(response.data[0].embedding)
+        try:
+            return self._create_embeddings([self.model_config.query_prefix + text])[0]
+        except ProviderCallError as exc:
+            error = exc
+        text = "<redacted>"
+        raise_sanitized_provider_error(error)
 
-    def _create_embeddings(self, texts: list[str]):
+    def _create_embeddings(self, texts: list[str]) -> list[list[float]]:
         kwargs: dict[str, Any] = {
             "model": self.model_config.model_name,
             "input": texts,
         }
         if self.model_config.dimensions:
             kwargs["dimensions"] = self.model_config.dimensions
-        return self.client.embeddings.create(**kwargs)
+        try:
+            response = self.client.embeddings.create(**kwargs)
+        except ProviderCallError:
+            raise
+        except Exception as exc:
+            error = provider_call_error(
+                exc,
+                provider="siliconflow",
+                operation="embedding",
+            )
+        else:
+            error = None
+        if error is not None:
+            raise error from None
+        try:
+            vectors = _decode_embedding_response(
+                response,
+                expected_count=len(texts),
+                expected_dimension=self._observed_dimension,
+            )
+        except ProviderCallError:
+            raise
+        except Exception as exc:
+            error = ProviderCallError(
+                "invalid_response",
+                provider="siliconflow",
+                operation="embedding",
+                cause_type=type(exc).__name__,
+            )
+        else:
+            if vectors and self._observed_dimension is None:
+                self._observed_dimension = len(vectors[0])
+            return vectors
+        raise error from None
 
 
-def resolve_embedding_model(config: dict, embedding_key: str | None = None) -> EmbeddingModelConfig:
+def resolve_embedding_model(
+    config: dict, embedding_key: str | None = None
+) -> EmbeddingModelConfig:
     embedding_config = config.get("embedding", {})
     key = embedding_key or embedding_config.get("default") or "bge_large_zh"
     model_map = embedding_config.get("models", {})
@@ -190,11 +343,52 @@ def resolve_embedding_model(config: dict, embedding_key: str | None = None) -> E
         api_base_url=item.get("api_base_url", ""),
         api_key_env=item.get("api_key_env", ""),
         dimensions=item.get("dimensions"),
-        max_retries=int(item.get("max_retries", 3)),
+        max_retries=item.get("max_retries", 0),
         query_prefix=item.get("query_prefix", ""),
         document_prefix=item.get("document_prefix", ""),
         embed_with_metadata=bool(item.get("embed_with_metadata", False)),
+        request_timeout=item.get("request_timeout", 120),
     )
+
+
+def _decode_embedding_response(
+    response: Any,
+    *,
+    expected_count: int,
+    expected_dimension: int | None,
+) -> list[list[float]]:
+    data = getattr(response, "data", None)
+    if not isinstance(data, (list, tuple)) or len(data) != expected_count:
+        raise TypeError("embedding response count is invalid")
+    vectors_by_index: list[list[float] | None] = [None] * expected_count
+    actual_dimension: int | None = None
+    for item in data:
+        index = getattr(item, "index", None)
+        if type(index) is not int or not 0 <= index < expected_count:
+            raise TypeError("embedding response index is invalid")
+        if vectors_by_index[index] is not None:
+            raise ValueError("embedding response index is duplicated")
+        embedding = getattr(item, "embedding", None)
+        if not isinstance(embedding, (list, tuple)) or not embedding:
+            raise TypeError("embedding response vector is invalid")
+        vector: list[float] = []
+        for value in embedding:
+            if isinstance(value, bool) or not isinstance(value, Real):
+                raise TypeError("embedding response contains a non-number")
+            number = float(value)
+            if not math.isfinite(number):
+                raise ValueError("embedding response contains a non-finite number")
+            vector.append(number)
+        if actual_dimension is None:
+            actual_dimension = len(vector)
+        elif len(vector) != actual_dimension:
+            raise ValueError("embedding response dimensions are inconsistent")
+        if expected_dimension is not None and len(vector) != expected_dimension:
+            raise ValueError("embedding response dimension is invalid")
+        vectors_by_index[index] = vector
+    if any(vector is None for vector in vectors_by_index):
+        raise ValueError("embedding response index is missing")
+    return [vector for vector in vectors_by_index if vector is not None]
 
 
 def build_embedding_cache(
@@ -218,7 +412,9 @@ def build_embedding_cache(
     try:
         import numpy as np  # type: ignore
     except ModuleNotFoundError as exc:
-        raise RuntimeError("Embedding cache requires numpy. Run `uv sync` first.") from exc
+        raise RuntimeError(
+            "Embedding cache requires numpy. Run `uv sync` first."
+        ) from exc
 
     matrix = np.asarray(vectors, dtype="float32")
     cache_dir = embedding_cache_dir(output_root, chunk_strategy, model_config.key)
@@ -227,11 +423,15 @@ def build_embedding_cache(
     chunk_ids_path = cache_dir / "chunk_ids.json"
     metadata_path = cache_dir / "metadata.json"
     manifest_path = cache_dir / "manifest.json"
-    artifact_run_id = run_id or new_run_id(f"embeddings_{chunk_strategy}_{model_config.key}")
+    artifact_run_id = run_id or new_run_id(
+        f"embeddings_{chunk_strategy}_{model_config.key}"
+    )
 
     np.save(vectors_path, matrix)
     chunk_ids = [chunk.chunk_id for chunk in chunks]
-    chunk_ids_path.write_text(json.dumps(chunk_ids, ensure_ascii=False, indent=2), encoding="utf-8")
+    chunk_ids_path.write_text(
+        json.dumps(chunk_ids, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     metadata = {
         "schema_version": EMBEDDING_CACHE_SCHEMA_VERSION,
         "run_id": artifact_run_id,
@@ -255,10 +455,14 @@ def build_embedding_cache(
         "query_prefix": model_config.query_prefix,
         "document_prefix": model_config.document_prefix,
         "embed_with_metadata": model_config.embed_with_metadata,
+        "request_timeout": model_config.request_timeout,
+        "sdk_max_retries": 0,
         "manifest_path": str(manifest_path),
         "build_seconds": round(time.perf_counter() - started, 3),
     }
-    metadata_path.write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
+    metadata_path.write_text(
+        json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     write_artifact_manifest(
         manifest_path,
         artifact_type="embedding_cache",
@@ -275,7 +479,11 @@ def build_embedding_cache(
             "query_prefix": model_config.query_prefix,
             "document_prefix": model_config.document_prefix,
             "embed_with_metadata": model_config.embed_with_metadata,
-            "embedding_contract_fingerprint": metadata["embedding_contract_fingerprint"],
+            "request_timeout": model_config.request_timeout,
+            "sdk_max_retries": 0,
+            "embedding_contract_fingerprint": metadata[
+                "embedding_contract_fingerprint"
+            ],
             "batch_size": batch_size,
             "device": device,
         },
@@ -303,11 +511,19 @@ def embedding_document_text(chunk: Chunk, model_config: EmbeddingModelConfig) ->
     return f"{header}\n{chunk.text}" if header else chunk.text
 
 
-def build_encoder(model_config: EmbeddingModelConfig, *, device: str = "auto"):
+def build_encoder(
+    model_config: EmbeddingModelConfig,
+    *,
+    device: str = "auto",
+    expected_dimension: int | None = None,
+):
     if model_config.provider == "sentence_transformers":
         return SentenceTransformerEncoder(model_config, device=device)
     if model_config.provider == "siliconflow":
-        return SiliconFlowEmbeddingEncoder(model_config)
+        return SiliconFlowEmbeddingEncoder(
+            model_config,
+            expected_dimension=expected_dimension,
+        )
     raise ValueError(f"Unsupported embedding provider: {model_config.provider}")
 
 
@@ -315,16 +531,22 @@ def load_embedding_cache(cache_dir: str | Path) -> EmbeddingCache:
     try:
         import numpy as np  # type: ignore
     except ModuleNotFoundError as exc:
-        raise RuntimeError("Loading embedding cache requires numpy. Run `uv sync` first.") from exc
+        raise RuntimeError(
+            "Loading embedding cache requires numpy. Run `uv sync` first."
+        ) from exc
 
     root = Path(cache_dir)
     metadata = json.loads((root / "metadata.json").read_text(encoding="utf-8"))
     chunk_ids = json.loads((root / "chunk_ids.json").read_text(encoding="utf-8"))
     vectors = np.load(root / "vectors.npy", allow_pickle=False)
-    return EmbeddingCache(cache_dir=root, metadata=metadata, chunk_ids=chunk_ids, vectors=vectors)
+    return EmbeddingCache(
+        cache_dir=root, metadata=metadata, chunk_ids=chunk_ids, vectors=vectors
+    )
 
 
-def embedding_cache_dir(output_root: str | Path, chunk_strategy: str, embedding_key: str) -> Path:
+def embedding_cache_dir(
+    output_root: str | Path, chunk_strategy: str, embedding_key: str
+) -> Path:
     return Path(output_root) / chunk_strategy / embedding_key
 
 
@@ -386,7 +608,9 @@ def inspect_embedding_cache(
     for filename in required:
         if not (root / filename).is_file():
             issues.append(
-                CacheHealthIssue("error", "missing_file", f"Missing required cache file: {filename}")
+                CacheHealthIssue(
+                    "error", "missing_file", f"Missing required cache file: {filename}"
+                )
             )
     if issues:
         return CacheHealthReport(cache_dir=root, issues=issues, metadata={})
@@ -433,9 +657,21 @@ def embedding_cache_issues(
 
     shape = getattr(vectors, "shape", ())
     if len(shape) != 2:
-        issues.append(CacheHealthIssue("error", "vector_shape", f"Expected a 2D vector matrix, got {shape!r}."))
+        issues.append(
+            CacheHealthIssue(
+                "error", "vector_shape", f"Expected a 2D vector matrix, got {shape!r}."
+            )
+        )
     else:
         rows, dimension = int(shape[0]), int(shape[1])
+        if dimension <= 0:
+            issues.append(
+                CacheHealthIssue(
+                    "error",
+                    "vector_dimension",
+                    "Vector dimension must be a positive integer.",
+                )
+            )
         if rows != len(cache.chunk_ids):
             issues.append(
                 CacheHealthIssue(
@@ -444,7 +680,11 @@ def embedding_cache_issues(
                     f"Vector rows ({rows}) do not match chunk IDs ({len(cache.chunk_ids)}).",
                 )
             )
-        for key, actual in (("chunk_count", len(cache.chunk_ids)), ("vector_count", rows), ("dimension", dimension)):
+        for key, actual in (
+            ("chunk_count", len(cache.chunk_ids)),
+            ("vector_count", rows),
+            ("dimension", dimension),
+        ):
             recorded = metadata.get(key)
             if recorded is not None and recorded != actual:
                 issues.append(
@@ -468,7 +708,13 @@ def embedding_cache_issues(
             import numpy as np  # type: ignore
 
             if not bool(np.isfinite(vectors).all()):
-                issues.append(CacheHealthIssue("error", "non_finite_vectors", "Vector matrix contains NaN or infinity."))
+                issues.append(
+                    CacheHealthIssue(
+                        "error",
+                        "non_finite_vectors",
+                        "Vector matrix contains NaN or infinity.",
+                    )
+                )
             elif metadata.get("normalize") and rows:
                 norms = np.linalg.norm(vectors, axis=1)
                 max_deviation = float(np.max(np.abs(norms - 1.0)))
@@ -481,9 +727,18 @@ def embedding_cache_issues(
                         )
                     )
         except (TypeError, ValueError):
-            issues.append(CacheHealthIssue("error", "vector_validation", "Vector matrix could not be validated numerically."))
+            issues.append(
+                CacheHealthIssue(
+                    "error",
+                    "vector_validation",
+                    "Vector matrix could not be validated numerically.",
+                )
+            )
 
-    if expected_chunk_strategy and metadata.get("chunk_strategy") != expected_chunk_strategy:
+    if (
+        expected_chunk_strategy
+        and metadata.get("chunk_strategy") != expected_chunk_strategy
+    ):
         issues.append(
             CacheHealthIssue(
                 "error",
@@ -532,7 +787,9 @@ def embedding_cache_issues(
             "query_prefix": model_config.query_prefix,
             "document_prefix": model_config.document_prefix,
             "embed_with_metadata": model_config.embed_with_metadata,
-            "embedding_contract_fingerprint": embedding_contract_fingerprint(model_config),
+            "embedding_contract_fingerprint": embedding_contract_fingerprint(
+                model_config
+            ),
         }
         if model_config.dimensions is not None:
             expected_contract["dimension"] = model_config.dimensions

@@ -16,22 +16,22 @@ import os
 import platform
 import re
 import subprocess
-import sys
 import tempfile
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, Iterable, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 from urllib.parse import unquote, urlsplit
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SUPPORTED_MILESTONES = frozenset({"M0", "M1"})
+SUPPORTED_MILESTONES = frozenset({"M0", "M1", "M2"})
 SUPPORTED_MODES = frozenset({"offline"})
 REPORT_SCHEMA_VERSION = 1
 MILESTONE_PREREQUISITES: dict[str, tuple[str, ...]] = {
     "M0": (),
     "M1": ("M0",),
+    "M2": ("M0", "M1"),
 }
 
 MANDATORY_M0_CHECK_IDS = frozenset(
@@ -95,6 +95,47 @@ MANDATORY_M1_CHECK_IDS = frozenset(
     }
 )
 
+M2_TEST_SELECTORS: dict[str, tuple[str, ...]] = {
+    "M2-T01": (
+        "tests/test_m2_experiment_runtime.py::test_m2_t01_exact_replay_preserves_output_without_external_calls",
+        "tests/test_m2_experiment_lifecycle.py::test_fresh_replay_and_aggregation_are_exact_read_only_and_zero_call",
+    ),
+    "M2-T02": (
+        "tests/test_m2_experiment_runtime.py::test_m2_t02_stage_keys_invalidate_only_affected_contracts",
+        "tests/test_m2_experiment_lifecycle.py::test_stage_contract_invalidation_is_directional",
+    ),
+    "M2-T03": (
+        "tests/test_m2_experiment_runner.py::test_m2_t03_resume_skips_completed_cases_without_reexecution",
+        "tests/test_m2_experiment_lifecycle.py::test_run_resume_skips_completed_cases_and_rejects_existing_run",
+    ),
+    "M2-T04": (
+        "tests/test_m2_experiment_aggregation.py::test_pending_and_corrupt_cases_never_become_scoring_records",
+        "tests/test_m2_experiment_lifecycle.py::test_corrupt_case_is_reported_and_publication_conflicts_are_rejected",
+    ),
+    "M2-T05": (
+        "tests/test_m2_experiment_runner.py::test_m2_t05_concurrent_session_units_are_isolated_bounded_and_sorted",
+    ),
+    "M2-T06": (
+        "tests/test_m2_experiment_runner.py::test_m2_t06_origin_timing_and_call_ledgers_are_separate",
+        "tests/test_m2_experiment_aggregation.py::test_fresh_cache_and_replay_keep_actual_calls_separate_from_provenance",
+    ),
+    "M2-T07": (
+        "tests/test_m2_experiment_store.py::test_incompatible_resume_is_rejected_before_artifact_scan",
+        "tests/test_m2_experiment_lifecycle.py::test_resume_rebuilds_current_corpus_facts_and_rejects_drift",
+    ),
+    "M2-T08": (
+        "tests/test_m2_experiment_aggregation.py::test_retrieval_only_keeps_answer_metrics_na_and_retrieval_metrics_scored",
+        "tests/test_m2_experiment_aggregation.py::test_failed_interrupted_exhausted_and_not_run_are_explicit_and_unscored",
+    ),
+}
+
+MANDATORY_M2_CHECK_IDS = frozenset(
+    {
+        *MANDATORY_M1_CHECK_IDS,
+        *M2_TEST_SELECTORS,
+    }
+)
+
 REQUIRED_RECORD_FIELDS = frozenset(
     {
         "test_id",
@@ -123,7 +164,10 @@ _TOML_SECTION_RE = re.compile(r"^\s*\[[^]]+\]\s*$")
 _TOML_VERSION_RE = re.compile(r'^\s*version\s*=\s*["\']([^"\']+)["\']\s*$')
 
 _SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("private-key", re.compile(r"-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----")),
+    (
+        "private-key",
+        re.compile(r"-----BEGIN (?:RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----"),
+    ),
     ("aws-access-key", re.compile(r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b")),
     ("github-token", re.compile(r"\bgh[pousr]_[A-Za-z0-9]{36,255}\b")),
     ("github-fine-grained-token", re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,255}\b")),
@@ -166,7 +210,9 @@ class GateConfigurationError(RuntimeError):
 def utc_now() -> str:
     """Return an RFC 3339 timestamp in UTC."""
 
-    return datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    return (
+        datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    )
 
 
 def environment_summary() -> dict[str, Any]:
@@ -209,7 +255,9 @@ def sanitized_environment(source: Mapping[str, str] | None = None) -> dict[str, 
         "USERPROFILE",
         "WINDIR",
     }
-    clean = {key: value for key, value in original.items() if key.upper() in allowed_names}
+    clean = {
+        key: value for key, value in original.items() if key.upper() in allowed_names
+    }
     clean.update(
         {
             "ALLOW_LIVE_MODEL_CALLS": "false",
@@ -466,7 +514,15 @@ def git_candidate_files(repo_root: Path) -> list[Path]:
 
     try:
         completed = subprocess.run(
-            ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard", "--"],
+            [
+                "git",
+                "ls-files",
+                "-z",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+                "--",
+            ],
             cwd=repo_root,
             env=sanitized_environment(),
             capture_output=True,
@@ -495,7 +551,9 @@ def git_candidate_files(repo_root: Path) -> list[Path]:
     return sorted(paths, key=lambda item: item.as_posix())
 
 
-def _read_candidate_text(repo_root: Path, relative_path: Path) -> tuple[str | None, str | None]:
+def _read_candidate_text(
+    repo_root: Path, relative_path: Path
+) -> tuple[str | None, str | None]:
     """Read a bounded UTF-8 candidate; return a skip reason for unsafe/binary files."""
 
     candidate = _safe_candidate_path(repo_root, relative_path)
@@ -566,7 +624,9 @@ def _relative_link_target(
     return source_path.parent.joinpath(*posix_path.parts), None
 
 
-def validate_markdown_links(repo_root: Path, candidate_files: Iterable[Path]) -> list[str]:
+def validate_markdown_links(
+    repo_root: Path, candidate_files: Iterable[Path]
+) -> list[str]:
     """Return broken/unsafe relative links in candidate Markdown files."""
 
     candidates = {path.as_posix(): path for path in candidate_files}
@@ -574,7 +634,9 @@ def validate_markdown_links(repo_root: Path, candidate_files: Iterable[Path]) ->
     root = repo_root.resolve()
     errors: list[str] = []
 
-    for source_key in sorted(key for key in candidate_keys if key.lower().endswith(".md")):
+    for source_key in sorted(
+        key for key in candidate_keys if key.lower().endswith(".md")
+    ):
         source_path = candidates[source_key]
         text, skip_reason = _read_candidate_text(repo_root, source_path)
         if text is None:
@@ -583,7 +645,9 @@ def validate_markdown_links(repo_root: Path, candidate_files: Iterable[Path]) ->
         for line_number, raw_target in _extract_markdown_targets(text):
             unresolved, target_error = _relative_link_target(source_path, raw_target)
             if target_error:
-                errors.append(f"{source_key}:{line_number}: {target_error}: {raw_target}")
+                errors.append(
+                    f"{source_key}:{line_number}: {target_error}: {raw_target}"
+                )
                 continue
             if unresolved is None:
                 continue
@@ -614,12 +678,18 @@ def validate_state_payload(payload: Any, milestone: str = "M0") -> list[str]:
     errors: list[str] = []
 
     schema_version = payload.get("document_schema_version")
-    if not isinstance(schema_version, int) or isinstance(schema_version, bool) or schema_version < 1:
+    if (
+        not isinstance(schema_version, int)
+        or isinstance(schema_version, bool)
+        or schema_version < 1
+    ):
         errors.append("document_schema_version must be a positive integer")
 
     status_values = payload.get("stage_status_values")
-    if not isinstance(status_values, list) or not status_values or not all(
-        isinstance(item, str) and item for item in status_values
+    if (
+        not isinstance(status_values, list)
+        or not status_values
+        or not all(isinstance(item, str) and item for item in status_values)
     ):
         errors.append("stage_status_values must be a non-empty string list")
         allowed_statuses: set[str] = set()
@@ -650,7 +720,9 @@ def validate_state_payload(payload: Any, milestone: str = "M0") -> list[str]:
             milestone_entries[milestone_id] = entry
             status = entry.get("status")
             if status not in allowed_statuses:
-                errors.append(f"milestone {milestone_id} has unknown status: {status!r}")
+                errors.append(
+                    f"milestone {milestone_id} has unknown status: {status!r}"
+                )
             tests = entry.get("tests")
             if not isinstance(tests, dict) or not isinstance(tests.get("status"), str):
                 errors.append(f"milestone {milestone_id} must have tests.status")
@@ -682,10 +754,9 @@ def validate_state_payload(payload: Any, milestone: str = "M0") -> list[str]:
     )
     if isinstance(active_milestone, str) and active_entry is None:
         errors.append(f"milestones must contain active_milestone {active_milestone}")
-    elif (
-        active_entry is not None
-        and payload.get("execution_status") != active_entry.get("status")
-    ):
+    elif active_entry is not None and payload.get(
+        "execution_status"
+    ) != active_entry.get("status"):
         errors.append("execution_status must equal the active milestone status")
 
     for milestone_id, entry in milestone_entries.items():
@@ -694,22 +765,32 @@ def validate_state_payload(payload: Any, milestone: str = "M0") -> list[str]:
         if not entry.get("tag"):
             errors.append(f"released milestone {milestone_id} must record a tag")
         if not entry.get("release_url"):
-            errors.append(f"released milestone {milestone_id} must record a release_url")
+            errors.append(
+                f"released milestone {milestone_id} must record a release_url"
+            )
         if entry.get("remote_release_verified") is not True:
-            errors.append(f"released milestone {milestone_id} must verify the remote release")
+            errors.append(
+                f"released milestone {milestone_id} must verify the remote release"
+            )
         tests = entry.get("tests", {})
         if tests.get("status") != "passed":
-            errors.append(f"released milestone {milestone_id} tests.status must be passed")
+            errors.append(
+                f"released milestone {milestone_id} tests.status must be passed"
+            )
 
     repository = payload.get("repository")
     if not isinstance(repository, dict):
         errors.append("repository must be an object")
     else:
-        if not isinstance(repository.get("full_name"), str) or not repository.get("full_name"):
+        if not isinstance(repository.get("full_name"), str) or not repository.get(
+            "full_name"
+        ):
             errors.append("repository.full_name must be a non-empty string")
         head = repository.get("workspace_head")
         if head is not None and not re.fullmatch(r"[0-9a-fA-F]{40}", str(head)):
-            errors.append("repository.workspace_head must be null or a 40-character commit SHA")
+            errors.append(
+                "repository.workspace_head must be null or a 40-character commit SHA"
+            )
 
     return errors
 
@@ -730,7 +811,9 @@ def validate_manifest_payload(payload: Any, path: Path | None = None) -> list[st
         return [f"{label}: root must be an object"]
     errors: list[str] = []
     if not _positive_schema_version(payload):
-        errors.append(f"{label}: schema_version or manifest_version must be a positive integer")
+        errors.append(
+            f"{label}: schema_version or manifest_version must be a positive integer"
+        )
 
     is_run_manifest = path is not None and "run_manifest" in path.name.lower()
     if is_run_manifest:
@@ -746,10 +829,14 @@ def validate_manifest_payload(payload: Any, path: Path | None = None) -> list[st
             }:
                 errors.append(f"{label}: execution.mode is invalid")
             if not isinstance(execution.get("live_model_calls_allowed"), bool):
-                errors.append(f"{label}: execution.live_model_calls_allowed must be boolean")
+                errors.append(
+                    f"{label}: execution.live_model_calls_allowed must be boolean"
+                )
         for section_name in ("generation", "judge"):
             section = payload.get(section_name)
-            if not isinstance(section, dict) or not isinstance(section.get("enabled"), bool):
+            if not isinstance(section, dict) or not isinstance(
+                section.get("enabled"), bool
+            ):
                 errors.append(f"{label}: {section_name}.enabled must be boolean")
         counts = payload.get("result_counts")
         if not isinstance(counts, dict):
@@ -760,7 +847,9 @@ def validate_manifest_payload(payload: Any, path: Path | None = None) -> list[st
                 if value is not None and (
                     not isinstance(value, int) or isinstance(value, bool) or value < 0
                 ):
-                    errors.append(f"{label}: result_counts.{name} must be null or non-negative")
+                    errors.append(
+                        f"{label}: result_counts.{name} must be null or non-negative"
+                    )
     return errors
 
 
@@ -789,7 +878,10 @@ def validate_state_and_manifests(
             except json.JSONDecodeError as exc:
                 errors.append(f"{state_key}:{exc.lineno}:{exc.colno}: invalid JSON")
             else:
-                errors.extend(f"{state_key}: {error}" for error in validate_state_payload(state_payload, milestone))
+                errors.extend(
+                    f"{state_key}: {error}"
+                    for error in validate_state_payload(state_payload, milestone)
+                )
 
     manifest_paths = sorted(
         (
@@ -852,7 +944,9 @@ def find_high_confidence_secrets(
                 if not _looks_like_placeholder(assignment.group(1)):
                     detectors.add("assigned-credential")
             for detector_name in sorted(detectors):
-                findings.append(f"{relative_path.as_posix()}:{line_number}:{detector_name}")
+                findings.append(
+                    f"{relative_path.as_posix()}:{line_number}:{detector_name}"
+                )
     return findings, skipped_count
 
 
@@ -944,7 +1038,9 @@ def _candidate_static_records(repo_root: Path, milestone: str) -> list[dict[str,
         ),
     )
 
-    json_errors, parsed_count = validate_state_and_manifests(repo_root, candidates, milestone)
+    json_errors, parsed_count = validate_state_and_manifests(
+        repo_root, candidates, milestone
+    )
     json_record = _static_check_record(
         test_id="M0-Q02-state-manifests",
         command="quality_gate:validate_state_and_manifests(git_candidates)",
@@ -1103,6 +1199,36 @@ def run_m1_offline(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
     )
 
 
+def _m2_acceptance_records(repo_root: Path) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    for test_id, selectors in M2_TEST_SELECTORS.items():
+        records.append(
+            run_pytest_check(
+                test_id=test_id,
+                selectors=selectors,
+                repo_root=repo_root,
+                timeout_seconds=180,
+                artifact_path=selectors[0].split("::", maxsplit=1)[0],
+            )
+        )
+    return records
+
+
+def run_m2_offline(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
+    """Execute cumulative M0/M1 checks plus every named M2 acceptance test."""
+
+    started_at = utc_now()
+    records = _m0_offline_records(repo_root, state_milestone="M2")
+    records.extend(_m1_acceptance_records(repo_root))
+    records.extend(_m2_acceptance_records(repo_root))
+    return _gate_report(
+        milestone="M2",
+        started_at=started_at,
+        records=records,
+        mandatory_check_ids=MANDATORY_M2_CHECK_IDS,
+    )
+
+
 def validate_request(milestone: str | None, mode: str | None) -> list[str]:
     errors: list[str] = []
     if milestone not in SUPPORTED_MILESTONES:
@@ -1110,7 +1236,9 @@ def validate_request(milestone: str | None, mode: str | None) -> list[str]:
             f"unsupported milestone {milestone!r}; supported: {', '.join(sorted(SUPPORTED_MILESTONES))}"
         )
     if mode not in SUPPORTED_MODES:
-        errors.append(f"unsupported mode {mode!r}; supported: {', '.join(sorted(SUPPORTED_MODES))}")
+        errors.append(
+            f"unsupported mode {mode!r}; supported: {', '.join(sorted(SUPPORTED_MODES))}"
+        )
     return errors
 
 
@@ -1152,7 +1280,7 @@ def _write_report(path: Path, report: Mapping[str, Any]) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run a milestone quality gate.")
-    parser.add_argument("--milestone", help="Milestone identifier (M0 or M1).")
+    parser.add_argument("--milestone", help="Milestone identifier (M0, M1, or M2).")
     parser.add_argument("--mode", help="Gate mode (currently offline).")
     parser.add_argument("--output", help="Optional path for the JSON report.")
     return parser
@@ -1163,6 +1291,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     request_errors = validate_request(args.milestone, args.mode)
     if request_errors:
         report = _invalid_request_report(args.milestone, args.mode, request_errors)
+    elif args.milestone == "M2":
+        report = run_m2_offline(REPO_ROOT)
     elif args.milestone == "M1":
         report = run_m1_offline(REPO_ROOT)
     else:
@@ -1179,7 +1309,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         except OSError as exc:
             report["status"] = "failed"
             report["exit_code"] = 1
-            report.setdefault("errors", []).append(f"could not write --output report: {exc}")
+            report.setdefault("errors", []).append(
+                f"could not write --output report: {exc}"
+            )
             exit_code = 1
 
     print(json.dumps(report, ensure_ascii=False, indent=2))

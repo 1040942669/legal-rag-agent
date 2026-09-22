@@ -14,6 +14,7 @@ from .json_utils import (
     validate_json_unicode,
 )
 from .models import SearchResult
+from .provider_errors import ProviderCallError, should_propagate_controlled_error
 
 
 MAX_JUDGE_RESPONSE_CHARS = 65_536
@@ -29,8 +30,7 @@ JUDGE_RESPONSE_FIELDS = {
 
 
 class CompletionClient(Protocol):
-    def complete(self, prompt: str) -> str:
-        ...
+    def complete(self, prompt: str) -> str: ...
 
 
 @dataclass(frozen=True)
@@ -96,7 +96,9 @@ def build_judge_prompt(question: str, answer: str, results: list[SearchResult]) 
         article = "、".join(chunk.article_numbers) or "未知条文"
         context_lines.append(f"[S{result.rank}] {law} {article}\n{chunk.text[:500]}")
     context = "\n\n".join(context_lines) or "（无检索资料）"
-    return JUDGE_PROMPT_TEMPLATE.format(question=question, context=context, answer=answer)
+    return JUDGE_PROMPT_TEMPLATE.format(
+        question=question, context=context, answer=answer
+    )
 
 
 def extract_json_object(text: str) -> dict[str, Any] | None:
@@ -174,10 +176,16 @@ def judge_answer(
     try:
         raw = str(client.complete(prompt))
     except Exception as exc:
+        if should_propagate_controlled_error(exc, client):
+            raise
         exception_name = type(exc).__name__.lower()
         error_code = (
             "timeout"
-            if isinstance(exc, TimeoutError) or "timeout" in exception_name
+            if (
+                isinstance(exc, TimeoutError)
+                or (isinstance(exc, ProviderCallError) and exc.error_code == "timeout")
+                or "timeout" in exception_name
+            )
             else "transport_error"
         )
         message = (
@@ -232,7 +240,9 @@ def judge_answer(
     faithfulness = scores["faithfulness"]
     relevance = scores["relevance"]
     completeness = scores["completeness"]
-    assert faithfulness is not None and relevance is not None and completeness is not None
+    assert (
+        faithfulness is not None and relevance is not None and completeness is not None
+    )
     # Recompute this deterministic field instead of trusting a possibly
     # inconsistent boolean emitted by the judge model.
     passed = faithfulness >= 0.7 and relevance >= 0.7

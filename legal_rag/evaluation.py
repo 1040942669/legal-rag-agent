@@ -12,24 +12,32 @@ from typing import Any
 from .adaptive import retrieve_adaptive
 from .chat import LegalChatAssistant
 from .evidence import check_evidence_sufficiency
-from .failure_analysis import label_retrieval_failure
+from .evaluation_contracts import validate_eval_case as validate_eval_case
+from .evaluation_scoring import (
+    CompletedCaseOutcome,
+    EvaluatedCase,
+    ModelUsageDelta,
+    citation_hit as citation_hit,
+    hit_at_k as hit_at_k,
+    keyword_coverage as keyword_coverage,
+    mean_reciprocal_rank as mean_reciprocal_rank,
+    metric_value as metric_value,
+    result_matches as result_matches,
+    score_completed_case,
+    stage_status as stage_status,
+    target_coverage as target_coverage,
+)
 from .judge import judge_answer
 from .llm import usage_delta, usage_snapshot
 from .models import (
-    ANSWER_MODES,
     EVALUATION_METRICS_SCHEMA_VERSION,
     EvalCase,
     EvalRecord,
-    SearchResult,
 )
 from .query import analyze_query
 from .query_understanding import CompletionClient
-from .retrieval import Retriever, format_sources
-from .tracing import (
-    JsonlTraceWriter,
-    build_retrieval_trace_record,
-    verification_result_to_trace,
-)
+from .retrieval import Retriever
+from .tracing import JsonlTraceWriter
 from .verifier import verify_answer
 
 
@@ -54,7 +62,9 @@ def load_eval_cases(path: str | Path) -> list[EvalCase]:
             if expected_behavior is None:
                 expected_behavior = expected_answer_mode
             if expected_behavior is None:
-                expected_behavior = "out_of_scope" if case_type == "refusal" else "evidence_answer"
+                expected_behavior = (
+                    "out_of_scope" if case_type == "refusal" else "evidence_answer"
+                )
             cases.append(
                 EvalCase(
                     case_id=item["id"],
@@ -81,37 +91,19 @@ def validate_eval_cases(cases: list[EvalCase]) -> None:
     closed_groups: set[str] = set()
     last_turn_index = -1
     for case in cases:
-        if not case.case_id or case.case_id in case_ids:
-            raise ValueError(f"evaluation case id must be non-empty and unique: {case.case_id!r}")
-        case_ids.add(case.case_id)
-        behavior = case.resolved_expected_behavior
-        if not isinstance(behavior, str) or behavior not in ANSWER_MODES:
+        validate_eval_case(case)
+        if case.case_id in case_ids:
             raise ValueError(
-                f"unknown expected_behavior for {case.case_id}: "
-                f"{behavior!r}"
+                f"evaluation case id must be non-empty and unique: {case.case_id!r}"
             )
-        if isinstance(case.turn_index, bool) or not isinstance(case.turn_index, int):
-            raise ValueError(f"turn_index must be an integer for {case.case_id}")
-        if case.turn_index < 0:
-            raise ValueError(f"turn_index must be non-negative for {case.case_id}")
-        if isinstance(case.schema_version, bool) or not isinstance(case.schema_version, int):
-            raise ValueError(f"schema_version must be an integer for {case.case_id}")
-        if case.schema_version < 1:
-            raise ValueError(f"schema_version must be at least 1 for {case.case_id}")
-
+        case_ids.add(case.case_id)
         group = case.session_group
         if group is None:
-            if case.turn_index != 0:
-                raise ValueError(
-                    f"single-turn case {case.case_id} must use turn_index=0"
-                )
             if active_group is not None:
                 closed_groups.add(active_group)
             active_group = None
             last_turn_index = -1
             continue
-        if not isinstance(group, str) or not group.strip():
-            raise ValueError(f"session_group must be a non-empty string for {case.case_id}")
         if group != active_group:
             if active_group is not None:
                 closed_groups.add(active_group)
@@ -130,14 +122,12 @@ def validate_eval_cases(cases: list[EvalCase]) -> None:
         last_turn_index = case.turn_index
 
 
-def metric_value(value: Any, unavailable_reason: str | None = None) -> dict[str, Any]:
-    if value is None and not unavailable_reason:
-        raise ValueError("an unavailable metric must include an unavailable_reason")
-    return {"value": value, "unavailable_reason": unavailable_reason}
+class _TraceCollector:
+    def __init__(self) -> None:
+        self.records: list[dict[str, Any]] = []
 
-
-def stage_status(status: str, reason: str | None = None) -> dict[str, str | None]:
-    return {"status": status, "reason": reason}
+    def write(self, record: dict[str, Any]) -> None:
+        self.records.append(record)
 
 
 def evaluate(
@@ -159,11 +149,103 @@ def evaluate(
     normalizer_retries: int = 0,
     judge_client: CompletionClient | None = None,
 ) -> list[EvalRecord]:
-    validate_eval_cases(cases)
+    return _evaluate_cases(
+        cases=cases,
+        retriever=retriever,
+        chunk_strategy=chunk_strategy,
+        model=model,
+        generate=generate,
+        top_k=top_k,
+        assistant=assistant,
+        trace_writer=trace_writer,
+        trace_metadata=trace_metadata,
+        adaptive_enabled=adaptive_enabled,
+        adaptive_use_llm=adaptive_use_llm,
+        adaptive_llm_client=adaptive_llm_client,
+        adaptive_max_queries=adaptive_max_queries,
+        adaptive_per_plan_top_k=adaptive_per_plan_top_k,
+        normalizer_retries=normalizer_retries,
+        judge_client=judge_client,
+        validate_sequence=True,
+        preserve_first_assistant_memory=False,
+    )
+
+
+def evaluate_case(
+    *,
+    case: EvalCase,
+    retriever: Retriever,
+    chunk_strategy: str,
+    model: str = "retrieval-only",
+    generate: bool = False,
+    top_k: int = 5,
+    assistant: LegalChatAssistant | None = None,
+    trace_metadata: dict[str, Any] | None = None,
+    adaptive_enabled: bool = False,
+    adaptive_use_llm: bool = False,
+    adaptive_llm_client: CompletionClient | None = None,
+    adaptive_max_queries: int = 3,
+    adaptive_per_plan_top_k: int | None = None,
+    normalizer_retries: int = 0,
+    judge_client: CompletionClient | None = None,
+) -> EvaluatedCase:
+    """Evaluate exactly one case without resetting caller-owned session state."""
+
+    validate_eval_case(case)
+    collector = _TraceCollector()
+    records = _evaluate_cases(
+        cases=[case],
+        retriever=retriever,
+        chunk_strategy=chunk_strategy,
+        model=model,
+        generate=generate,
+        top_k=top_k,
+        assistant=assistant,
+        trace_writer=collector,
+        trace_metadata=trace_metadata,
+        adaptive_enabled=adaptive_enabled,
+        adaptive_use_llm=adaptive_use_llm,
+        adaptive_llm_client=adaptive_llm_client,
+        adaptive_max_queries=adaptive_max_queries,
+        adaptive_per_plan_top_k=adaptive_per_plan_top_k,
+        normalizer_retries=normalizer_retries,
+        judge_client=judge_client,
+        validate_sequence=False,
+        preserve_first_assistant_memory=True,
+    )
+    if len(records) != 1 or len(collector.records) != 1:
+        raise RuntimeError(
+            "single-case evaluation did not produce exactly one artifact"
+        )
+    return EvaluatedCase(record=records[0], trace_record=collector.records[0])
+
+
+def _evaluate_cases(
+    *,
+    cases: list[EvalCase],
+    retriever: Retriever,
+    chunk_strategy: str,
+    model: str,
+    generate: bool,
+    top_k: int,
+    assistant: LegalChatAssistant | None,
+    trace_writer: JsonlTraceWriter | _TraceCollector | None,
+    trace_metadata: dict[str, Any] | None,
+    adaptive_enabled: bool,
+    adaptive_use_llm: bool,
+    adaptive_llm_client: CompletionClient | None,
+    adaptive_max_queries: int,
+    adaptive_per_plan_top_k: int | None,
+    normalizer_retries: int,
+    judge_client: CompletionClient | None,
+    validate_sequence: bool,
+    preserve_first_assistant_memory: bool,
+) -> list[EvalRecord]:
+    if validate_sequence:
+        validate_eval_cases(cases)
     records: list[EvalRecord] = []
     active_session_group: str | None = None
-    for case in cases:
-        expected_behavior = case.resolved_expected_behavior
+    for case_index, case in enumerate(cases):
         assistant_client = getattr(assistant, "llm", None)
         assistant_usage_before = usage_snapshot(assistant_client)
         normalizer_usage_before = usage_snapshot(adaptive_llm_client)
@@ -171,7 +253,10 @@ def evaluate(
         if assistant is not None:
             # Independent cases are always reset. An explicitly named session
             # keeps memory only for its contiguous, ordered turns.
-            if case.session_group is None or case.session_group != active_session_group:
+            preserve_current = preserve_first_assistant_memory and case_index == 0
+            if not preserve_current and (
+                case.session_group is None or case.session_group != active_session_group
+            ):
                 assistant.reset_memory()
         active_session_group = case.session_group
         analysis = analyze_query(case.question)
@@ -185,10 +270,7 @@ def evaluate(
         structured_answer = None
         pre_fallback_answer = None
         pre_fallback_verification = None
-        service_status = stage_status("succeeded")
-        generation_status = (
-            stage_status("succeeded") if generate else stage_status("not_run", "retrieval_only")
-        )
+        generation_kind = "retrieval_only" if not generate else "service_error"
         try:
             if generate:
                 if assistant is None:
@@ -201,21 +283,27 @@ def evaluate(
                 evidence_check = getattr(assistant, "last_evidence_check", None)
                 verification = getattr(assistant, "last_verification", None)
                 structured_answer = getattr(assistant, "last_structured_answer", None)
-                pre_fallback_answer = getattr(assistant, "last_pre_fallback_answer", None)
+                pre_fallback_answer = getattr(
+                    assistant, "last_pre_fallback_answer", None
+                )
                 pre_fallback_verification = getattr(
                     assistant,
                     "last_pre_fallback_verification",
                     None,
                 )
                 generation_error = getattr(assistant, "last_generation_error", None)
-                if generation_error:
-                    generation_status = stage_status("error", generation_error)
-                    service_status = stage_status("degraded", generation_error)
-                elif (
-                    getattr(structured_answer, "adapter_source", None) == "programmatic"
-                    and pre_fallback_verification is None
-                ):
-                    generation_status = stage_status("not_run", "programmatic_terminal")
+                generation_kind = getattr(assistant, "last_generation_kind", None)
+                if generation_kind is None:
+                    if generation_error:
+                        generation_kind = "generation_error"
+                    elif (
+                        getattr(structured_answer, "adapter_source", None)
+                        == "programmatic"
+                        and pre_fallback_verification is None
+                    ):
+                        generation_kind = "programmatic_terminal"
+                    else:
+                        generation_kind = "model"
             else:
                 adaptive_result = retrieve_adaptive(
                     case.question,
@@ -230,16 +318,25 @@ def evaluate(
                 )
                 results = adaptive_result.results
                 analysis = adaptive_result.analysis
-                adaptive_trace = adaptive_result.to_trace() if adaptive_enabled else adaptive_trace
+                adaptive_trace = (
+                    adaptive_result.to_trace() if adaptive_enabled else adaptive_trace
+                )
                 evidence_check = adaptive_result.evidence_check
         except Exception:  # Keep evaluation running across model failures.
             results = []
+            answer = ""
             error = "evaluation service failed"
-            service_status = stage_status("error", "service_error")
-            if generate:
-                generation_status = stage_status("error", "service_error")
+            generation_error = None
+            evidence_check = None
+            verification = None
+            structured_answer = None
+            pre_fallback_answer = None
+            pre_fallback_verification = None
+            generation_kind = "service_error" if generate else "retrieval_only"
         if evidence_check is None:
-            evidence_check = check_evidence_sufficiency(case.question, results, analysis=analysis)
+            evidence_check = check_evidence_sufficiency(
+                case.question, results, analysis=analysis
+            )
         if generate and verification is None and not error:
             verification = verify_answer(
                 answer,
@@ -248,7 +345,6 @@ def evaluate(
                 risk_flags=analysis.risk_flags,
             )
         latency_ms = int((time.perf_counter() - started) * 1000)
-        failure = label_retrieval_failure(results, case, top_k=top_k)
         judge_result = None
         if judge_client is not None and generate and not error and not generation_error:
             judge_result = judge_answer(
@@ -257,357 +353,47 @@ def evaluate(
                 answer=answer,
                 results=results,
             )
-        judge_succeeded = judge_result is not None and judge_result.status == "succeeded"
-        if not generate:
-            judge_status = stage_status("not_run", "retrieval_only")
-        elif error:
-            judge_status = stage_status("not_run", "service_error")
-        elif generation_error:
-            judge_status = stage_status("not_run", generation_error)
-        elif judge_client is None:
-            judge_status = stage_status("not_run", "judge_not_configured")
-        elif judge_succeeded:
-            judge_status = stage_status("succeeded")
-        else:
-            judge_status = stage_status(
-                "error",
-                judge_result.error_code if judge_result is not None else "judge_error",
-            )
-
-        if not generate:
-            verification_status = stage_status("not_run", "retrieval_only")
-        elif error:
-            verification_status = stage_status("not_run", "service_error")
-        elif verification is None:
-            verification_status = stage_status("not_run", "verification_not_available")
-        else:
-            verification_status = stage_status("succeeded")
-
-        execution = {
-            "service": service_status,
-            "generation": generation_status,
-            "verification": verification_status,
-            "judge": judge_status,
-        }
-        if not generate:
-            generation_attempt = {"attempted": False, "reason": "retrieval_only"}
-            final_response = {"value": None, "unavailable_reason": "retrieval_only"}
-        else:
-            attempted_mode = getattr(pre_fallback_answer, "answer_mode", None)
-            if attempted_mode is None:
-                attempted_mode = getattr(structured_answer, "answer_mode", None)
-            programmatic_terminal = (
-                getattr(structured_answer, "adapter_source", None) == "programmatic"
-                and not generation_error
-                and pre_fallback_verification is None
-            )
-            generation_attempt = {
-                "attempted": not bool(error) and not programmatic_terminal,
-                "status": (
-                    "rejected"
-                    if pre_fallback_verification is not None
-                    else "error"
-                    if error or generation_error
-                    else "not_run"
-                    if programmatic_terminal
-                    else "accepted"
-                ),
-                "reason": (
-                    "verification_failed"
-                    if pre_fallback_verification is not None
-                    else generation_error
-                    or ("service_error" if error else None)
-                    or ("programmatic_terminal" if programmatic_terminal else None)
-                ),
-                "answer_mode": attempted_mode,
-                "verification": (
-                    verification_result_to_trace(pre_fallback_verification)
-                    if pre_fallback_verification is not None
-                    else None
-                ),
-            }
-            if error:
-                final_response = {"value": None, "unavailable_reason": "service_error"}
-            else:
-                observed_mode_for_trace = getattr(structured_answer, "answer_mode", None)
-                if observed_mode_for_trace is None and verification is not None:
-                    observed_mode_for_trace = verification.actual_answer_mode
-                final_response = {
-                    "value": {
-                        "answer_mode": observed_mode_for_trace,
-                        "verification": verification_result_to_trace(verification),
-                    },
-                    "unavailable_reason": None,
-                }
-
-        observed_answer_mode = getattr(structured_answer, "answer_mode", None)
-        if observed_answer_mode is None and verification is not None:
-            observed_answer_mode = verification.actual_answer_mode
-        if not generate:
-            answer_reason = "retrieval_only"
-        elif error:
-            answer_reason = "service_error"
-        else:
-            answer_reason = None
-        if verification is None:
-            verification_reason = "retrieval_only" if not generate else "service_error" if error else "verification_not_available"
-        else:
-            verification_reason = None
-        if judge_succeeded:
-            judge_reason = None
-        else:
-            judge_reason = str(judge_status["reason"] or "judge_not_available")
-
-        keyword_value = keyword_coverage(answer, case.keywords) if answer_reason is None else None
-        source_ids_exist_value = (
-            verification.evidence_catalog_valid and not verification.missing_source_ids
-            if verification is not None
-            else None
+        assistant_usage = usage_delta(
+            assistant_usage_before, usage_snapshot(assistant_client)
         )
-        citation_ids_value = verification.citation_ids_valid if verification is not None else None
-        citation_valid_value = verification.citation_valid if verification is not None else None
-        verifier_value = verification.passed if verification is not None else None
-        semantic_value = (
-            verification.semantic_support_status if verification is not None else None
-        )
-        evidence_scope_value = (
-            verification.evidence_scope_valid if verification is not None else None
-        )
-        evidence_scope_reason = (
-            verification_reason
-            if verification is None
-            else "scope_check_not_configured"
-            if evidence_scope_value is None
-            else None
-        )
-        response_mode_value = (
-            bool(observed_answer_mode == expected_behavior and verification.response_mode_valid)
-            if verification is not None and observed_answer_mode is not None
-            else None
-        )
-        if not generate:
-            refusal_value = None
-            refusal_reason = "retrieval_only"
-        elif expected_behavior == "out_of_scope":
-            refusal_value = (
-                bool(verification.refusal_present)
-                if verification is not None
-                else None
-            )
-            refusal_reason = verification_reason if refusal_value is None else None
-        else:
-            refusal_value = None
-            refusal_reason = "not_expected_to_refuse"
-        if expected_behavior in {"evidence_answer", "insufficient_evidence"}:
-            over_refusal_value = (
-                bool(verification.refusal_present)
-                if verification is not None
-                else None
-            )
-            over_refusal_reason = verification_reason if over_refusal_value is None else None
-        else:
-            over_refusal_value = None
-            over_refusal_reason = "not_expected_to_answer"
-
-        has_retrieval_gold = bool(case.expected_law or case.expected_articles)
-        no_gold_reason = None if has_retrieval_gold else "no_retrieval_gold"
-        canonical_metrics = {
-            "answer_text": metric_value(answer if answer_reason is None else None, answer_reason),
-            "hit_at_3": metric_value(hit_at_k(results, case, 3) if has_retrieval_gold else None, no_gold_reason),
-            "hit_at_5": metric_value(hit_at_k(results, case, 5) if has_retrieval_gold else None, no_gold_reason),
-            "mrr": metric_value(mean_reciprocal_rank(results, case) if has_retrieval_gold else None, no_gold_reason),
-            "target_coverage": metric_value(target_coverage(results, case, top_k) if case.expected_articles else None, None if case.expected_articles else "no_article_gold"),
-            "retrieval_target_hit": metric_value(
-                citation_hit(results, case) if has_retrieval_gold else None,
-                no_gold_reason,
-            ),
-            "citation_hit": metric_value(
-                citation_hit(results, case) if has_retrieval_gold else None,
-                no_gold_reason,
-            ),
-            "keyword_coverage": metric_value(keyword_value, answer_reason),
-            "schema_valid": metric_value(
-                verification.schema_valid if verification is not None else None,
-                verification_reason,
-            ),
-            "evidence_catalog_valid": metric_value(
-                verification.evidence_catalog_valid if verification is not None else None,
-                verification_reason,
-            ),
-            "source_ids_exist": metric_value(source_ids_exist_value, verification_reason),
-            "citation_ids_valid": metric_value(citation_ids_value, verification_reason),
-            "citation_alignment_valid": metric_value(
-                verification.citation_alignment_valid if verification is not None else None,
-                verification_reason,
-            ),
-            "evidence_scope_valid": metric_value(
-                evidence_scope_value,
-                evidence_scope_reason,
-            ),
-            "citation_valid": metric_value(citation_valid_value, verification_reason),
-            "disclaimer_present": metric_value(
-                verification.disclaimer_present if verification is not None else None,
-                verification_reason,
-            ),
-            "response_mode_valid": metric_value(
-                verification.response_mode_valid if verification is not None else None,
-                verification_reason,
-            ),
-            "verifier_pass": metric_value(verifier_value, verification_reason),
-            "semantic_support_status": metric_value(semantic_value, verification_reason),
-            "response_mode_correct": metric_value(response_mode_value, verification_reason),
-            "refusal_recall_hit": metric_value(refusal_value, refusal_reason),
-            "refusal_correctness": metric_value(refusal_value, refusal_reason),
-            "over_refusal": metric_value(over_refusal_value, over_refusal_reason),
-            "judge_faithfulness": metric_value(
-                judge_result.faithfulness if judge_succeeded else None,
-                judge_reason,
-            ),
-            "judge_relevance": metric_value(
-                judge_result.relevance if judge_succeeded else None,
-                judge_reason,
-            ),
-            "judge_completeness": metric_value(
-                judge_result.completeness if judge_succeeded else None,
-                judge_reason,
-            ),
-            "judge_pass": metric_value(
-                judge_result.passed if judge_succeeded else None,
-                judge_reason,
-            ),
-        }
-
-        assistant_usage = usage_delta(assistant_usage_before, usage_snapshot(assistant_client))
         normalizer_usage = usage_delta(
             normalizer_usage_before,
             usage_snapshot(adaptive_llm_client),
         )
         judge_usage = usage_delta(judge_usage_before, usage_snapshot(judge_client))
-        usage_parts = (assistant_usage, normalizer_usage, judge_usage)
-        if trace_writer:
-            trace_writer.write(
-                build_retrieval_trace_record(
-                    case_id=case.case_id,
-                    query=case.question,
-                    retriever=getattr(retriever, "name", "unknown"),
-                    top_k=top_k,
-                    results=results,
-                    latency_ms=latency_ms,
-                    analyzer=analysis.to_dict(),
-                    adaptive=adaptive_trace,
-                    evidence=evidence_check.to_dict(),
-                    verifier=(
-                        verification_result_to_trace(verification)
-                        if generate and verification is not None
-                        else None
-                    ),
-                    execution=execution,
-                    generation_attempt=generation_attempt,
-                    final_response=final_response,
-                    failure=failure.to_dict(),
-                    metadata=trace_metadata,
-                )
-            )
-        records.append(
-            EvalRecord(
-                case_id=case.case_id,
-                case_type=case.case_type,
+        evaluated = score_completed_case(
+            CompletedCaseOutcome(
+                case=case,
                 model=model,
                 retriever=getattr(retriever, "name", "unknown"),
                 chunk_strategy=chunk_strategy,
-                hit_at_3=hit_at_k(results, case, 3),
-                hit_at_5=hit_at_k(results, case, 5),
-                mrr=mean_reciprocal_rank(results, case),
-                target_coverage=target_coverage(results, case, top_k),
-                keyword_coverage=keyword_value if keyword_value is not None else -1.0,
-                citation_hit=citation_hit(results, case),
-                sufficiency_pass=int(evidence_check.sufficient),
-                citation_valid=(
-                    int(citation_valid_value) if citation_valid_value is not None else -1
-                ),
-                verifier_pass=int(verifier_value) if verifier_value is not None else -1,
-                refusal_correctness=(
-                    int(refusal_value) if refusal_value is not None else -1
-                ),
-                latency_ms=latency_ms,
-                answer=answer[:1200],
-                sources=format_sources(results),
+                top_k=top_k,
+                generate=generate,
+                results=tuple(results),
+                answer=answer,
+                analysis=analysis,
+                adaptive_trace=adaptive_trace,
+                evidence_check=evidence_check,
+                verification=verification,
+                structured_answer=structured_answer,
+                pre_fallback_answer=pre_fallback_answer,
+                pre_fallback_verification=pre_fallback_verification,
+                generation_kind=generation_kind,
+                generation_error=generation_error,
+                judge_configured=judge_client is not None,
+                judge_result=judge_result,
                 error=error,
-                failure_label=failure.label,
-                failure_reason=failure.reason,
-                judge_faithfulness=float(judge_result.faithfulness) if judge_succeeded else -1.0,
-                judge_relevance=float(judge_result.relevance) if judge_succeeded else -1.0,
-                judge_completeness=float(judge_result.completeness) if judge_succeeded else -1.0,
-                judge_pass=int(judge_result.passed) if judge_succeeded else -1,
-                judge_comment=judge_result.comment if judge_succeeded else "",
-                judge_error=judge_result.error if judge_result and not judge_succeeded else "",
-                assistant_llm_calls=int(assistant_usage["calls"]),
-                normalizer_llm_calls=int(normalizer_usage["calls"]),
-                judge_llm_calls=int(judge_usage["calls"]),
-                llm_failed_calls=sum(int(item["failed_calls"]) for item in usage_parts),
-                input_tokens=sum(int(item["input_tokens"]) for item in usage_parts),
-                output_tokens=sum(int(item["output_tokens"]) for item in usage_parts),
-                total_tokens=sum(int(item["total_tokens"]) for item in usage_parts),
-                token_usage_calls=sum(int(item["token_usage_calls"]) for item in usage_parts),
-                llm_latency_ms=round(sum(float(item["latency_ms"]) for item in usage_parts), 3),
-                metrics_schema_version=EVALUATION_METRICS_SCHEMA_VERSION,
-                expected_behavior=expected_behavior,
-                observed_answer_mode=observed_answer_mode,
-                execution=execution,
-                canonical_metrics=canonical_metrics,
-                generation_attempt=generation_attempt,
+                latency_ms=latency_ms,
+                assistant_usage=ModelUsageDelta.from_mapping(assistant_usage),
+                normalizer_usage=ModelUsageDelta.from_mapping(normalizer_usage),
+                judge_usage=ModelUsageDelta.from_mapping(judge_usage),
+                trace_metadata=trace_metadata,
             )
         )
+        if trace_writer:
+            trace_writer.write(evaluated.trace_record)
+        records.append(evaluated.record)
     return records
-
-
-def hit_at_k(results: list[SearchResult], case: EvalCase, k: int) -> int:
-    if not case.expected_law and not case.expected_articles:
-        return 0
-    return int(any(result_matches(result, case) for result in results[:k]))
-
-
-def mean_reciprocal_rank(results: list[SearchResult], case: EvalCase) -> float:
-    for result in results:
-        if result_matches(result, case):
-            return round(1 / result.rank, 4)
-    return 0.0
-
-
-def citation_hit(results: list[SearchResult], case: EvalCase) -> int:
-    if not case.expected_law and not case.expected_articles:
-        return 0
-    return int(any(result_matches(result, case) for result in results))
-
-
-def target_coverage(results: list[SearchResult], case: EvalCase, k: int = 5) -> float:
-    if not case.expected_articles:
-        return 0.0
-    found = set()
-    for result in results[:k]:
-        if case.expected_law and case.expected_law not in result.chunk.law_names:
-            continue
-        for article in case.expected_articles:
-            if article in result.chunk.article_numbers:
-                found.add(article)
-    return round(len(found) / len(case.expected_articles), 4)
-
-
-def result_matches(result: SearchResult, case: EvalCase) -> bool:
-    if not case.expected_law and not case.expected_articles:
-        return False
-    law_ok = not case.expected_law or case.expected_law in result.chunk.law_names
-    article_ok = not case.expected_articles or any(
-        article in result.chunk.article_numbers for article in case.expected_articles
-    )
-    return law_ok and article_ok
-
-
-def keyword_coverage(answer: str, keywords: list[str]) -> float:
-    if not keywords:
-        return 0.0
-    matched = sum(1 for keyword in keywords if keyword and keyword in answer)
-    return round(matched / len(keywords), 4)
 
 
 def write_eval_outputs(
@@ -625,12 +411,16 @@ def write_eval_outputs(
     existing = [path for path in (csv_path, report_path) if path.exists()]
     if existing:
         rendered = ", ".join(str(path) for path in existing)
-        raise FileExistsError(f"evaluation outputs are immutable and already exist: {rendered}")
+        raise FileExistsError(
+            f"evaluation outputs are immutable and already exist: {rendered}"
+        )
 
     report = render_eval_report(records, metadata=metadata)
 
     with csv_path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.DictWriter(handle, fieldnames=[field.name for field in fields(EvalRecord)])
+        writer = csv.DictWriter(
+            handle, fieldnames=[field.name for field in fields(EvalRecord)]
+        )
         writer.writeheader()
         for record in records:
             row: dict[str, Any] = {}
@@ -768,10 +558,13 @@ def summarize_evaluation(records: list[EvalRecord]) -> dict[str, Any]:
     should_answer = [
         record
         for record in records
-        if _record_expected_behavior(record) in {"evidence_answer", "insufficient_evidence"}
+        if _record_expected_behavior(record)
+        in {"evidence_answer", "insufficient_evidence"}
     ]
     should_refuse = [
-        record for record in records if _record_expected_behavior(record) == "out_of_scope"
+        record
+        for record in records
+        if _record_expected_behavior(record) == "out_of_scope"
     ]
     should_clarify = [
         record
@@ -784,13 +577,17 @@ def summarize_evaluation(records: list[EvalRecord]) -> dict[str, Any]:
         if _record_stage_status(record, "service") in {"error", "degraded"}
     ]
     judge_succeeded = [
-        record for record in records if _record_stage_status(record, "judge") == "succeeded"
+        record
+        for record in records
+        if _record_stage_status(record, "judge") == "succeeded"
     ]
     judge_failed = [
         record for record in records if _record_stage_status(record, "judge") == "error"
     ]
     judge_not_run = [
-        record for record in records if _record_stage_status(record, "judge") == "not_run"
+        record
+        for record in records
+        if _record_stage_status(record, "judge") == "not_run"
     ]
     retrieval_gold = [
         record
@@ -830,7 +627,9 @@ def summarize_evaluation(records: list[EvalRecord]) -> dict[str, Any]:
         if _record_stage_status(record, "service") in {"error", "degraded"}:
             continue
         if record.observed_answer_mode is not None:
-            clarification_values.append(record.observed_answer_mode == "needs_clarification")
+            clarification_values.append(
+                record.observed_answer_mode == "needs_clarification"
+            )
 
     mode_values: list[bool] = []
     for record in records:
@@ -876,7 +675,9 @@ def percentile(values: list[float], quantile: float) -> float:
     return float(ordered[lower] + (ordered[upper] - ordered[lower]) * fraction)
 
 
-def render_eval_report(records: list[EvalRecord], *, metadata: dict[str, Any] | None = None) -> str:
+def render_eval_report(
+    records: list[EvalRecord], *, metadata: dict[str, Any] | None = None
+) -> str:
     if not records:
         return "# 评估报告\n\n没有评估记录。\n"
     summary = summarize_evaluation(records)
@@ -907,23 +708,41 @@ def render_eval_report(records: list[EvalRecord], *, metadata: dict[str, Any] | 
     if metadata:
         for label, value in report_metadata_items(metadata):
             lines.append(f"- {label}: {value}")
-    lines.extend([
-        "",
-        "## 汇总指标",
-        f"- Hit@3 (retrieval gold): {avg_hit3:.3f}" if avg_hit3 is not None else "- Hit@3 (retrieval gold): N/A",
-        f"- Hit@5 (retrieval gold): {avg_hit5:.3f}" if avg_hit5 is not None else "- Hit@5 (retrieval gold): N/A",
-        f"- MRR (retrieval gold): {avg_mrr:.3f}" if avg_mrr is not None else "- MRR (retrieval gold): N/A",
-        f"- 目标条文覆盖率 (retrieval gold): {avg_target_coverage:.3f}" if avg_target_coverage is not None else "- 目标条文覆盖率 (retrieval gold): N/A",
-        f"- 关键词覆盖率: {avg_keyword:.3f}" if avg_keyword is not None else "- 关键词覆盖率: N/A (answer unavailable)",
-        f"- Evidence sufficiency pass: {avg_sufficiency:.3f}",
-        f"- Citation validity: {avg_citation_valid:.3f}" if avg_citation_valid is not None else "- Citation validity: N/A (retrieval-only)",
-        f"- Verifier pass: {avg_verifier:.3f}" if avg_verifier is not None else "- Verifier pass: N/A (retrieval-only)",
-        f"- Refusal correctness: {avg_refusal:.3f}" if avg_refusal is not None else "- Refusal correctness: N/A (retrieval-only)",
-        f"- 平均延迟: {avg_latency:.1f} ms",
-        f"- P50 延迟: {percentile(latency_values, 0.50):.1f} ms",
-        f"- P95 延迟: {percentile(latency_values, 0.95):.1f} ms",
-        "- 兼容字段说明: `citation_hit` 等同检索目标命中，不表示回答中的 claim 获得语义支持。",
-    ])
+    lines.extend(
+        [
+            "",
+            "## 汇总指标",
+            f"- Hit@3 (retrieval gold): {avg_hit3:.3f}"
+            if avg_hit3 is not None
+            else "- Hit@3 (retrieval gold): N/A",
+            f"- Hit@5 (retrieval gold): {avg_hit5:.3f}"
+            if avg_hit5 is not None
+            else "- Hit@5 (retrieval gold): N/A",
+            f"- MRR (retrieval gold): {avg_mrr:.3f}"
+            if avg_mrr is not None
+            else "- MRR (retrieval gold): N/A",
+            f"- 目标条文覆盖率 (retrieval gold): {avg_target_coverage:.3f}"
+            if avg_target_coverage is not None
+            else "- 目标条文覆盖率 (retrieval gold): N/A",
+            f"- 关键词覆盖率: {avg_keyword:.3f}"
+            if avg_keyword is not None
+            else "- 关键词覆盖率: N/A (answer unavailable)",
+            f"- Evidence sufficiency pass: {avg_sufficiency:.3f}",
+            f"- Citation validity: {avg_citation_valid:.3f}"
+            if avg_citation_valid is not None
+            else "- Citation validity: N/A (retrieval-only)",
+            f"- Verifier pass: {avg_verifier:.3f}"
+            if avg_verifier is not None
+            else "- Verifier pass: N/A (retrieval-only)",
+            f"- Refusal correctness: {avg_refusal:.3f}"
+            if avg_refusal is not None
+            else "- Refusal correctness: N/A (retrieval-only)",
+            f"- 平均延迟: {avg_latency:.1f} ms",
+            f"- P50 延迟: {percentile(latency_values, 0.50):.1f} ms",
+            f"- P95 延迟: {percentile(latency_values, 0.95):.1f} ms",
+            "- 兼容字段说明: `citation_hit` 等同检索目标命中，不表示回答中的 claim 获得语义支持。",
+        ]
+    )
     lines.extend(["", "## M1 v2 显式分母"])
     for denominator_name, value in summary["denominators"].items():
         lines.append(f"- {denominator_name}: {value}")
@@ -953,13 +772,15 @@ def render_eval_report(records: list[EvalRecord], *, metadata: dict[str, Any] | 
         input_tokens = sum(record.input_tokens for record in records)
         output_tokens = sum(record.output_tokens for record in records)
         total_tokens = sum(record.total_tokens for record in records)
-        lines.extend([
-            "",
-            "## 调用与成本观测",
-            f"- LLM calls: assistant={assistant_calls}, normalizer={normalizer_calls}, judge={judge_calls}",
-            f"- LLM failed calls: {sum(record.llm_failed_calls for record in records)}",
-            f"- LLM provider latency: {sum(record.llm_latency_ms for record in records):.1f} ms",
-        ])
+        lines.extend(
+            [
+                "",
+                "## 调用与成本观测",
+                f"- LLM calls: assistant={assistant_calls}, normalizer={normalizer_calls}, judge={judge_calls}",
+                f"- LLM failed calls: {sum(record.llm_failed_calls for record in records)}",
+                f"- LLM provider latency: {sum(record.llm_latency_ms for record in records):.1f} ms",
+            ]
+        )
         if token_usage_calls:
             lines.append(
                 f"- Tokens: input={input_tokens}, output={output_tokens}, total={total_tokens} "
@@ -984,52 +805,67 @@ def render_eval_report(records: list[EvalRecord], *, metadata: dict[str, Any] | 
         hit3_ci = bootstrap_ci(scored_hit3)
         hit5_ci = bootstrap_ci(scored_hit5)
         mrr_ci = bootstrap_ci(scored_mrr)
-        lines.extend([
-            "",
-            f"## 有目标样例指标 (n={len(scored)}, 排除拒答类, bootstrap 95% CI)",
-            f"- Hit@3: {sum(scored_hit3) / len(scored):.3f} [{hit3_ci[0]:.3f}, {hit3_ci[1]:.3f}]",
-            f"- Hit@5: {sum(scored_hit5) / len(scored):.3f} [{hit5_ci[0]:.3f}, {hit5_ci[1]:.3f}]",
-            f"- MRR: {sum(scored_mrr) / len(scored):.3f} [{mrr_ci[0]:.3f}, {mrr_ci[1]:.3f}]",
-        ])
+        lines.extend(
+            [
+                "",
+                f"## 有目标样例指标 (n={len(scored)}, 排除拒答类, bootstrap 95% CI)",
+                f"- Hit@3: {sum(scored_hit3) / len(scored):.3f} [{hit3_ci[0]:.3f}, {hit3_ci[1]:.3f}]",
+                f"- Hit@5: {sum(scored_hit5) / len(scored):.3f} [{hit5_ci[0]:.3f}, {hit5_ci[1]:.3f}]",
+                f"- MRR: {sum(scored_mrr) / len(scored):.3f} [{mrr_ci[0]:.3f}, {mrr_ci[1]:.3f}]",
+            ]
+        )
     judged = [
         record
         for record in records
-        if _record_stage_status(record, "judge") == "succeeded" and record.judge_pass >= 0
+        if _record_stage_status(record, "judge") == "succeeded"
+        and record.judge_pass >= 0
     ]
     judge_errors = [
         record for record in records if _record_stage_status(record, "judge") == "error"
     ]
     judge_not_run = [
-        record for record in records if _record_stage_status(record, "judge") == "not_run"
+        record
+        for record in records
+        if _record_stage_status(record, "judge") == "not_run"
     ]
-    lines.extend([
-        "",
-        (
-            f"## LLM Judge 指标 (成功 n={len(judged)}, 失败 n={len(judge_errors)}, "
-            f"未执行 n={len(judge_not_run)})"
-        ),
-    ])
+    lines.extend(
+        [
+            "",
+            (
+                f"## LLM Judge 指标 (成功 n={len(judged)}, 失败 n={len(judge_errors)}, "
+                f"未执行 n={len(judge_not_run)})"
+            ),
+        ]
+    )
     if judged:
-        avg_faithfulness = sum(record.judge_faithfulness for record in judged) / len(judged)
+        avg_faithfulness = sum(record.judge_faithfulness for record in judged) / len(
+            judged
+        )
         avg_relevance = sum(record.judge_relevance for record in judged) / len(judged)
-        avg_completeness = sum(record.judge_completeness for record in judged) / len(judged)
+        avg_completeness = sum(record.judge_completeness for record in judged) / len(
+            judged
+        )
         pass_rate = sum(record.judge_pass for record in judged) / len(judged)
-        lines.extend([
-            f"- Faithfulness: {avg_faithfulness:.3f}",
-            f"- Relevance: {avg_relevance:.3f}",
-            f"- Completeness: {avg_completeness:.3f}",
-            f"- Judge pass rate: {pass_rate:.3f}",
-        ])
+        lines.extend(
+            [
+                f"- Faithfulness: {avg_faithfulness:.3f}",
+                f"- Relevance: {avg_relevance:.3f}",
+                f"- Completeness: {avg_completeness:.3f}",
+                f"- Judge pass rate: {pass_rate:.3f}",
+            ]
+        )
     if judge_errors:
         lines.append("- Judge 调用或格式错误已从质量均值中排除。")
     if not judged:
         lines.append("- Judge 质量均值: N/A (没有成功的 judge 结果)")
     models = sorted({record.model for record in records})
     if len(models) > 1:
-        lines.extend([
-            "",
-            "## 按模型分组",
-        ])
+        lines.extend(
+            [
+                "",
+                "## 按模型分组",
+            ]
+        )
         for model_name in models:
             group = [record for record in records if record.model == model_name]
             group_scored = scored_records(group)
@@ -1055,23 +891,26 @@ def render_eval_report(records: list[EvalRecord], *, metadata: dict[str, Any] | 
                 if faith is not None and jpass is not None:
                     line += f" JudgeFaith={faith:.3f} JudgePass={jpass:.3f}"
             judge_error_count = sum(
-                _record_stage_status(record, "judge") == "error"
-                for record in group
+                _record_stage_status(record, "judge") == "error" for record in group
             )
             if judge_error_count:
                 line += f" JudgeErrors={judge_error_count}"
             lines.append(line)
-    lines.extend([
-        "",
-        "## 分组指标",
-    ])
+    lines.extend(
+        [
+            "",
+            "## 分组指标",
+        ]
+    )
     for case_type, group in grouped_records(records).items():
         group_scored = scored_records(group)
         group_hit3 = available_mean(group_scored, "hit_at_3")
         group_hit5 = available_mean(group_scored, "hit_at_5")
         group_mrr = available_mean(group_scored, "mrr")
         group_target = available_mean(group_scored, "target_coverage")
-        group_sufficiency = sum(record.sufficiency_pass for record in group) / len(group)
+        group_sufficiency = sum(record.sufficiency_pass for record in group) / len(
+            group
+        )
         group_verifier = available_mean(group, "verifier_pass")
         group_latency = sum(record.latency_ms for record in group) / len(group)
         lines.append(
@@ -1088,16 +927,20 @@ def render_eval_report(records: list[EvalRecord], *, metadata: dict[str, Any] | 
     for record in records:
         if record.failure_label:
             failure_counts[record.failure_label] += 1
-    lines.extend([
-        "",
-        "## 失败归因",
-    ])
+    lines.extend(
+        [
+            "",
+            "## 失败归因",
+        ]
+    )
     for label, count in sorted(failure_counts.items()):
         lines.append(f"- `{label}`: {count}")
-    lines.extend([
-        "",
-        "## 失败样例",
-    ])
+    lines.extend(
+        [
+            "",
+            "## 失败样例",
+        ]
+    )
     failures = [
         record
         for record in records

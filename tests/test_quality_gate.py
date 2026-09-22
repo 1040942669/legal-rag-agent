@@ -10,10 +10,7 @@ import pytest
 
 _SCRIPT_PATH = Path(__file__).resolve().parents[1] / "scripts" / "quality_gate.py"
 _WORKFLOW_PATH = (
-    Path(__file__).resolve().parents[1]
-    / ".github"
-    / "workflows"
-    / "quality-gate.yml"
+    Path(__file__).resolve().parents[1] / ".github" / "workflows" / "quality-gate.yml"
 )
 _SPEC = importlib.util.spec_from_file_location("m0_quality_gate", _SCRIPT_PATH)
 assert _SPEC is not None and _SPEC.loader is not None
@@ -161,8 +158,12 @@ def test_markdown_links_only_accept_candidate_targets(tmp_path: Path) -> None:
 
     errors = gate.validate_markdown_links(tmp_path, candidates)
 
-    assert any("private.txt" in error and "not a Git candidate" in error for error in errors)
-    assert any("missing.md" in error and "not a Git candidate" in error for error in errors)
+    assert any(
+        "private.txt" in error and "not a Git candidate" in error for error in errors
+    )
+    assert any(
+        "missing.md" in error and "not a Git candidate" in error for error in errors
+    )
     assert not any("README.md" in error for error in errors)
     assert not any("example.com" in error for error in errors)
 
@@ -270,7 +271,9 @@ def test_state_and_manifest_check_rejects_invalid_json(tmp_path: Path) -> None:
     assert any("STATE.json" in error and "invalid JSON" in error for error in errors)
 
 
-def test_secret_scan_reports_location_and_detector_but_not_value(tmp_path: Path) -> None:
+def test_secret_scan_reports_location_and_detector_but_not_value(
+    tmp_path: Path,
+) -> None:
     fake_secret = "sk-" + "A" * 32
     candidate = Path("candidate.txt")
     _write(tmp_path / candidate, f"SERVICE_API_KEY={fake_secret}\n")
@@ -337,6 +340,23 @@ def test_m1_gate_is_cumulative_and_maps_every_named_acceptance_test() -> None:
     )
 
 
+def test_m2_gate_is_cumulative_and_maps_every_named_acceptance_test() -> None:
+    expected_m2_ids = {f"M2-T{index:02d}" for index in range(1, 9)}
+
+    assert set(gate.MANDATORY_M2_CHECK_IDS) == (
+        set(gate.MANDATORY_M1_CHECK_IDS) | expected_m2_ids
+    )
+    assert set(gate.M2_TEST_SELECTORS) == expected_m2_ids
+    assert len(gate.M2_TEST_SELECTORS["M2-T01"]) == 2
+    assert len(gate.M2_TEST_SELECTORS["M2-T02"]) == 2
+    assert len(gate.M2_TEST_SELECTORS["M2-T03"]) == 2
+    assert len(gate.M2_TEST_SELECTORS["M2-T04"]) == 2
+    assert len(gate.M2_TEST_SELECTORS["M2-T05"]) == 1
+    assert len(gate.M2_TEST_SELECTORS["M2-T06"]) == 2
+    assert len(gate.M2_TEST_SELECTORS["M2-T07"]) == 2
+    assert len(gate.M2_TEST_SELECTORS["M2-T08"]) == 2
+
+
 def test_mandatory_pytest_check_fails_closed_on_skip_or_xfail(
     monkeypatch,
     tmp_path: Path,
@@ -390,7 +410,7 @@ def test_result_record_contains_required_machine_readable_fields() -> None:
 
 @pytest.mark.parametrize(
     ("milestone", "mode"),
-    [("M2", "offline"), ("M0", "integration"), (None, "offline")],
+    [("M3", "offline"), ("M0", "integration"), (None, "offline")],
 )
 def test_unknown_milestone_or_mode_is_rejected(
     milestone: str | None,
@@ -399,7 +419,7 @@ def test_unknown_milestone_or_mode_is_rejected(
     assert gate.validate_request(milestone, mode)
 
 
-@pytest.mark.parametrize("milestone", ["M0", "M1"])
+@pytest.mark.parametrize("milestone", ["M0", "M1", "M2"])
 def test_supported_request_is_accepted(milestone: str) -> None:
     assert gate.validate_request(milestone, "offline") == []
 
@@ -424,33 +444,34 @@ def test_main_dispatches_the_requested_milestone(monkeypatch, capsys) -> None:
 
     monkeypatch.setattr(gate, "run_m0_offline", lambda repo_root: report_for("M0"))
     monkeypatch.setattr(gate, "run_m1_offline", lambda repo_root: report_for("M1"))
+    monkeypatch.setattr(gate, "run_m2_offline", lambda repo_root: report_for("M2"))
 
-    assert gate.main(["--milestone", "M1", "--mode", "offline"]) == 0
-    assert calls == ["M1"]
-    assert json.loads(capsys.readouterr().out)["milestone"] == "M1"
+    assert gate.main(["--milestone", "M2", "--mode", "offline"]) == 0
+    assert calls == ["M2"]
+    assert json.loads(capsys.readouterr().out)["milestone"] == "M2"
 
 
 def test_main_returns_configuration_exit_code_for_unsupported_request(capsys) -> None:
-    assert gate.main(["--milestone", "M2", "--mode", "offline"]) == 2
+    assert gate.main(["--milestone", "M3", "--mode", "offline"]) == 2
     report = json.loads(capsys.readouterr().out)
     assert report["status"] == "failed"
     assert report["exit_code"] == 2
 
 
-def test_ci_runs_the_cumulative_m1_gate_with_a_pinned_report_upload() -> None:
+def test_ci_runs_the_cumulative_m2_gate_with_a_pinned_report_upload() -> None:
     workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
 
     assert "pull_request_target" not in workflow
     assert "secrets." not in workflow
     assert "permissions:\n  contents: read" in workflow
     assert "persist-credentials: false" in workflow
-    assert "--milestone M1" in workflow
+    assert "--milestone M2" in workflow
     assert "--mode offline" in workflow
     assert "--milestone M0" not in workflow
+    assert "--milestone M1" not in workflow
     assert "cancel-in-progress: ${{ github.event_name == 'pull_request' }}" in workflow
     assert (
-        "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02"
-        in workflow
+        "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" in workflow
     )
     assert "${{ github.run_attempt }}" in workflow
     assert "if-no-files-found: error" in workflow
@@ -464,7 +485,7 @@ def test_ci_checks_out_and_labels_the_exact_event_commit() -> None:
     assert "if: github.event_name == 'push'" in workflow
     assert "ref: ${{ github.sha }}" in workflow
     assert (
-        "m1-quality-gate-${{ github.event_name == 'pull_request' "
+        "m2-quality-gate-${{ github.event_name == 'pull_request' "
         "&& github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}"
         in workflow
     )

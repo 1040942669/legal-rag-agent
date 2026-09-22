@@ -4,6 +4,37 @@
 
 ## [Unreleased]
 
+尚无未发布变更。
+
+## [0.3.0] - 2026-09-22
+
+### Added
+
+- 严格实验 manifest 与分阶段精确缓存契约，区分 fresh、cache 和零外调 replay；缓存键按阶段依赖定向失效。
+- 不可变逐 case attempt/complete artifact、校验和、损坏清单、兼容性检查和 pending commit 恢复。
+- 通用 work-unit runner，支持 session group 内顺序执行、不同 work unit 并发、重试预算、断点续跑、checkpoint hash chain、分层计时和外部调用账本。
+- 真实 evaluation/chat adapter 与 `ConversationMemory` 导出恢复，逐阶段保存 query、retrieval、generation、verification、judge 和最终结果。
+- provider timeout、并发上限、可重试/不可重试错误分类，以及默认关闭的真实模型调用闸门。
+- 冻结数据集 registry、四种 evaluation mode、artifact-only 聚合，以及 `experiment plan/run/resume/aggregate/replay` 生命周期 CLI。
+- 累计 M2 离线门禁，将 M0 的 7 项、M1 的 10 项和 M2-T01 至 M2-T08 合并为 25 项机器可读检查。
+
+### Changed
+
+- 包版本升级为 `0.3.0`；实验命令不加载 `.env`，必须显式选择模式和输入，生成模式在未授权时失败关闭。
+- replay 必须使用新的 experiment ID 和精确缓存命中，不能静默回退 fresh；聚合只读已持久化 artifact，发布内容寻址且不可覆盖。
+- fresh/cache/replay 的真实调用数、来源调用 provenance 与耗时分开记录；失败、损坏、终止、耗尽重试和未运行均保留显式状态。
+
+### Security
+
+- 真实模型调用默认关闭；本里程碑的验收、示例运行和发布门禁均未读取本地 `.env`，未调用在线或付费模型。
+- 实验身份记录真实 Git HEAD、dirty/untracked 摘要、配置、数据、语料、索引和阶段实现指纹，resume/replay 对不兼容事实失败关闭。
+
+### Known limitations
+
+- 当前可直接执行的生命周期后端是 provider-free BM25；`smoke-generation` 和 `full-regression` 只可规划，未提供预算与 provider 时不会运行。
+- M2 证明实验身份、恢复、回放、聚合和指标口径的工程语义，不证明真实法律回答质量提高；本次未复跑完整法律语料、dense embedding、reranker 或模型 Judge。
+- 生命周期命令当前要求 Git 源码工作区，以便读取真实 commit 与实现指纹；尚未引入跨进程任务队列、数据库或生产服务。
+
 ## [0.2.0] - 2026-09-20
 
 ### Added

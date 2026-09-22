@@ -19,6 +19,7 @@ artifacts/uv-cache/
 artifacts/uv-python/
 artifacts/profile/
 artifacts/test_tmp/
+artifacts/experiments/
 artifacts/*.env
 reports/*
 !reports/RESULTS_SUMMARY.md

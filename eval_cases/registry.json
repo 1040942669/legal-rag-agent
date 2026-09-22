@@ -1,0 +1,204 @@
+{
+  "registry_schema_version": 1,
+  "datasets": [
+    {
+      "dataset_id": "legal-eval-v3",
+      "path": "eval_cases/legal_eval_cases_v3.jsonl",
+      "role": "legacy_regression",
+      "source_format": "jsonl",
+      "file_hash_normalization": "utf8_lf_v1",
+      "file_sha256": "d14a91055687cb3d430332a874c3bb88f452186d38933d8df5f29f0981c0de74",
+      "case_schema_version": 1,
+      "case_count": 120,
+      "case_artifact_set_sha256": "f34e4c948bdad1249ce3e92dbe104b4de205a5d6d448ca430a7e70a9330f14c0",
+      "manifest_case_set_sha256": "8d40c72daf89fc32946a90b107bdb1451a67a8ec29d37138f6cb2e3d8027c1c3",
+      "type_counts": {
+        "adaptive_contradictory": 3,
+        "adaptive_many_law_hints": 3,
+        "adaptive_multi_intent": 4,
+        "adaptive_vague": 4,
+        "article_lookup": 25,
+        "cross_law": 12,
+        "hard_negative": 12,
+        "multi_article": 15,
+        "refusal": 12,
+        "semantic_scenario": 30
+      },
+      "gold_case_count": 108,
+      "expected_behavior_counts": {
+        "evidence_answer": 108,
+        "out_of_scope": 12
+      },
+      "allowed_modes": [
+        "retrieval",
+        "full-regression"
+      ],
+      "freeze": {
+        "frozen_at": "2026-09-20T16:17:01+08:00",
+        "immutable": true
+      },
+      "provenance": {
+        "source_commit": "4ed96ec921593ef81de61ce545513e3f1211b5db",
+        "source_documents": [
+          "README.md",
+          "reports/RESULTS_SUMMARY.md"
+        ],
+        "annotation_method": "legacy repository-authored evaluation cases",
+        "annotator_status": "not_recorded"
+      },
+      "exposure": {
+        "status": "repeated_development",
+        "is_holdout": false
+      },
+      "duplicate_policy": {
+        "algorithm": "nfkc_alnum_char_trigram_jaccard",
+        "threshold": 0.9,
+        "expected_pairs": 0
+      },
+      "gold_policy": {
+        "structural_status": "verified_by_registry_loader",
+        "index_presence_status": "verified_only_against_untracked_local_snapshot",
+        "legal_authority_status": "not_authoritatively_reviewed"
+      },
+      "derived_from": null
+    },
+    {
+      "dataset_id": "legal-eval-v3-generation-30",
+      "path": "eval_cases/legal_eval_cases_v3_gen_subset.jsonl",
+      "role": "legacy_regression",
+      "source_format": "jsonl",
+      "file_hash_normalization": "utf8_lf_v1",
+      "file_sha256": "b3bee7b6249dbe05c2118c076b73409491fba623b88bc9b31172c9e2202c7c6f",
+      "case_schema_version": 1,
+      "case_count": 30,
+      "case_artifact_set_sha256": "2fc9c9c0d67b289c9ea6f77e0bd9490c42b149b6571972f4a451f4f886564a49",
+      "manifest_case_set_sha256": "538a992da401079c82590f89ac46986bee9b55287388957b73d5245036488390",
+      "type_counts": {
+        "adaptive_multi_intent": 1,
+        "adaptive_vague": 1,
+        "article_lookup": 10,
+        "cross_law": 2,
+        "hard_negative": 2,
+        "multi_article": 3,
+        "refusal": 3,
+        "semantic_scenario": 8
+      },
+      "gold_case_count": 27,
+      "expected_behavior_counts": {
+        "evidence_answer": 27,
+        "out_of_scope": 3
+      },
+      "allowed_modes": [
+        "smoke-generation"
+      ],
+      "freeze": {
+        "frozen_at": "2026-09-20T16:17:01+08:00",
+        "immutable": true
+      },
+      "provenance": {
+        "source_commit": "4ed96ec921593ef81de61ce545513e3f1211b5db",
+        "source_documents": [
+          "README.md",
+          "reports/RESULTS_SUMMARY.md"
+        ],
+        "annotation_method": "fixed legacy generation subset selected from legal-eval-v3",
+        "annotator_status": "not_recorded"
+      },
+      "exposure": {
+        "status": "repeated_development",
+        "is_holdout": false
+      },
+      "duplicate_policy": {
+        "algorithm": "nfkc_alnum_char_trigram_jaccard",
+        "threshold": 0.9,
+        "expected_pairs": 0
+      },
+      "gold_policy": {
+        "structural_status": "verified_by_registry_loader",
+        "index_presence_status": "verified_only_against_untracked_local_snapshot",
+        "legal_authority_status": "not_authoritatively_reviewed"
+      },
+      "derived_from": {
+        "dataset_id": "legal-eval-v3",
+        "selection_case_ids": null
+      }
+    },
+    {
+      "dataset_id": "synthetic-offline-v1",
+      "path": "eval_cases/synthetic_offline_v1.jsonl",
+      "role": "synthetic_fixture",
+      "source_format": "jsonl",
+      "file_hash_normalization": "utf8_lf_v1",
+      "file_sha256": "b6f8fbc553eb0be564b521b63fedf19b5da7a27882e653a4dad7d0a45b0d9dab",
+      "case_schema_version": 1,
+      "case_count": 2,
+      "case_artifact_set_sha256": "d55e45b56167d5f3cf34662454cc593a8ebff9745a1df5d95a7e8562eb17a6f0",
+      "manifest_case_set_sha256": "927c691dc45b0e8dea1a5652081f8d5476aa24c706be4c9f1a254fdc6cba4361",
+      "type_counts": {
+        "refusal": 1,
+        "synthetic_lookup": 1
+      },
+      "gold_case_count": 1,
+      "expected_behavior_counts": {
+        "evidence_answer": 1,
+        "out_of_scope": 1
+      },
+      "allowed_modes": [
+        "offline"
+      ],
+      "freeze": {
+        "frozen_at": "2026-09-20T16:17:01+08:00",
+        "immutable": true
+      },
+      "provenance": {
+        "source_commit": "b3a2b4605a66c66f76ac6f199552c613e623f44d",
+        "source_documents": [
+          "tests/fixtures/synthetic/synthetic_non_law.txt"
+        ],
+        "annotation_method": "deterministic evaluation cases derived from the explicitly fictional M0 corpus fixture",
+        "annotator_status": "not_recorded"
+      },
+      "exposure": {
+        "status": "synthetic",
+        "is_holdout": false
+      },
+      "duplicate_policy": {
+        "algorithm": "nfkc_alnum_char_trigram_jaccard",
+        "threshold": 0.9,
+        "expected_pairs": 0
+      },
+      "gold_policy": {
+        "structural_status": "verified_by_registry_loader",
+        "index_presence_status": "bound_to_tracked_synthetic_m0_fixture",
+        "legal_authority_status": "not_applicable_synthetic_content"
+      },
+      "derived_from": null
+    }
+  ],
+  "mode_defaults": {
+    "offline": {
+      "default_dataset_id": "synthetic-offline-v1",
+      "generation": "forbidden",
+      "judge": "forbidden",
+      "external_calls": "forbidden"
+    },
+    "retrieval": {
+      "default_dataset_id": "legal-eval-v3",
+      "generation": "forbidden",
+      "judge": "forbidden",
+      "external_calls": "explicit_opt_in"
+    },
+    "smoke-generation": {
+      "default_dataset_id": "legal-eval-v3-generation-30",
+      "generation": "required",
+      "judge": "optional",
+      "external_calls": "explicit_opt_in"
+    },
+    "full-regression": {
+      "default_dataset_id": "legal-eval-v3",
+      "generation": "required",
+      "judge": "optional",
+      "external_calls": "explicit_opt_in"
+    }
+  }
+}

@@ -11,6 +11,7 @@ from .json_utils import (
     validate_json_unicode,
 )
 from .models import NormalizedQuery
+from .provider_errors import should_propagate_controlled_error
 from .query import QueryAnalysis, analyze_query, should_use_adaptive
 
 
@@ -56,8 +57,7 @@ STOP_WORDS = {
 
 
 class CompletionClient(Protocol):
-    def complete(self, prompt: str) -> str:
-        ...
+    def complete(self, prompt: str) -> str: ...
 
 
 def normalize_query(
@@ -80,19 +80,20 @@ def normalize_query(
     for _ in range(attempts):
         try:
             raw_response = llm_client.complete(prompt)
+        except Exception as exc:  # Normalizer must never block retrieval by default.
+            if should_propagate_controlled_error(exc, llm_client):
+                raise
+            errors.append("normalizer_provider_error")
+            continue
+        try:
             parsed = parse_normalized_query_json(
                 raw_response,
                 original_query=query,
                 source="llm",
             )
             return enrich_normalized_query(parsed, analysis)
-        except Exception as exc:  # Normalizer must never block retrieval.
-            error_code = (
-                "normalizer_invalid_response"
-                if isinstance(exc, (TypeError, ValueError, RecursionError, OverflowError))
-                else "normalizer_provider_error"
-            )
-            errors.append(error_code)
+        except (TypeError, ValueError, RecursionError, OverflowError):
+            errors.append("normalizer_invalid_response")
 
     return fallback_normalized_query(
         query,
@@ -160,7 +161,9 @@ def fallback_normalized_query(
     raw_response: str = "",
 ) -> NormalizedQuery:
     legal_questions = split_legal_questions(analysis.normalized_query)
-    law_hints = unique([*analysis.law_names, *suggest_law_hints(analysis.normalized_query)])
+    law_hints = unique(
+        [*analysis.law_names, *suggest_law_hints(analysis.normalized_query)]
+    )
     keywords = extract_keywords(analysis.normalized_query)
     missing_facts = infer_missing_facts(analysis)
     return NormalizedQuery(
@@ -178,14 +181,26 @@ def fallback_normalized_query(
     )
 
 
-def enrich_normalized_query(normalized: NormalizedQuery, analysis: QueryAnalysis) -> NormalizedQuery:
+def enrich_normalized_query(
+    normalized: NormalizedQuery, analysis: QueryAnalysis
+) -> NormalizedQuery:
     return NormalizedQuery(
         original_query=normalized.original_query,
         legal_questions=unique(normalized.legal_questions),
-        missing_facts=unique([*normalized.missing_facts, *infer_missing_facts(analysis)]),
-        law_hints=unique([*normalized.law_hints, *analysis.law_names, *suggest_law_hints(analysis.normalized_query)]),
+        missing_facts=unique(
+            [*normalized.missing_facts, *infer_missing_facts(analysis)]
+        ),
+        law_hints=unique(
+            [
+                *normalized.law_hints,
+                *analysis.law_names,
+                *suggest_law_hints(analysis.normalized_query),
+            ]
+        ),
         article_hints=unique([*normalized.article_hints, *analysis.article_numbers]),
-        keywords=unique([*normalized.keywords, *extract_keywords(analysis.normalized_query)]),
+        keywords=unique(
+            [*normalized.keywords, *extract_keywords(analysis.normalized_query)]
+        ),
         risk_flags=unique([*normalized.risk_flags, *analysis.risk_flags]),
         confidence=round(min(max(normalized.confidence, 0.0), 1.0), 2),
         source=normalized.source,
@@ -264,7 +279,11 @@ def require_confidence(value: object) -> float:
 
 def split_legal_questions(text: str, *, max_questions: int = 5) -> list[str]:
     separators = r"(?:分别|同时|以及|还有|另外|一方面|另一方面|；|;|\n)"
-    parts = [part.strip(" ，,。？?") for part in re.split(separators, text) if part.strip(" ，,。？?")]
+    parts = [
+        part.strip(" ，,。？?")
+        for part in re.split(separators, text)
+        if part.strip(" ，,。？?")
+    ]
     if len(parts) <= 1:
         return [text.strip()]
     return unique(parts[:max_questions])

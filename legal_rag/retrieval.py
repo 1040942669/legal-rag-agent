@@ -4,7 +4,7 @@ import math
 import re
 from collections import Counter, defaultdict
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 from .embeddings import (
     EmbeddingModelConfig,
@@ -13,13 +13,13 @@ from .embeddings import (
     validate_cache_matches_chunks,
 )
 from .models import Chunk, SearchResult
+from .provider_errors import ProviderCallError, raise_sanitized_provider_error
 
 
 class Retriever(Protocol):
     name: str
 
-    def retrieve(self, query: str, top_k: int = 5) -> list[SearchResult]:
-        ...
+    def retrieve(self, query: str, top_k: int = 5) -> list[SearchResult]: ...
 
 
 class BM25Retriever:
@@ -66,7 +66,9 @@ class BM25Retriever:
                 df = self.doc_freqs.get(term, 0)
                 idf = math.log((self.total_docs - df + 0.5) / (df + 0.5) + 1)
                 numerator = tf * (self.k1 + 1)
-                denominator = tf + self.k1 * (1 - self.b + self.b * doc_len / max(self.avgdl, 1))
+                denominator = tf + self.k1 * (
+                    1 - self.b + self.b * doc_len / max(self.avgdl, 1)
+                )
                 bm25_score += idf * numerator / denominator
             boost = metadata_boost(
                 self.chunks[index],
@@ -110,7 +112,9 @@ class BM25Retriever:
 class DenseRetriever:
     name = "dense"
 
-    def __init__(self, chunks: list[Chunk], model_name: str = "BAAI/bge-small-zh-v1.5") -> None:
+    def __init__(
+        self, chunks: list[Chunk], model_name: str = "BAAI/bge-small-zh-v1.5"
+    ) -> None:
         self.chunks = chunks
         self.model_name = model_name
         try:
@@ -120,12 +124,16 @@ class DenseRetriever:
                 "Dense retrieval requires sentence-transformers. Install project dependencies first."
             ) from exc
         self.model = SentenceTransformer(model_name)
-        self.embeddings = self.model.encode([chunk.text for chunk in chunks], normalize_embeddings=True)
+        self.embeddings = self.model.encode(
+            [chunk.text for chunk in chunks], normalize_embeddings=True
+        )
 
     def retrieve(self, query: str, top_k: int = 5) -> list[SearchResult]:
         query_embedding = self.model.encode([query], normalize_embeddings=True)[0]
         scores = self.embeddings @ query_embedding
-        ranked = sorted(enumerate(scores), key=lambda item: float(item[1]), reverse=True)[:top_k]
+        ranked = sorted(
+            enumerate(scores), key=lambda item: float(item[1]), reverse=True
+        )[:top_k]
         return [
             SearchResult(
                 chunk=self.chunks[index],
@@ -153,16 +161,38 @@ class CachedDenseRetriever:
         self.model_config = model_config
         self.cache = load_embedding_cache(cache_dir)
         validate_cache_matches_chunks(self.cache, chunks, model_config=model_config)
-        self.encoder = build_encoder(model_config, device=device)
+        cache_dimension = int(self.cache.vectors.shape[1])
+        self.encoder = build_encoder(
+            model_config,
+            device=device,
+            expected_dimension=cache_dimension,
+        )
         self.deprecated_penalty = deprecated_penalty
         self.known_law_hints = build_known_law_hints(chunks)
         self.deprecated_indexes = [
-            index for index, chunk in enumerate(chunks) if chunk.metadata.get("deprecated")
+            index
+            for index, chunk in enumerate(chunks)
+            if chunk.metadata.get("deprecated")
         ]
 
     def retrieve(self, query: str, top_k: int = 5) -> list[SearchResult]:
-        query_embedding = self.encoder.encode_query(query)
-        scores = self.cache.vectors @ query_embedding
+        expected_dimension = int(self.cache.vectors.shape[1])
+        try:
+            query_embedding = self.encoder.encode_query(query)
+            query_vector = _validated_query_embedding(
+                query_embedding,
+                expected_dimension=expected_dimension,
+                provider=self.model_config.provider,
+            )
+        except ProviderCallError as exc:
+            error = exc
+        else:
+            scores = self.cache.vectors @ query_vector
+            error = None
+        if error is not None:
+            query = "<redacted>"
+            query_embedding = []
+            raise_sanitized_provider_error(error)
         if self.deprecated_penalty != 1.0 and self.deprecated_indexes:
             law_hints = extract_law_hints(query, known_hints=self.known_law_hints)
             scores = scores.copy()
@@ -172,7 +202,9 @@ class CachedDenseRetriever:
                 )
                 if multiplier != 1.0 and scores[index] > 0:
                     scores[index] = scores[index] * multiplier
-        ranked = sorted(enumerate(scores), key=lambda item: float(item[1]), reverse=True)[:top_k]
+        ranked = sorted(
+            enumerate(scores), key=lambda item: float(item[1]), reverse=True
+        )[:top_k]
         return [
             SearchResult(
                 chunk=self.chunks[index],
@@ -182,6 +214,39 @@ class CachedDenseRetriever:
             )
             for rank, (index, score) in enumerate(ranked, start=1)
         ]
+
+
+def _validated_query_embedding(
+    value: Any,
+    *,
+    expected_dimension: int,
+    provider: str,
+) -> Any:
+    """Validate encoder output before NumPy can fail or rank unsafe scores."""
+
+    try:
+        import numpy as np  # type: ignore
+
+        vector = np.asarray(value)
+        valid = (
+            vector.ndim == 1
+            and int(vector.shape[0]) == expected_dimension
+            and vector.dtype.kind in {"f", "i", "u"}
+            and bool(np.isfinite(vector).all())
+        )
+    except (TypeError, ValueError, OverflowError):
+        valid = False
+        vector = None
+    if valid:
+        return vector
+    if provider == "siliconflow":
+        raise ProviderCallError(
+            "invalid_response",
+            provider="siliconflow",
+            operation="embedding",
+            cause_type="InvalidQueryVector",
+        )
+    raise ValueError("query embedding vector is invalid")
 
 
 class RRFHybridRetriever:
@@ -223,7 +288,9 @@ class RRFHybridRetriever:
                 }
             )
         for result in dense_results:
-            contribution = self.dense_weight * reciprocal_rank(result.rank, k=self.rrf_k)
+            contribution = self.dense_weight * reciprocal_rank(
+                result.rank, k=self.rrf_k
+            )
             chunk_id = result.chunk.chunk_id
             fused_scores[chunk_id] += contribution
             chunk_by_id[chunk_id] = result.chunk
@@ -236,7 +303,9 @@ class RRFHybridRetriever:
                 }
             )
 
-        ranked = sorted(fused_scores.items(), key=lambda item: item[1], reverse=True)[:top_k]
+        ranked = sorted(fused_scores.items(), key=lambda item: item[1], reverse=True)[
+            :top_k
+        ]
         return [
             SearchResult(
                 chunk=chunk_by_id[chunk_id],
@@ -386,7 +455,9 @@ def extract_law_hints(text: str, known_hints: list[str] | None = None) -> list[s
     return list(dict.fromkeys(hints))
 
 
-def deprecated_multiplier(chunk: Chunk, law_hints: list[str], *, penalty: float) -> float:
+def deprecated_multiplier(
+    chunk: Chunk, law_hints: list[str], *, penalty: float
+) -> float:
     """Score multiplier for deprecated laws. No penalty when the query
     explicitly references the deprecated law."""
     if penalty >= 1.0 or not chunk.metadata.get("deprecated"):
@@ -407,7 +478,9 @@ def metadata_boost(
     boost = 0.0
     if law_hints and any(hint in law for hint in law_hints for law in chunk.law_names):
         boost += law_boost
-    if article_hints and any(article == hint for hint in article_hints for article in chunk.article_numbers):
+    if article_hints and any(
+        article == hint for hint in article_hints for article in chunk.article_numbers
+    ):
         boost += article_boost
     return boost
 
