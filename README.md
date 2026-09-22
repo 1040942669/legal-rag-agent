@@ -2,7 +2,7 @@
 
 一个面向指定中国法律文本快照的可复现 RAG 工程项目。它不是把大模型接到向量库后的演示，而是围绕法律场景中的三个核心问题展开：**如何稳定召回正确法条、如何证明一次优化真的有效、如何在证据不足时安全停止生成**。
 
-仓库已经实现旧 Phase 路线中的规则型工程链路，包括数据画像、分块实验、混合检索、受控查询理解、证据覆盖启发式、引用编号检查、缓存契约和自动实验矩阵。默认链路保持保守：清晰问题直接检索，复杂问题才进入有边界的 adaptive lane；reranker 默认关闭，任何检索或生成增强都必须通过固定评测集、trace、质量与成本指标证明价值。M1 已把结构检查、行为检查和未知语义状态拆开；M2 进一步把 fresh/cache/replay、逐 case artifact、恢复、聚合和外部调用账本固化为显式实验生命周期。包版本已准备为 `0.3.0` 发布候选，最近一个已远端核验的版本仍是 [v0.2.0](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.2.0)。
+仓库已经实现旧 Phase 路线中的规则型工程链路，包括数据画像、分块实验、混合检索、受控查询理解、证据覆盖启发式、引用编号检查、缓存契约和自动实验矩阵。默认链路保持保守：清晰问题直接检索，复杂问题才进入有边界的 adaptive lane；reranker 默认关闭，任何检索或生成增强都必须通过固定评测集、trace、质量与成本指标证明价值。M1 已把结构检查、行为检查和未知语义状态拆开；M2 进一步把 fresh/cache/replay、逐 case artifact、恢复、聚合和外部调用账本固化为显式实验生命周期。当前已发布并远端核验的版本为 [v0.3.0](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.3.0)。
 
 > 本项目仅用于检索与工程研究，不提供个案法律意见。仓库不随附完整法律语料，历史快照的内容截止日期为 2025-01-01；因此本文不声称覆盖全部当前有效法律。数据来源及复现边界见下文。
 
@@ -15,7 +15,7 @@
 | 受控 Agent 能力 | 规则 Query Analyzer、严格 JSON normalizer、有限 multi-query planner、证据合并、最多一轮补检索 |
 | 生成边界 | 高风险请求预拒答、证据充分性检查、结构化回答兼容层、引用/范围/行为检查、资料不足或澄清模板、最终交付前复核 |
 | 评测体系 | 120 条分层评测集、30 条固定生成子集、bootstrap 95% CI、显式行为分母、answer/retrieval/Judge N/A、自动五维实验矩阵 |
-| 工程质量 | M2 `0.3.0` 候选为 548 个离线测试、157 个子测试；25 项累计 JSON 质量门禁；精确 cache/replay、原子 case artifact、断点续评、生命周期 CLI 与内容寻址聚合报告 |
+| 工程质量 | M2 `v0.3.0` 为 548 个离线测试、157 个子测试；25 项累计 JSON 质量门禁；精确 cache/replay、原子 case artifact、断点续评、生命周期 CLI 与内容寻址聚合报告 |
 
 历史实验中，`Qwen3-Embedding-4B` dense 的 Hit@5 达到 **0.981 [0.954, 1.000]**，无外部 API 的自研 BM25 baseline 为 **0.704 [0.611, 0.787]**。这些数字来自 2026-06 的固定本地语料快照和当时模型版本，不是跨语料、跨时间的效果承诺。完整实验条件见 [结果摘要](reports/RESULTS_SUMMARY.md)。
 
@@ -249,9 +249,9 @@ uv run python -m legal_rag.cli evaluate `
 
 首次运行 `bge_v2_m3` 需要下载/加载约 2.29 GB 模型。它目前是实验能力，不是默认链路；只有完整 A/B 同时提升质量且 P95 可接受时才会晋升为默认。
 
-### M2 实验生命周期（0.3.0 发布候选）
+### M2 实验生命周期（v0.3.0）
 
-[草稿 PR #9](https://github.com/1040942669/legal-rag-agent/pull/9) 已提供 `plan / run / resume / aggregate / replay` 五个显式入口。当前可执行后端是 provider-free BM25；`offline` 使用 2 条完全虚构的合成 case，`retrieval` 必须显式给出本地语料路径。`smoke-generation` 与 `full-regression` 可以生成计划，但在没有预算闸门和显式 provider 配置时会失败关闭，不会读取 `.env` 或尝试模型请求。
+[已合并 PR #9](https://github.com/1040942669/legal-rag-agent/pull/9) 提供 `plan / run / resume / aggregate / replay` 五个显式入口。当前可执行后端是 provider-free BM25；`offline` 使用 2 条完全虚构的合成 case，`retrieval` 必须显式给出本地语料路径。`smoke-generation` 与 `full-regression` 可以生成计划，但在没有预算闸门和显式 provider 配置时会失败关闭，不会读取 `.env` 或尝试模型请求。
 
 这些命令要求在 Git 源码工作区运行，因为 manifest 会记录真实 HEAD、dirty 状态、未跟踪文件摘要和分阶段实现指纹。默认原始工件、精确阶段缓存和聚合报告均写入被 Git 忽略的 `artifacts/experiments/`。
 
@@ -289,11 +289,11 @@ uv run python -m legal_rag.cli experiment replay `
 uv run --offline --frozen --no-sync python scripts/quality_gate.py --milestone M2 --mode offline
 ```
 
-该 M2 门禁不需要完整语料或模型 Key，会累积运行 M0 的 7 项工程检查、`M1-T01` 至 `M1-T10` 和 `M2-T01` 至 `M2-T08`，共 25 个必检 ID：全量测试、明确禁止 socket 访问的合成 BM25 smoke、包版本导入、CLI help、Markdown 相对链接、STATE/manifest JSON、候选文件凭证风险检查，以及结构/行为/指标、精确回放、缓存失效、恢复、损坏、并发、调用账本和分母边界。离线子进程会禁用 dotenv 加载并在 provider 边界拒绝真实模型调用；mandatory pytest 出现零测试、skip、xfail 或无效 JUnit 也不会假绿。提交 `1fe3ddd7e7cf627114c21846de43be560dce2c98` 的本地门禁为 `548 passed, 157 subtests passed`、25/25，通过同一提交的 [Linux CI](https://github.com/1040942669/legal-rag-agent/actions/runs/35685720818) 也已成功；最终发布候选还会在文档与版本冻结后重新运行。这仍不是 OS 级 air-gap，也不代表真实法律质量已经验证。
+该 M2 门禁不需要完整语料或模型 Key，会累积运行 M0 的 7 项工程检查、`M1-T01` 至 `M1-T10` 和 `M2-T01` 至 `M2-T08`，共 25 个必检 ID：全量测试、明确禁止 socket 访问的合成 BM25 smoke、包版本导入、CLI help、Markdown 相对链接、STATE/manifest JSON、候选文件凭证风险检查，以及结构/行为/指标、精确回放、缓存失效、恢复、损坏、并发、调用账本和分母边界。离线子进程会禁用 dotenv 加载并在 provider 边界拒绝真实模型调用；mandatory pytest 出现零测试、skip、xfail 或无效 JUnit 也不会假绿。最终 PR head `170da868831e2730ea15d56ed88ad24b1159e67b` 的 [CI](https://github.com/1040942669/legal-rag-agent/actions/runs/35686885130) 与 release target `da7023a659672121fd772364e475870a0167e1be` 的 [master CI](https://github.com/1040942669/legal-rag-agent/actions/runs/35687258856) 均为 `548 passed, 157 subtests passed`、JUnit 705/0/0/0、25/25。这仍不是 OS 级 air-gap，也不代表真实法律质量已经验证。
 
 需要明确区分三类可复现性：
 
-1. 代码与离线逻辑：M0 发布时由 89 个测试提供基线；M1 `v0.2.0` 由 186 个测试、148 个子测试与 17 项累计门禁提供证据；M2 `0.3.0` 候选目前由 548 个测试、157 个子测试和 25 项累计门禁覆盖。这不等于法律正确性保证。
+1. 代码与离线逻辑：M0 发布时由 89 个测试提供基线；M1 `v0.2.0` 由 186 个测试、148 个子测试与 17 项累计门禁提供证据；M2 `v0.3.0` 由 548 个测试、157 个子测试和 25 项累计门禁覆盖。这不等于法律正确性保证。
 2. 历史检索数字：依赖 2026-06 的 203 部法律快照及对应 embedding cache。
 3. API 生成分数：还依赖外部模型版本、服务状态和 judge 偏差，不能视为永久固定值。
 
@@ -330,7 +330,7 @@ ARCHITECTURE_DECISION_LOG.md       关键架构决策和反例
 
 截至 2026-09-18，旧 Phase 0-4B 路线实现了可复现 baseline、检索诊断与 trace、受控查询理解、最多一轮补检索、规则 verifier、v3 评测集、reranker adapter、embedding cache v2 和自动实验矩阵。旧 Phase 编号与当前 M0-M7 里程碑不一一对应；旧路线的 reranker/cache A/B 仍是未完成的实验项，不代表当前发布主线的下一步。
 
-当前 M0-M7 主线以 [MASTER_PLAN](docs/refactor/MASTER_PLAN.md)、[STATE](docs/refactor/STATE.json) 和 [HANDOFF](docs/refactor/HANDOFF.md) 为权威来源。M0 已于 2026-09-19 作为 [v0.1.1](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.1.1) 发布并远端核验；M1 已于 2026-09-20 作为 [v0.2.0](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.2.0) 发布并远端核验，发布回执已通过独立文档 [PR #6](https://github.com/1040942669/legal-rag-agent/pull/6) 落库。M2 在 [草稿 PR #9](https://github.com/1040942669/legal-rag-agent/pull/9) 中已完成实现与累计门禁，正在冻结 `0.3.0` 候选；Tag、Release 和发布后回执尚未创建，因此仍不能标为 released。M3-M7 尚未开始。
+当前 M0-M7 主线以 [MASTER_PLAN](docs/refactor/MASTER_PLAN.md)、[STATE](docs/refactor/STATE.json) 和 [HANDOFF](docs/refactor/HANDOFF.md) 为权威来源。M0 已于 2026-09-19 作为 [v0.1.1](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.1.1) 发布并远端核验；M1 已于 2026-09-20 作为 [v0.2.0](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.2.0) 发布并远端核验；M2 软件 [PR #9](https://github.com/1040942669/legal-rag-agent/pull/9) 已正常合并，并于 2026-09-22 作为 [v0.3.0](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.3.0) 发布、远端核验。M2 的独立文档回执正在落库；软件 Tag 不会为回执移动。M3-M7 尚未开始。
 
 ## 文档导航
 
