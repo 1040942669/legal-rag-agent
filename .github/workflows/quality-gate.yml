@@ -65,18 +65,18 @@ jobs:
       - name: Verify the environment in uv offline mode
         run: uv sync --check --offline --frozen
 
-      - name: Run the M1 cumulative offline quality gate
+      - name: Run the M2 cumulative offline quality gate
         run: >-
           uv run --offline --frozen --no-sync python scripts/quality_gate.py
-          --milestone M1
+          --milestone M2
           --mode offline
-          --output "${RUNNER_TEMP}/m1-quality-gate.json"
+          --output "${RUNNER_TEMP}/m2-quality-gate.json"
 
       - name: Upload the machine-readable gate report
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: m1-quality-gate-${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/m1-quality-gate.json
+          name: m2-quality-gate-${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/m2-quality-gate.json
           if-no-files-found: error
           retention-days: 14
