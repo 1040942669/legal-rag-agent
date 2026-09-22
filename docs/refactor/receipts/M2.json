@@ -11,6 +11,17 @@
   "receipt_candidate_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/35688433212",
   "receipt_candidate_ci_artifact_digest": "sha256:c5603af26b7f94a8a69add984e8f441f3557bd2f5888b737ff551e4dc7f35aeb",
   "receipt_candidate_ci_json_sha256": "40aedd6bf7c40f914149cc7c672ebc3fcfb6cc5ec15937619240ce40e54209aa",
+  "receipt_final_sha": "4ba8282a7ed6eba61a31f2cf2fcd88c7a5811dfc",
+  "receipt_final_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/35688786318",
+  "receipt_final_ci_artifact_digest": "sha256:32ccfab7750b9e8321449337170218dbca3268b6aa58c81cc2f00d54ff8cbb2b",
+  "receipt_final_ci_json_sha256": "aba6ea259300de35f2642b0d7492f7a6002a2d9fbd69a0eab0f9949eb99daf76",
+  "receipt_merge_sha": "6decc0f2e675300f1a175f7ab49c85852d35b38d",
+  "receipt_master_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/35689024928",
+  "receipt_master_ci_verified": true,
+  "receipt_master_ci_artifact_digest": "sha256:c2031739c1573d06e03457b2893059e680990a702838fc7fb5ebb291679c5960",
+  "receipt_master_ci_json_sha256": "cc3cbd42c7bc3c0d4cbc9f3fcab4071fee23c9337a3ed1080ed6c86e516bf2bb",
+  "issue_closed_at": "2026-09-22T05:04:04Z",
+  "milestone_closed_at": "2026-09-22T05:04:05Z",
   "final_pr_head_sha": "170da868831e2730ea15d56ed88ad24b1159e67b",
   "release_target_sha": "da7023a659672121fd772364e475870a0167e1be",
   "tag_name": "v0.3.0",
@@ -75,6 +86,6 @@
     "The local runner provides in-process ownership and filesystem no-clobber checks, not a distributed task lease or cross-host transaction system.",
     "The declared Python range is >=3.10, while required M2 local and CI evidence is primarily Python 3.12.x."
   ],
-  "receipt_status": "verified_release_receipt_pending_merge",
+  "receipt_status": "verified",
   "note": "This receipt is recorded after the software release. Its later documentation commit does not move or replace the v0.3.0 tag target."
 }

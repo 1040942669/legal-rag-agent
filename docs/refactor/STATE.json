@@ -7,13 +7,13 @@
     "observed_default_branch": "master",
     "observed_baseline_commit": "00ec3ad5b193a7442e427486e8bfade2dbabd482",
     "observed_on": "2026-09-22",
-    "workspace_head": "da7023a659672121fd772364e475870a0167e1be",
-    "workspace_head_note": "Verified M2 software release target. This STATE update is a later documentation-only receipt commit and does not move the v0.3.0 tag; read the receipt branch for its exact tip.",
-    "workspace_branch": "codex/m2-release-receipt",
+    "workspace_head": "6decc0f2e675300f1a175f7ab49c85852d35b38d",
+    "workspace_head_note": "Verified M2 receipt merge. This STATE update is a later documentation-only finalization commit and does not move the v0.3.0 tag; read the finalization branch for its exact tip.",
+    "workspace_branch": "codex/m2-release-finalize",
     "workspace_dirty": false,
     "remote_tags_checked": true
   },
-  "execution_status": "released_receipt_pending",
+  "execution_status": "released",
   "active_milestone": "M2",
   "last_verified_release": {
     "milestone_id": "M2",
@@ -154,7 +154,7 @@
       "name": "分层实验与回放",
       "planned_version": "v0.3.0",
       "required": true,
-      "status": "released_receipt_pending",
+      "status": "released",
       "branch": "codex/m2-experiment-lifecycle",
       "receipt_branch": "codex/m2-release-receipt",
       "receipt_pr_url": "https://github.com/1040942669/legal-rag-agent/pull/10",
@@ -162,6 +162,18 @@
       "receipt_candidate_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/35688433212",
       "receipt_candidate_ci_artifact_digest": "sha256:c5603af26b7f94a8a69add984e8f441f3557bd2f5888b737ff551e4dc7f35aeb",
       "receipt_candidate_ci_json_sha256": "40aedd6bf7c40f914149cc7c672ebc3fcfb6cc5ec15937619240ce40e54209aa",
+      "receipt_final_sha": "4ba8282a7ed6eba61a31f2cf2fcd88c7a5811dfc",
+      "receipt_final_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/35688786318",
+      "receipt_final_ci_artifact_digest": "sha256:32ccfab7750b9e8321449337170218dbca3268b6aa58c81cc2f00d54ff8cbb2b",
+      "receipt_final_ci_json_sha256": "aba6ea259300de35f2642b0d7492f7a6002a2d9fbd69a0eab0f9949eb99daf76",
+      "receipt_merge_sha": "6decc0f2e675300f1a175f7ab49c85852d35b38d",
+      "receipt_master_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/35689024928",
+      "receipt_master_ci_sha": "6decc0f2e675300f1a175f7ab49c85852d35b38d",
+      "receipt_master_ci_artifact_digest": "sha256:c2031739c1573d06e03457b2893059e680990a702838fc7fb5ebb291679c5960",
+      "receipt_master_ci_json_sha256": "cc3cbd42c7bc3c0d4cbc9f3fcab4071fee23c9337a3ed1080ed6c86e516bf2bb",
+      "issue_closed_at": "2026-09-22T05:04:04Z",
+      "milestone_closed_at": "2026-09-22T05:04:05Z",
+      "milestone_state": "closed",
       "issue_url": "https://github.com/1040942669/legal-rag-agent/issues/8",
       "milestone_url": "https://github.com/1040942669/legal-rag-agent/milestone/3",
       "pr_url": "https://github.com/1040942669/legal-rag-agent/pull/9",
@@ -233,15 +245,10 @@
         "ci_status": "passed",
         "ci_scope": "cumulative M2 gate passed on exact final PR head and release-target master push",
         "live_model_calls": 0,
-        "remaining_release_steps": [
-          "commit, test and merge the documentation-only M2 release receipt PR",
-          "verify the receipt merge master CI",
-          "record receipt merge facts in a final documentation PR and close Issue #8 / Milestone 3"
-        ]
+        "remaining_release_steps": [],
+        "completion_note": "Software PR, release-target CI, annotated tag, GitHub Release, receipt PR, receipt merge CI, Issue #8 and Milestone 3 are complete. M3 remains not_started."
       },
-      "blockers": [
-        "The software release is verified; only the documentation-only receipt PR, its CI, merge and final receipt closure remain."
-      ]
+      "blockers": []
     },
     {
       "id": "M3",
@@ -364,5 +371,5 @@
       "blockers": []
     }
   ],
-  "next_action": "Finish only the M2 documentation receipt lifecycle: merge the verified receipt through normal CI, record its merge/master-CI facts in a final documentation PR, close Issue #8 and Milestone 3, and do not start M3."
+  "next_action": "Stop after M2. Do not start M3 until the user explicitly authorizes the next milestone."
 }
