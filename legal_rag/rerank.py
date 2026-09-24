@@ -1,11 +1,22 @@
 from __future__ import annotations
 
+import math
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Protocol
 
 from .models import SearchResult
-from .retrieval import Retriever
+from .retrieval import (
+    Retriever,
+    assert_results_match_boundary,
+    retrieval_boundary,
+)
+from .retrieval_contracts import (
+    RetrievalBoundary,
+    RetrievalBoundaryViolation,
+    RetrievalContractError,
+    validate_retrieval_top_k,
+)
 
 
 @dataclass(frozen=True)
@@ -38,8 +49,7 @@ class RerankerStats:
 class Reranker(Protocol):
     name: str
 
-    def score(self, query: str, results: list[SearchResult]) -> list[float]:
-        ...
+    def score(self, query: str, results: list[SearchResult]) -> list[float]: ...
 
 
 class CrossEncoderReranker:
@@ -68,7 +78,9 @@ class CrossEncoderReranker:
         pairs = [
             (
                 query,
-                reranker_document_text(result) if self.config.include_metadata else result.chunk.text,
+                reranker_document_text(result)
+                if self.config.include_metadata
+                else result.chunk.text,
             )
             for result in results
         ]
@@ -77,7 +89,9 @@ class CrossEncoderReranker:
             batch_size=self.config.batch_size,
             show_progress_bar=False,
         )
-        raw_scores = predictions.tolist() if hasattr(predictions, "tolist") else predictions
+        raw_scores = (
+            predictions.tolist() if hasattr(predictions, "tolist") else predictions
+        )
         if not isinstance(raw_scores, (list, tuple)):
             raw_scores = [raw_scores]
         scores: list[float] = []
@@ -123,17 +137,43 @@ class RerankingRetriever:
         *,
         candidate_top_n: int = 20,
     ) -> None:
-        if candidate_top_n < 1:
+        if type(candidate_top_n) is not int or candidate_top_n < 1:
             raise ValueError("candidate_top_n must be at least 1")
-        self.base = base
+        self._base = base
         self.reranker = reranker
         self.candidate_top_n = candidate_top_n
         self.name = f"{getattr(base, 'name', 'retriever')}+rerank:{reranker.name}"
         self.stats = RerankerStats()
+        self._boundary = retrieval_boundary(base)
+
+    @property
+    def retrieval_boundary(self) -> RetrievalBoundary | None:
+        return self._boundary
+
+    @property
+    def base(self) -> Retriever:
+        """Read-only compatibility view of the captured base retriever."""
+
+        return self._base
+
+    @property
+    def boundary_fingerprint(self) -> str | None:
+        return self._boundary.fingerprint if self._boundary is not None else None
 
     def retrieve(self, query: str, top_k: int = 5) -> list[SearchResult]:
-        candidate_top_n = max(top_k, self.candidate_top_n)
-        candidates = self.base.retrieve(query, top_k=candidate_top_n)
+        resolved_top_k = validate_retrieval_top_k(top_k)
+        candidate_top_n = validate_retrieval_top_k(
+            max(resolved_top_k, self.candidate_top_n)
+        )
+        if retrieval_boundary(self._base) != self._boundary:
+            raise RetrievalBoundaryViolation(
+                "reranker base retrieval boundary changed after construction"
+            )
+        candidates = self._base.retrieve(query, top_k=candidate_top_n)
+        boundary = self._boundary
+        assert_results_match_boundary(
+            candidates, boundary, stage="reranker candidate retrieval"
+        )
         if not candidates:
             return []
 
@@ -142,6 +182,27 @@ class RerankingRetriever:
         self.stats.documents += len(candidates)
         try:
             scores = self.reranker.score(query, candidates)
+            if not isinstance(scores, (list, tuple)) or len(scores) != len(candidates):
+                raise RetrievalContractError(
+                    "reranker must return one score for every candidate"
+                )
+            normalized_scores: list[float] = []
+            for score in scores:
+                if isinstance(score, bool):
+                    raise RetrievalContractError(
+                        "reranker scores must be finite real numbers"
+                    )
+                try:
+                    normalized_score = float(score)
+                except (TypeError, ValueError, OverflowError) as exc:
+                    raise RetrievalContractError(
+                        "reranker scores must be finite real numbers"
+                    ) from exc
+                if not math.isfinite(normalized_score):
+                    raise RetrievalContractError(
+                        "reranker scores must be finite real numbers"
+                    )
+                normalized_scores.append(normalized_score)
         except Exception:
             self.stats.failed_calls += 1
             raise
@@ -150,13 +211,12 @@ class RerankingRetriever:
             self.stats.total_ms += elapsed_ms
 
         ranked = sorted(
-            zip(candidates, scores),
-            key=lambda item: item[1],
-            reverse=True,
-        )[:top_k]
-        return [
-            SearchResult(
-                chunk=result.chunk,
+            zip(candidates, normalized_scores, strict=True),
+            key=lambda item: (-item[1], item[0].rank, item[0].chunk.chunk_id),
+        )[:resolved_top_k]
+        results = [
+            replace(
+                result,
                 score=score,
                 rank=rank,
                 retriever=self.name,
@@ -173,9 +233,13 @@ class RerankingRetriever:
             )
             for rank, (result, score) in enumerate(ranked, start=1)
         ]
+        assert_results_match_boundary(results, boundary, stage="reranker output")
+        return results
 
 
-def resolve_reranker_config(config: dict, reranker_key: str | None = None) -> RerankerConfig | None:
+def resolve_reranker_config(
+    config: dict, reranker_key: str | None = None
+) -> RerankerConfig | None:
     reranking = config.get("reranking", {})
     key = reranker_key if reranker_key is not None else reranking.get("default", "none")
     if not key or str(key).lower() == "none":
@@ -216,7 +280,9 @@ def wrap_with_reranker(
     return RerankingRetriever(
         retriever,
         build_reranker(reranker_config),
-        candidate_top_n=(candidate_top_n if candidate_top_n is not None else configured_top_n),
+        candidate_top_n=(
+            candidate_top_n if candidate_top_n is not None else configured_top_n
+        ),
     )
 
 

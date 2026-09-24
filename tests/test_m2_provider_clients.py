@@ -836,6 +836,14 @@ def test_cached_dense_retriever_rejects_bad_query_vector_before_matmul() -> None
 
     assert captured.value.error_code == "invalid_response"
 
+    for invalid_vector in ([0.0, 0.0], [1.0, 1.0]):
+        retriever.encoder = SimpleNamespace(
+            encode_query=lambda _, value=invalid_vector: value
+        )
+        with pytest.raises(ProviderCallError) as captured:
+            retriever.retrieve("normalization mismatch")
+        assert captured.value.error_code == "invalid_response"
+
 
 def test_embedding_boundary_redacts_query_and_response_from_traceback_locals() -> None:
     fake, _ = _embedding_client(

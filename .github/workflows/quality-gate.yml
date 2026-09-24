@@ -142,13 +142,13 @@ jobs:
       - name: Run storage integration tests against a fresh database
         run: >-
           uv run --frozen --no-sync pytest -q
-          integration_tests/test_m3_storage_import.py
+          integration_tests
           --junitxml="${RUNNER_TEMP}/m3-storage-junit.xml"
 
       - name: Build the wheel and verify packaged migration resources
         run: |
           uv build --wheel --out-dir "${RUNNER_TEMP}/m3-wheel"
-          uv run --frozen --no-sync python -c "import glob,zipfile; p=glob.glob('${RUNNER_TEMP}/m3-wheel/*.whl')[0]; names=zipfile.ZipFile(p).namelist(); required={'legal_rag/storage/alembic/env.py','legal_rag/storage/alembic/script.py.mako','legal_rag/storage/alembic/versions/0001_m3_storage_baseline.py'}; missing=required-set(names); assert not missing, missing"
+          uv run --frozen --no-sync python -c "import glob,zipfile; p=glob.glob('${RUNNER_TEMP}/m3-wheel/*.whl')[0]; names=zipfile.ZipFile(p).namelist(); required={'legal_rag/storage/alembic/env.py','legal_rag/storage/alembic/script.py.mako','legal_rag/storage/alembic/versions/0001_m3_storage_baseline.py','legal_rag/storage/alembic/versions/0002_m3_immutable_corpus_rows.py'}; missing=required-set(names); assert not missing, missing"
 
       - name: Upload the M3 storage integration report
         if: always()

@@ -11,6 +11,12 @@ from ..embeddings import (
     EmbeddingModelConfig,
     validate_cache_matches_chunks,
 )
+from ..embedding_contracts import (
+    EmbeddingProfileIdentity,
+    EmbeddingVectorContractError,
+    canonicalize_embedding_matrix,
+    canonicalize_embedding_vector,
+)
 from ..models import Chunk, LawArticle
 
 
@@ -187,6 +193,26 @@ class EmbeddingProfileRecord:
     embed_with_metadata: bool
     recipe_hash: str
 
+    def to_identity(self) -> EmbeddingProfileIdentity:
+        try:
+            identity = EmbeddingProfileIdentity(
+                provider=self.provider,
+                model=self.model,
+                revision=self.revision,
+                dimensions=self.dimensions,
+                normalization=self.normalization,
+                query_prefix=self.query_prefix,
+                document_prefix=self.document_prefix,
+                embed_with_metadata=self.embed_with_metadata,
+            )
+        except ValueError as exc:
+            raise StorageContractError(f"embedding profile is invalid: {exc}") from exc
+        if identity.recipe_hash != self.recipe_hash:
+            raise StorageContractError("embedding profile recipe hash mismatch")
+        if identity.profile_id != self.profile_id:
+            raise StorageContractError("embedding profile identity mismatch")
+        return identity
+
 
 @dataclass(frozen=True)
 class ChunkEmbeddingRecord:
@@ -281,6 +307,7 @@ def _article_records(
     records: list[ArticleRecord] = []
     for article in articles:
         _required_text(article.article_id, "article_id", max_length=255)
+        source_ref = _required_text(article.source_file, "source_ref")
         if len(article.article_number) > 128:
             raise StorageContractError("article_number exceeds maximum length 128")
         if len(article.parse_status) > 64:
@@ -316,7 +343,7 @@ def _article_records(
             "article_number": article.article_number,
             "body": article.body,
             "raw_text": article.raw_text,
-            "source_ref": article.source_file,
+            "source_ref": source_ref,
             "source_line": article.line_no,
             "parse_status": article.parse_status,
         }
@@ -361,6 +388,11 @@ def _profile_record(
     actual_dimensions: int,
 ) -> EmbeddingProfileRecord:
     revision = _required_text(model_revision, "model_revision")
+    configured_revision = _required_text(model_config.revision, "model_config.revision")
+    if configured_revision != revision:
+        raise StorageContractError(
+            "model_revision does not match model_config.revision"
+        )
     if model_config.dimensions is None:
         raise StorageContractError(
             "model_config.dimensions must be explicit for a storage profile"
@@ -375,21 +407,18 @@ def _profile_record(
             f"storage limit {PGVECTOR_VECTOR_MAX_DIMENSIONS}; choose an explicit "
             "supported representation instead of truncating"
         )
-    recipe = {
-        "query_prefix": model_config.query_prefix,
-        "document_prefix": model_config.document_prefix,
-        "embed_with_metadata": model_config.embed_with_metadata,
-    }
-    identity = {
-        "provider": model_config.provider,
-        "model": model_config.model_name,
-        "revision": revision,
-        "dimensions": actual_dimensions,
-        "normalization": model_config.normalize,
-        "recipe": recipe,
-    }
+    identity = EmbeddingProfileIdentity(
+        provider=model_config.provider,
+        model=model_config.model_name,
+        revision=revision,
+        dimensions=actual_dimensions,
+        normalization=model_config.normalize,
+        query_prefix=model_config.query_prefix,
+        document_prefix=model_config.document_prefix,
+        embed_with_metadata=model_config.embed_with_metadata,
+    )
     return EmbeddingProfileRecord(
-        profile_id=sha256_json(identity),
+        profile_id=identity.profile_id,
         provider=_required_text(model_config.provider, "provider", max_length=128),
         model=_required_text(model_config.model_name, "model_name"),
         revision=revision,
@@ -398,7 +427,7 @@ def _profile_record(
         query_prefix=model_config.query_prefix,
         document_prefix=model_config.document_prefix,
         embed_with_metadata=model_config.embed_with_metadata,
-        recipe_hash=sha256_json(recipe),
+        recipe_hash=identity.recipe_hash,
     )
 
 
@@ -410,16 +439,16 @@ def _embedding_records(
     except ModuleNotFoundError as exc:  # pragma: no cover - project requires numpy.
         raise RuntimeError("building a storage bundle requires numpy") from exc
 
-    source_matrix = np.asarray(cache.vectors)
-    if source_matrix.dtype != np.dtype("float32"):
-        raise StorageContractError(
-            "embedding cache dtype must be float32; explicit migration is required"
+    try:
+        matrix = canonicalize_embedding_matrix(
+            cache.vectors,
+            expected_dimension=profile.dimensions,
+            normalized=profile.normalization,
+            label="embedding cache",
+            require_float32=True,
         )
-    matrix = np.asarray(source_matrix, dtype="<f4", order="C")
-    if matrix.ndim != 2 or matrix.shape[1] != profile.dimensions:
-        raise StorageContractError("embedding matrix dimension does not match profile")
-    if not bool(np.isfinite(matrix).all()):
-        raise StorageContractError("embedding vectors must contain only finite values")
+    except EmbeddingVectorContractError as exc:
+        raise StorageContractError(str(exc)) from exc
     records: list[ChunkEmbeddingRecord] = []
     for chunk_id, row in zip(cache.chunk_ids, matrix, strict=True):
         canonical_row = np.ascontiguousarray(row, dtype="<f4")
@@ -464,6 +493,10 @@ def build_storage_import_bundle(
         raise StorageContractError("at least one article is required")
     if not chunks:
         raise StorageContractError("at least one chunk is required")
+    if model_config.trust_remote_code:
+        raise StorageContractError(
+            "version-bound storage does not allow trust_remote_code"
+        )
     _unique_by_id(chunks, "chunk_id", "chunk_id")
 
     source_manifest_json = canonical_json(source_manifest)
@@ -471,9 +504,16 @@ def build_storage_import_bundle(
     chunk_recipe_hash = sha256_text(chunk_recipe_json)
 
     # Reuse the existing strict cache contract before adding M3-specific fields.
-    validate_cache_matches_chunks(
-        embedding_cache, list(chunks), model_config=model_config
-    )
+    try:
+        validate_cache_matches_chunks(
+            embedding_cache, list(chunks), model_config=model_config
+        )
+    except ValueError as exc:
+        raise StorageContractError(str(exc)) from exc
+    if embedding_cache.metadata.get("revision") != model_revision:
+        raise StorageContractError(
+            "embedding cache revision does not match model_revision"
+        )
 
     shape = getattr(embedding_cache.vectors, "shape", ())
     if len(shape) != 2:
@@ -782,28 +822,8 @@ def validate_storage_import_bundle(bundle: StorageImportBundle) -> None:
             f"embedding profile dimensions must be between 1 and "
             f"{PGVECTOR_VECTOR_MAX_DIMENSIONS}"
         )
-    recipe = {
-        "query_prefix": profile.query_prefix,
-        "document_prefix": profile.document_prefix,
-        "embed_with_metadata": profile.embed_with_metadata,
-    }
-    if sha256_json(recipe) != profile.recipe_hash:
-        raise StorageContractError("embedding profile recipe hash mismatch")
-    profile_identity = {
-        "provider": profile.provider,
-        "model": profile.model,
-        "revision": profile.revision,
-        "dimensions": profile.dimensions,
-        "normalization": profile.normalization,
-        "recipe": recipe,
-    }
-    if sha256_json(profile_identity) != profile.profile_id:
-        raise StorageContractError("embedding profile identity mismatch")
+    profile.to_identity()
 
-    try:
-        import numpy as np
-    except ModuleNotFoundError as exc:  # pragma: no cover - project requires numpy.
-        raise RuntimeError("validating a storage bundle requires numpy") from exc
     embeddings_by_chunk: dict[str, ChunkEmbeddingRecord] = {}
     for embedding in bundle.embeddings:
         if embedding.chunk_id not in chunk_by_id:
@@ -812,14 +832,15 @@ def validate_storage_import_bundle(bundle: StorageImportBundle) -> None:
             raise StorageContractError("duplicate chunk embedding")
         if embedding.profile_id != profile.profile_id:
             raise StorageContractError("embedding profile relation mismatch")
-        row = np.asarray(embedding.embedding)
-        if row.ndim != 1 or len(row) != profile.dimensions:
-            raise StorageContractError("embedding dimension does not match profile")
-        if not bool(np.isfinite(row).all()):
-            raise StorageContractError(
-                "embedding vectors must contain only finite values"
+        try:
+            canonical_row = canonicalize_embedding_vector(
+                embedding.embedding,
+                expected_dimension=profile.dimensions,
+                normalized=profile.normalization,
+                label=f"embedding {embedding.chunk_id}",
             )
-        canonical_row = np.ascontiguousarray(row, dtype="<f4")
+        except EmbeddingVectorContractError as exc:
+            raise StorageContractError(str(exc)) from exc
         if hashlib.sha256(canonical_row.tobytes(order="C")).hexdigest() != (
             embedding.embedding_hash
         ):

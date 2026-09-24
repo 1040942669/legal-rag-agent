@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from .models import Chunk, SearchResult
+from .retrieval_contracts import validate_retrieval_top_k
 
 
 def is_llamaindex_available() -> bool:
@@ -26,7 +27,7 @@ class LlamaIndexRetriever:
         self.chunks = chunks
         self.chunk_by_id = {chunk.chunk_id: chunk for chunk in chunks}
         self.kind = kind
-        self.top_k = top_k
+        self.top_k = validate_retrieval_top_k(top_k)
         self.embedding_model = embedding_model
         self._retriever = self._build_retriever()
 
@@ -62,12 +63,13 @@ class LlamaIndexRetriever:
         raise ValueError(f"Unsupported LlamaIndex retriever kind: {self.kind}")
 
     def retrieve(self, query: str, top_k: int = 5) -> list[SearchResult]:
+        resolved_top_k = validate_retrieval_top_k(top_k)
         previous_top_k = getattr(self._retriever, "similarity_top_k", None)
         if previous_top_k is not None:
-            self._retriever.similarity_top_k = top_k
+            self._retriever.similarity_top_k = resolved_top_k
         nodes = self._retriever.retrieve(query)
         results: list[SearchResult] = []
-        for rank, node_with_score in enumerate(nodes[:top_k], start=1):
+        for rank, node_with_score in enumerate(nodes[:resolved_top_k], start=1):
             node = node_with_score.node
             chunk = self.chunk_by_id.get(node.node_id)
             if not chunk:
@@ -81,4 +83,3 @@ class LlamaIndexRetriever:
                 )
             )
         return results
-

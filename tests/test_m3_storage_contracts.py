@@ -7,13 +7,18 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+import legal_rag.embedding_contracts as embedding_contracts_module
+import legal_rag.embeddings as embeddings_module
 from legal_rag.chunking import article_chunks, neighbor_chunks
 from legal_rag.embeddings import (
     EMBEDDING_CACHE_SCHEMA_VERSION,
+    BoundQueryEncoder,
     EmbeddingCache,
     EmbeddingModelConfig,
     chunk_corpus_fingerprint,
     embedding_contract_fingerprint,
+    embedding_profile_identity,
+    build_bound_query_encoder,
 )
 from legal_rag.models import LawArticle
 from legal_rag.storage.contracts import (
@@ -49,13 +54,21 @@ def _articles() -> list[LawArticle]:
     ]
 
 
-def _model_config(*, dimensions: int = 3) -> EmbeddingModelConfig:
+def _model_config(
+    *,
+    dimensions: int = 3,
+    normalize: bool = True,
+    revision: str = "fixture-rev-1",
+    trust_remote_code: bool = False,
+) -> EmbeddingModelConfig:
     return EmbeddingModelConfig(
         key="fixture-embedding",
         provider="fixture",
         model_name="fixture/model",
         role="retrieval",
-        normalize=True,
+        revision=revision,
+        normalize=normalize,
+        trust_remote_code=trust_remote_code,
         dimensions=dimensions,
         query_prefix="query: ",
         document_prefix="passage: ",
@@ -76,6 +89,7 @@ def _cache(chunks, model_config, vectors) -> EmbeddingCache:
         "embedding_key": model_config.key,
         "provider": model_config.provider,
         "model_name": model_config.model_name,
+        "revision": model_config.revision,
         "normalize": model_config.normalize,
         "trust_remote_code": model_config.trust_remote_code,
         "query_prefix": model_config.query_prefix,
@@ -98,8 +112,11 @@ def _build_bundle(
     vectors=None,
     dimensions=3,
     model_revision="fixture-rev-1",
+    config_revision=None,
     article_version_ids=None,
     laws=None,
+    normalize=True,
+    trust_remote_code=False,
 ):
     if articles is None:
         articles = _articles()
@@ -107,7 +124,12 @@ def _build_bundle(
         chunks = article_chunks(articles)
     if vectors is None:
         vectors = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
-    model_config = _model_config(dimensions=dimensions)
+    model_config = _model_config(
+        dimensions=dimensions,
+        normalize=normalize,
+        revision=model_revision if config_revision is None else config_revision,
+        trust_remote_code=trust_remote_code,
+    )
     cache = _cache(chunks, model_config, vectors)
     if laws is None:
         laws = [
@@ -222,6 +244,181 @@ def test_bundle_rejects_non_finite_or_wrong_dimension_vectors() -> None:
         )
 
 
+def test_normalized_profile_rejects_non_unit_and_zero_vectors() -> None:
+    with pytest.raises(StorageContractError, match="L2 norm"):
+        _build_bundle(vectors=[[0.5, 0.5, 0.0], [0.0, 1.0, 0.0]])
+    with pytest.raises(StorageContractError, match="L2 norm"):
+        _build_bundle(vectors=[[0.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+
+    unnormalized = _build_bundle(
+        vectors=[[0.5, 0.5, 0.0], [0.0, 0.0, 0.0]], normalize=False
+    )
+    assert unnormalized.embedding_profile.normalization is False
+
+
+def test_bound_query_encoder_uses_the_same_revision_and_vector_contract() -> None:
+    model = _model_config(revision="fixture-rev-bound")
+    profile = embedding_profile_identity(model, expected_dimension=3)
+    same_profile = embedding_profile_identity(model, expected_dimension=3)
+    other_profile = embedding_profile_identity(
+        replace(model, revision="fixture-rev-other"), expected_dimension=3
+    )
+
+    assert profile == same_profile
+    assert profile.profile_id != other_profile.profile_id
+
+    class _Delegate:
+        def __init__(self, vector) -> None:
+            self.vector = vector
+
+        def encode_query(self, text: str):
+            return self.vector
+
+    encoded = BoundQueryEncoder(_Delegate([1.0, 0.0, 0.0]), profile).encode_query(
+        "query"
+    )
+    assert encoded.dtype == np.dtype("float32")
+    with pytest.raises(ValueError, match="L2 norm"):
+        BoundQueryEncoder(_Delegate([0.5, 0.5, 0.0]), profile).encode_query("query")
+    with pytest.raises(ValueError, match="revision"):
+        embedding_profile_identity(replace(model, revision=""), expected_dimension=3)
+
+
+def test_bound_query_encoder_factory_requires_provider_verifiable_revision(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    revision = "a" * 40
+    model = replace(
+        _model_config(revision=revision),
+        provider="sentence_transformers",
+        model_name="fixture-owner/fixture-model",
+    )
+    captured: dict[str, object] = {}
+
+    class _Delegate:
+        def encode_query(self, text: str):
+            return [1.0, 0.0, 0.0]
+
+    def fake_build_encoder(config, **kwargs):
+        captured["config"] = config
+        captured.update(kwargs)
+        return _Delegate()
+
+    monkeypatch.setattr(embeddings_module, "build_encoder", fake_build_encoder)
+    encoder = build_bound_query_encoder(model, expected_dimension=3)
+
+    assert encoder.profile.revision == revision
+    assert captured["config"] == model
+    assert captured["expected_dimension"] == 3
+
+
+@pytest.mark.parametrize(
+    ("provider", "model_name", "revision", "message"),
+    [
+        ("sentence_transformers", "owner/model", "main", "commit SHA"),
+        ("sentence_transformers", "owner/model", "a" * 12, "commit SHA"),
+        ("sentence_transformers", "owner/model", "A" * 40, "commit SHA"),
+        (
+            "sentence_transformers",
+            "C:\\models\\local-model",
+            "a" * 40,
+            "Hub repository ID",
+        ),
+        ("siliconflow", "remote/model", "provider-alias-v1", "does not attest"),
+    ],
+)
+def test_bound_query_encoder_factory_rejects_unverifiable_models_before_loading(
+    monkeypatch: pytest.MonkeyPatch,
+    provider: str,
+    model_name: str,
+    revision: str,
+    message: str,
+) -> None:
+    model = replace(
+        _model_config(revision=revision),
+        provider=provider,
+        model_name=model_name,
+    )
+
+    def forbidden_build_encoder(*args, **kwargs):
+        raise AssertionError("provider loading must not begin")
+
+    monkeypatch.setattr(
+        embeddings_module,
+        "build_encoder",
+        forbidden_build_encoder,
+    )
+    with pytest.raises(ValueError, match=message):
+        build_bound_query_encoder(model, expected_dimension=3)
+
+    # Import identities remain declarative and support fixtures/non-hex
+    # revisions; provider attestation is enforced only by the serving factory.
+    assert (
+        embedding_profile_identity(
+            replace(model, provider="fixture", revision="fixture-revision"),
+            expected_dimension=3,
+        ).revision
+        == "fixture-revision"
+    )
+
+
+def test_bound_query_encoder_rejects_repo_shaped_local_directory(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "owner" / "model").mkdir(parents=True)
+    model = replace(
+        _model_config(revision="a" * 40),
+        provider="sentence_transformers",
+        model_name="owner/model",
+    )
+
+    monkeypatch.setattr(
+        embeddings_module,
+        "build_encoder",
+        lambda *args, **kwargs: pytest.fail("local model loading must not begin"),
+    )
+    with pytest.raises(ValueError, match="Hub repository ID"):
+        build_bound_query_encoder(model, expected_dimension=3)
+
+    with pytest.raises(ValueError, match="trust_remote_code"):
+        build_bound_query_encoder(
+            replace(
+                model,
+                model_name="owner/remote-model",
+                trust_remote_code=True,
+            ),
+            expected_dimension=3,
+        )
+
+
+def test_encoder_adapter_version_invalidates_profile_and_cache_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    model = _model_config(revision="fixture-adapter-version")
+    original_profile = embedding_profile_identity(model, expected_dimension=3)
+    original_profile_id = original_profile.profile_id
+    original_cache_contract = embedding_contract_fingerprint(model)
+
+    monkeypatch.setattr(
+        embedding_contracts_module,
+        "EMBEDDING_ENCODER_ADAPTER_VERSION",
+        "bound-encoder-v2",
+    )
+    monkeypatch.setattr(
+        embeddings_module,
+        "EMBEDDING_ENCODER_ADAPTER_VERSION",
+        "bound-encoder-v2",
+    )
+
+    assert (
+        embedding_profile_identity(model, expected_dimension=3).profile_id
+        != original_profile_id
+    )
+    assert embedding_contract_fingerprint(model) != original_cache_contract
+
+
 def test_bundle_rejects_vector_above_pgvector_storage_limit() -> None:
     oversized = np.zeros((2, 16_001), dtype=np.float32)
     oversized[:, 0] = 1.0
@@ -233,6 +430,13 @@ def test_bundle_rejects_vector_above_pgvector_storage_limit() -> None:
 def test_bundle_requires_explicit_model_revision_and_known_article_relations() -> None:
     with pytest.raises(StorageContractError, match="model_revision"):
         _build_bundle(model_revision="")
+    with pytest.raises(StorageContractError, match="revision"):
+        _build_bundle(
+            model_revision="fixture-rev-2",
+            config_revision="fixture-rev-1",
+        )
+    with pytest.raises(StorageContractError, match="trust_remote_code"):
+        _build_bundle(trust_remote_code=True)
 
     articles = _articles()
     chunks = article_chunks(articles)
@@ -363,3 +567,10 @@ def test_bundle_validator_detects_dataclass_tampering() -> None:
     )
     with pytest.raises(StorageContractError, match="embedding.*hash mismatch"):
         validate_storage_import_bundle(tampered_bundle)
+
+    non_unit_embedding = replace(bundle.embeddings[0], embedding=(0.5, 0.5, 0.0))
+    non_unit_bundle = replace(
+        bundle, embeddings=(non_unit_embedding, *bundle.embeddings[1:])
+    )
+    with pytest.raises(StorageContractError, match="L2 norm"):
+        validate_storage_import_bundle(non_unit_bundle)

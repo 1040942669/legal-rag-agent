@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from .retrieval_contracts import RetrievalProvenance
+
 
 ANSWER_MODES = frozenset(
     {
@@ -49,6 +51,7 @@ class SearchResult:
     rank: int
     retriever: str
     trace: dict[str, Any] = field(default_factory=dict)
+    provenance: RetrievalProvenance | None = None
 
 
 @dataclass(frozen=True)

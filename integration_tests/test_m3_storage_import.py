@@ -75,6 +75,7 @@ def _fixture_bundle(
         provider="fixture",
         model_name="fixture/model",
         role="retrieval",
+        revision=model_revision,
         normalize=True,
         dimensions=3,
     )
@@ -96,6 +97,7 @@ def _fixture_bundle(
             "embedding_key": model.key,
             "provider": model.provider,
             "model_name": model.model_name,
+            "revision": model.revision,
             "normalize": model.normalize,
             "trust_remote_code": model.trust_remote_code,
             "query_prefix": model.query_prefix,
@@ -149,7 +151,7 @@ def test_empty_database_upgrades_to_head_with_vector_extension(
     assert expected_tables <= set(inspect(migrated_engine).get_table_names())
     with migrated_engine.connect() as connection:
         assert MigrationContext.configure(connection).get_current_revision() == (
-            "0001_m3_storage"
+            "0002_m3_immutable_rows"
         )
         extension_version = connection.scalar(
             text("SELECT extversion FROM pg_extension WHERE extname = 'vector'")
@@ -315,6 +317,12 @@ def test_database_trigger_rejects_profile_dimension_mismatch(
     with pytest.raises(Exception, match="does not match profile dimension"):
         with migrated_engine.begin() as connection:
             connection.execute(
+                text(
+                    "ALTER TABLE chunk_embeddings DISABLE TRIGGER "
+                    "trg_chunk_embeddings_immutable"
+                )
+            )
+            connection.execute(
                 update(chunk_embeddings)
                 .where(
                     chunk_embeddings.c.chunk_id == bundle.embeddings[0].chunk_id,
@@ -347,9 +355,15 @@ def test_repeat_import_detects_persisted_text_tampering(
 
     with migrated_engine.begin() as connection:
         connection.execute(
+            text("ALTER TABLE chunks DISABLE TRIGGER trg_chunks_immutable")
+        )
+        connection.execute(
             update(chunks)
             .where(chunks.c.chunk_id == target.chunk_id)
             .values(text="tampered database text")
+        )
+        connection.execute(
+            text("ALTER TABLE chunks ENABLE TRIGGER trg_chunks_immutable")
         )
     try:
         with pytest.raises(ImportConflictError, match="immutable content in text"):
@@ -357,9 +371,15 @@ def test_repeat_import_detects_persisted_text_tampering(
     finally:
         with migrated_engine.begin() as connection:
             connection.execute(
+                text("ALTER TABLE chunks DISABLE TRIGGER trg_chunks_immutable")
+            )
+            connection.execute(
                 update(chunks)
                 .where(chunks.c.chunk_id == target.chunk_id)
                 .values(text=target.text)
+            )
+            connection.execute(
+                text("ALTER TABLE chunks ENABLE TRIGGER trg_chunks_immutable")
             )
 
 
