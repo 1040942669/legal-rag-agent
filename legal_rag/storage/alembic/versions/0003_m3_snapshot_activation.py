@@ -63,6 +63,32 @@ $$;
 """
 
 
+DOWNGRADE_ACTIVATION_HISTORY_ASSERTIONS_SQL = """
+DO $$
+DECLARE
+    unsafe_scope text;
+    unsafe_revision bigint;
+    unsafe_operation text;
+BEGIN
+    SELECT event.scope_id, event.revision, event.operation
+    INTO unsafe_scope, unsafe_revision, unsafe_operation
+    FROM snapshot_activation_events AS event
+    WHERE event.revision <> 1
+       OR event.operation NOT IN ('migration_bootstrap', 'initial_activate')
+    ORDER BY event.scope_id, event.revision
+    LIMIT 1;
+
+    IF unsafe_scope IS NOT NULL THEN
+        RAISE EXCEPTION
+            'cannot downgrade activation history for scope %, revision %, operation %; back up the activation ledger and perform an approved manual migration',
+            unsafe_scope, unsafe_revision, unsafe_operation
+            USING ERRCODE = '55000';
+    END IF;
+END;
+$$;
+"""
+
+
 CORPUS_SNAPSHOT_GUARD_SQL = """
 CREATE OR REPLACE FUNCTION legal_rag_guard_corpus_snapshot_change()
 RETURNS trigger
@@ -543,6 +569,14 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Revisioned replace/rollback history cannot be represented by the 0002
+    # schema.  Hold writers out while checking and fail before dropping any
+    # ledger object so operators must explicitly back up and migrate history.
+    op.execute(
+        "LOCK TABLE active_snapshot_pointers, snapshot_activation_events, "
+        "corpus_snapshots IN SHARE ROW EXCLUSIVE MODE"
+    )
+    op.execute(DOWNGRADE_ACTIVATION_HISTORY_ASSERTIONS_SQL)
     for table_name in reversed(
         (
             "corpus_snapshots",
