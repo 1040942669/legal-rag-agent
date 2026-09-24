@@ -609,27 +609,25 @@ def test_filters_apply_before_limit_and_isolate_scope_snapshot_profile_and_versi
     with migrated_engine.begin() as connection:
         connection.execute(
             update(corpus_snapshots)
-            .where(corpus_snapshots.c.snapshot_id == target.snapshot.snapshot_id)
+            .where(
+                corpus_snapshots.c.snapshot_id == other_snapshot.snapshot.snapshot_id
+            )
             .values(status="archived")
         )
-    try:
-        archived_encoder = _FixedEncoder(
-            [1.0, 0.0, 0.0], target.embedding_profile.to_identity()
+    archived_encoder = _FixedEncoder(
+        [1.0, 0.0, 0.0], other_snapshot.embedding_profile.to_identity()
+    )
+    with pytest.raises(RetrievalUnavailableError, match="not serviceable"):
+        PgVectorExactRetriever(
+            repository,
+            encoder=archived_encoder,
+            filters=RetrievalFilters(
+                scope_id=other_snapshot.snapshot.scope_id,
+                snapshot_id=other_snapshot.snapshot.snapshot_id,
+                profile_id=other_snapshot.embedding_profile.profile_id,
+            ),
         )
-        with pytest.raises(RetrievalUnavailableError, match="not serviceable"):
-            PgVectorExactRetriever(
-                repository,
-                encoder=archived_encoder,
-                filters=v1_filters,
-            )
-        assert archived_encoder.calls == 0
-    finally:
-        with migrated_engine.begin() as connection:
-            connection.execute(
-                update(corpus_snapshots)
-                .where(corpus_snapshots.c.snapshot_id == target.snapshot.snapshot_id)
-                .values(status="active", activated_at=func.now())
-            )
+    assert archived_encoder.calls == 0
 
     with pytest.raises(DBAPIError, match="immutable storage table embedding_imports"):
         with migrated_engine.begin() as connection:

@@ -3,12 +3,13 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from threading import Barrier
+import uuid
 
 import numpy as np
 import pytest
 from alembic import command
 from alembic.runtime.migration import MigrationContext
-from sqlalchemy import Engine, inspect, select, text, update
+from sqlalchemy import Engine, create_engine, inspect, make_url, select, text, update
 
 from legal_rag.chunking import article_chunks
 from legal_rag.embeddings import (
@@ -21,7 +22,7 @@ from legal_rag.embeddings import (
 from legal_rag.models import LawArticle
 from legal_rag.storage.contracts import LawVersionSpec, build_storage_import_bundle
 from legal_rag.storage.database import DatabaseSettings, create_database_engine
-from legal_rag.storage.migrations import alembic_config
+from legal_rag.storage.migrations import alembic_config, upgrade_database
 from legal_rag.storage.repository import (
     ImportConflictError,
     PostgresCorpusRepository,
@@ -147,17 +148,151 @@ def test_empty_database_upgrades_to_head_with_vector_extension(
         "law_articles",
         "law_versions",
         "snapshot_chunks",
+        "snapshot_activation_events",
     }
-    assert expected_tables <= set(inspect(migrated_engine).get_table_names())
+    inspector = inspect(migrated_engine)
+    assert expected_tables <= set(inspector.get_table_names())
+    assert "ix_chunk_articles_article_chunk" in {
+        item["name"] for item in inspector.get_indexes("chunk_articles")
+    }
     with migrated_engine.connect() as connection:
         assert MigrationContext.configure(connection).get_current_revision() == (
-            "0002_m3_immutable_rows"
+            "0003_m3_activation"
         )
         extension_version = connection.scalar(
             text("SELECT extversion FROM pg_extension WHERE extname = 'vector'")
         )
         command.check(alembic_config(connection=connection))
     assert extension_version
+
+
+def test_legacy_active_pointers_with_delimiter_ambiguity_upgrade_distinctly(
+    integration_database_url: str,
+) -> None:
+    parsed_url = make_url(integration_database_url)
+    database_name = f"legal_rag_m3_test_legacy_{uuid.uuid4().hex[:12]}"
+    database_url = parsed_url.set(database=database_name)
+    admin_engine = create_engine(
+        parsed_url.set(database="postgres"), isolation_level="AUTOCOMMIT"
+    )
+    legacy_engine: Engine | None = None
+
+    try:
+        with admin_engine.connect() as connection:
+            connection.exec_driver_sql(f'CREATE DATABASE "{database_name}"')
+        legacy_engine = create_database_engine(
+            DatabaseSettings(database_url.render_as_string(hide_password=False))
+        )
+        upgrade_database(legacy_engine, "0002_m3_immutable_rows")
+
+        legacy_timestamp = "2026-09-25 00:00:00+00"
+        with legacy_engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO corpus_snapshots (
+                        snapshot_id,
+                        scope_id,
+                        source_manifest,
+                        source_manifest_hash,
+                        corpus_hash
+                    ) VALUES
+                        ('c', 'a:b', '{}'::jsonb, repeat('a', 64), repeat('b', 64)),
+                        ('b:c', 'a', '{}'::jsonb, repeat('c', 64), repeat('d', 64))
+                    """
+                )
+            )
+            connection.execute(
+                text(
+                    """
+                    UPDATE corpus_snapshots
+                    SET status = 'validated',
+                        validated_at = CAST(:legacy_timestamp AS timestamptz)
+                    WHERE snapshot_id IN ('c', 'b:c')
+                    """
+                ),
+                {"legacy_timestamp": legacy_timestamp},
+            )
+            connection.execute(
+                text(
+                    """
+                    UPDATE corpus_snapshots
+                    SET status = 'active',
+                        activated_at = CAST(:legacy_timestamp AS timestamptz)
+                    WHERE snapshot_id IN ('c', 'b:c')
+                    """
+                ),
+                {"legacy_timestamp": legacy_timestamp},
+            )
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO active_snapshot_pointers (
+                        scope_id,
+                        snapshot_id,
+                        updated_at
+                    ) VALUES
+                        ('a:b', 'c', CAST(:legacy_timestamp AS timestamptz)),
+                        ('a', 'b:c', CAST(:legacy_timestamp AS timestamptz))
+                    """
+                ),
+                {"legacy_timestamp": legacy_timestamp},
+            )
+
+        upgrade_database(legacy_engine)
+
+        with legacy_engine.connect() as connection:
+            rows = (
+                connection.execute(
+                    text(
+                        """
+                    SELECT
+                        pointer.scope_id,
+                        pointer.snapshot_id,
+                        pointer.revision,
+                        pointer.activation_id,
+                        pointer.updated_at,
+                        event.operation,
+                        event.target_snapshot_id,
+                        event.occurred_at
+                    FROM active_snapshot_pointers AS pointer
+                    JOIN snapshot_activation_events AS event
+                      ON event.scope_id = pointer.scope_id
+                     AND event.revision = pointer.revision
+                     AND event.activation_id = pointer.activation_id
+                     AND event.target_snapshot_id = pointer.snapshot_id
+                    ORDER BY pointer.scope_id
+                    """
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            command.check(alembic_config(connection=connection))
+
+        assert len(rows) == 2
+        assert {row["scope_id"] for row in rows} == {"a", "a:b"}
+        assert {row["snapshot_id"] for row in rows} == {"c", "b:c"}
+        assert {row["revision"] for row in rows} == {1}
+        assert {row["operation"] for row in rows} == {"migration_bootstrap"}
+        assert all(row["target_snapshot_id"] == row["snapshot_id"] for row in rows)
+        assert len({row["activation_id"] for row in rows}) == 2
+        assert all(row["occurred_at"] == row["updated_at"] for row in rows)
+    finally:
+        if legacy_engine is not None:
+            legacy_engine.dispose()
+        with admin_engine.connect() as connection:
+            connection.execute(
+                text(
+                    "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                    "WHERE datname = :database_name AND pid <> pg_backend_pid()"
+                ),
+                {"database_name": database_name},
+            )
+            connection.exec_driver_sql(
+                f'DROP DATABASE IF EXISTS "{database_name}" WITH (FORCE)'
+            )
+        admin_engine.dispose()
 
 
 def test_import_is_idempotent_and_preserves_hash_count_and_dimension(

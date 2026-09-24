@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pgvector.sqlalchemy import VECTOR
 from sqlalchemy import (
+    BigInteger,
     Boolean,
     CheckConstraint,
     Column,
@@ -159,6 +160,12 @@ chunk_articles = Table(
     UniqueConstraint("chunk_id", "ordinal", name="uq_chunk_articles_ordinal"),
 )
 
+Index(
+    "ix_chunk_articles_article_chunk",
+    chunk_articles.c.article_id,
+    chunk_articles.c.chunk_id,
+)
+
 
 snapshot_chunks = Table(
     "snapshot_chunks",
@@ -284,6 +291,92 @@ index_builds = Table(
 )
 
 
+snapshot_activation_events = Table(
+    "snapshot_activation_events",
+    metadata,
+    Column("activation_id", String(64), primary_key=True),
+    Column("scope_id", String(255), nullable=False),
+    Column("revision", BigInteger, nullable=False),
+    Column("operation", String(32), nullable=False),
+    Column("previous_snapshot_id", String(255), nullable=True),
+    Column("target_snapshot_id", String(255), nullable=False),
+    Column("previous_activation_id", String(64), nullable=True),
+    Column("actor", String(128), nullable=True),
+    Column("reason", Text, nullable=True),
+    Column(
+        "occurred_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    CheckConstraint(
+        "revision > 0",
+        name="ck_snapshot_activation_events_revision_positive",
+    ),
+    CheckConstraint(
+        "operation IN "
+        "('initial_activate', 'replace', 'rollback', 'migration_bootstrap')",
+        name="ck_snapshot_activation_events_operation",
+    ),
+    CheckConstraint(
+        "((revision = 1 "
+        "AND previous_snapshot_id IS NULL "
+        "AND previous_activation_id IS NULL) "
+        "OR (revision > 1 "
+        "AND previous_snapshot_id IS NOT NULL "
+        "AND previous_activation_id IS NOT NULL))",
+        name="ck_snapshot_activation_events_predecessor",
+    ),
+    CheckConstraint(
+        "((operation IN ('initial_activate', 'migration_bootstrap') "
+        "AND revision = 1) "
+        "OR (operation IN ('replace', 'rollback') AND revision > 1))",
+        name="ck_snapshot_activation_events_operation_revision",
+    ),
+    CheckConstraint(
+        "previous_snapshot_id IS NULL OR target_snapshot_id <> previous_snapshot_id",
+        name="ck_snapshot_activation_events_target_changes",
+    ),
+    ForeignKeyConstraint(
+        ["scope_id", "previous_snapshot_id"],
+        ["corpus_snapshots.scope_id", "corpus_snapshots.snapshot_id"],
+        name="fk_snapshot_activation_events_previous_snapshot",
+    ),
+    ForeignKeyConstraint(
+        ["scope_id", "target_snapshot_id"],
+        ["corpus_snapshots.scope_id", "corpus_snapshots.snapshot_id"],
+        name="fk_snapshot_activation_events_target_snapshot",
+    ),
+    ForeignKeyConstraint(
+        ["scope_id", "previous_activation_id"],
+        [
+            "snapshot_activation_events.scope_id",
+            "snapshot_activation_events.activation_id",
+        ],
+        name="fk_snapshot_activation_events_previous_event",
+        deferrable=True,
+        initially="DEFERRED",
+    ),
+    UniqueConstraint(
+        "scope_id",
+        "revision",
+        name="uq_snapshot_activation_events_scope_revision",
+    ),
+    UniqueConstraint(
+        "scope_id",
+        "activation_id",
+        name="uq_snapshot_activation_events_scope_activation",
+    ),
+    UniqueConstraint(
+        "scope_id",
+        "revision",
+        "activation_id",
+        "target_snapshot_id",
+        name="uq_snapshot_activation_events_pointer_target",
+    ),
+)
+
+
 active_snapshot_pointers = Table(
     "active_snapshot_pointers",
     metadata,
@@ -293,13 +386,31 @@ active_snapshot_pointers = Table(
         String(255),
         nullable=False,
     ),
+    Column("revision", BigInteger, nullable=False),
+    Column("activation_id", String(64), nullable=False),
     Column(
         "updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()
+    ),
+    CheckConstraint(
+        "revision > 0",
+        name="ck_active_snapshot_pointers_revision_positive",
     ),
     ForeignKeyConstraint(
         ["scope_id", "snapshot_id"],
         ["corpus_snapshots.scope_id", "corpus_snapshots.snapshot_id"],
         name="fk_active_snapshot_pointer_scope_snapshot",
+    ),
+    ForeignKeyConstraint(
+        ["scope_id", "revision", "activation_id", "snapshot_id"],
+        [
+            "snapshot_activation_events.scope_id",
+            "snapshot_activation_events.revision",
+            "snapshot_activation_events.activation_id",
+            "snapshot_activation_events.target_snapshot_id",
+        ],
+        name="fk_active_snapshot_pointer_activation_event",
+        deferrable=True,
+        initially="DEFERRED",
     ),
 )
 
