@@ -260,6 +260,45 @@ embedding_imports = Table(
 )
 
 
+embedding_profile_generations = Table(
+    "embedding_profile_generations",
+    metadata,
+    Column(
+        "profile_id",
+        String(64),
+        primary_key=True,
+    ),
+    Column("embedding_count", BigInteger, nullable=False),
+    Column("embedding_manifest_hash", String(64), nullable=True),
+    Column("ann_physical_instance_id", String(64), nullable=True),
+    Column("ann_physical_index_name", String(63), nullable=True),
+    Column("ann_index_params_hash", String(64), nullable=True),
+    Column(
+        "updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()
+    ),
+    CheckConstraint(
+        "embedding_count >= 0",
+        name="ck_embedding_profile_generations_count",
+    ),
+    CheckConstraint(
+        "((embedding_manifest_hash IS NULL "
+        "AND ann_physical_instance_id IS NULL "
+        "AND ann_physical_index_name IS NULL "
+        "AND ann_index_params_hash IS NULL) OR "
+        "(embedding_manifest_hash IS NOT NULL "
+        "AND ann_physical_instance_id IS NOT NULL "
+        "AND ann_physical_index_name IS NOT NULL "
+        "AND ann_index_params_hash IS NOT NULL))",
+        name="ck_embedding_profile_generations_ann_binding",
+    ),
+    ForeignKeyConstraint(
+        ["profile_id"],
+        ["embedding_profiles.profile_id"],
+        name="fk_embedding_profile_generations_profile",
+    ),
+)
+
+
 index_builds = Table(
     "index_builds",
     metadata,
@@ -277,6 +316,12 @@ index_builds = Table(
         "status IN ('building', 'validated', 'active', 'failed', 'archived')",
         name="ck_index_builds_status",
     ),
+    CheckConstraint(
+        "((status = 'building' AND completed_at IS NULL) OR "
+        "(status IN ('validated', 'active', 'failed', 'archived') "
+        "AND completed_at IS NOT NULL))",
+        name="ck_index_builds_completion",
+    ),
     ForeignKeyConstraint(
         ["snapshot_id", "profile_id"],
         ["embedding_imports.snapshot_id", "embedding_imports.profile_id"],
@@ -288,6 +333,14 @@ index_builds = Table(
         "index_params_hash",
         name="uq_index_build_identity",
     ),
+)
+
+Index(
+    "uq_index_builds_active_boundary",
+    index_builds.c.snapshot_id,
+    index_builds.c.profile_id,
+    unique=True,
+    postgresql_where=index_builds.c.status == "active",
 )
 
 

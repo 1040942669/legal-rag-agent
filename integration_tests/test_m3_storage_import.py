@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+import os
 from pathlib import Path
 from threading import Barrier
 import uuid
@@ -143,6 +144,7 @@ def test_empty_database_upgrades_to_head_with_vector_extension(
         "chunks",
         "corpus_snapshots",
         "embedding_profiles",
+        "embedding_profile_generations",
         "embedding_imports",
         "index_builds",
         "law_articles",
@@ -157,13 +159,17 @@ def test_empty_database_upgrades_to_head_with_vector_extension(
     }
     with migrated_engine.connect() as connection:
         assert MigrationContext.configure(connection).get_current_revision() == (
-            "0003_m3_activation"
+            "0004_m3_ann_guards"
         )
         extension_version = connection.scalar(
             text("SELECT extversion FROM pg_extension WHERE extname = 'vector'")
         )
         command.check(alembic_config(connection=connection))
-    assert extension_version
+    expected_extension_version = os.environ.get("LEGAL_RAG_EXPECTED_PGVECTOR_VERSION")
+    if expected_extension_version:
+        assert extension_version == expected_extension_version
+    else:
+        assert extension_version
 
 
 def test_legacy_active_pointers_with_delimiter_ambiguity_upgrade_distinctly(

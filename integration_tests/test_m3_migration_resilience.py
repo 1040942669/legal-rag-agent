@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import uuid
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 from typing import Iterator
 
@@ -22,6 +23,10 @@ from legal_rag.embeddings import (
     embedding_contract_fingerprint,
 )
 from legal_rag.models import LawArticle
+from legal_rag.storage.ann import (
+    PostgresAnnRetrievalRepository,
+    PostgresHnswIndexManager,
+)
 from legal_rag.storage.catalog import PostgresLegalCatalogRepository
 from legal_rag.storage.contracts import LawVersionSpec, build_storage_import_bundle
 from legal_rag.storage.database import DatabaseSettings, create_database_engine
@@ -39,7 +44,7 @@ from legal_rag.storage.schema import (
 
 
 LEGACY_REVISION = "0002_m3_immutable_rows"
-HEAD_REVISION = "0003_m3_activation"
+HEAD_REVISION = "0004_m3_ann_guards"
 
 
 @contextmanager
@@ -268,11 +273,18 @@ def _legacy_state(engine: Engine) -> tuple[dict[str, object], dict[str, object] 
 def _assert_no_0003_residue(engine: Engine) -> None:
     inspector = inspect(engine)
     assert "snapshot_activation_events" not in inspector.get_table_names()
+    assert "embedding_profile_generations" not in inspector.get_table_names()
     assert {
         item["name"] for item in inspector.get_columns("active_snapshot_pointers")
     }.isdisjoint({"revision", "activation_id"})
     assert "ix_chunk_articles_article_chunk" not in {
         item["name"] for item in inspector.get_indexes("chunk_articles")
+    }
+    assert "uq_index_builds_active_boundary" not in {
+        item["name"] for item in inspector.get_indexes("index_builds")
+    }
+    assert "ck_index_builds_completion" not in {
+        item["name"] for item in inspector.get_check_constraints("index_builds")
     }
     with engine.connect() as connection:
         assert not connection.scalar(
@@ -286,6 +298,21 @@ def _assert_no_0003_residue(engine: Engine) -> None:
                     WHERE namespace.nspname = current_schema()
                       AND procedure.proname =
                           'legal_rag_enforce_snapshot_activation_consistency'
+                )
+                """
+            )
+        )
+        assert not connection.scalar(
+            text(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM pg_proc AS procedure
+                    JOIN pg_namespace AS namespace
+                      ON namespace.oid = procedure.pronamespace
+                    WHERE namespace.nspname = current_schema()
+                      AND procedure.proname =
+                          'legal_rag_bind_embedding_profile_generation'
                 )
                 """
             )
@@ -305,6 +332,58 @@ def _assert_no_0003_residue(engine: Engine) -> None:
                 )
             )
             == 0
+        )
+        assert not connection.scalar(
+            text(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM pg_proc AS procedure
+                    JOIN pg_namespace AS namespace
+                      ON namespace.oid = procedure.pronamespace
+                    WHERE namespace.nspname = current_schema()
+                      AND procedure.proname = 'legal_rag_guard_index_build_change'
+                )
+                """
+            )
+        )
+        assert not connection.scalar(
+            text(
+                """
+                SELECT EXISTS (
+                    SELECT 1
+                    FROM pg_proc AS procedure
+                    JOIN pg_namespace AS namespace
+                      ON namespace.oid = procedure.pronamespace
+                    WHERE namespace.nspname = current_schema()
+                      AND procedure.proname =
+                          'legal_rag_track_embedding_profile_generation'
+                )
+                """
+            )
+        )
+        assert not connection.scalar(
+            text(
+                """
+                SELECT EXISTS (
+                    SELECT 1 FROM pg_trigger
+                    WHERE NOT tgisinternal
+                      AND tgname = 'trg_index_builds_guarded'
+                )
+                """
+            )
+        )
+        assert not connection.scalar(
+            text(
+                """
+                SELECT EXISTS (
+                    SELECT 1 FROM pg_trigger
+                    WHERE NOT tgisinternal
+                      AND tgname =
+                          'trg_chunk_embeddings_track_profile_generation'
+                )
+                """
+            )
         )
 
 
@@ -390,6 +469,79 @@ def test_downgrade_rejects_revisioned_activation_history_before_schema_changes(
         assert "snapshot_activation_events" in inspect(engine).get_table_names()
 
 
+def test_invalid_legacy_index_build_blocks_0004_atomically(
+    integration_database_url: str,
+) -> None:
+    with _temporary_database(integration_database_url, "invalid_index_build") as engine:
+        upgrade_database(engine, "0003_m3_activation")
+        bundle = _fixture_bundle(
+            prefix="invalid-index-build",
+            scope_id="scope-invalid-index-build",
+            snapshot_id="snapshot-invalid-index-build",
+        )
+        PostgresCorpusRepository(engine).import_bundle(bundle)
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO index_builds (
+                        build_id,
+                        snapshot_id,
+                        profile_id,
+                        index_params,
+                        index_params_hash,
+                        status,
+                        completed_at
+                    ) VALUES (
+                        'legacy-invalid-completion',
+                        :snapshot_id,
+                        :profile_id,
+                        '{}'::jsonb,
+                        repeat('a', 64),
+                        'validated',
+                        NULL
+                    )
+                    """
+                ),
+                {
+                    "snapshot_id": bundle.snapshot.snapshot_id,
+                    "profile_id": bundle.embedding_profile.profile_id,
+                },
+            )
+
+        with pytest.raises(DBAPIError) as upgrade_error:
+            upgrade_database(engine)
+        assert upgrade_error.value.orig.sqlstate == "23514"
+        assert _current_revision(engine) == "0003_m3_activation"
+        inspector = inspect(engine)
+        assert "embedding_profile_generations" not in inspector.get_table_names()
+        assert "uq_index_builds_active_boundary" not in {
+            item["name"] for item in inspector.get_indexes("index_builds")
+        }
+        assert "ck_index_builds_completion" not in {
+            item["name"] for item in inspector.get_check_constraints("index_builds")
+        }
+        with engine.connect() as connection:
+            assert not connection.scalar(
+                text(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM pg_proc AS procedure
+                        JOIN pg_namespace AS namespace
+                          ON namespace.oid = procedure.pronamespace
+                        WHERE namespace.nspname = current_schema()
+                          AND procedure.proname IN (
+                              'legal_rag_guard_index_build_change',
+                              'legal_rag_bind_embedding_profile_generation',
+                              'legal_rag_track_embedding_profile_generation'
+                          )
+                    )
+                    """
+                )
+            )
+
+
 def _retrieval_signature(engine: Engine, bundle) -> tuple[object, ...]:
     filters = RetrievalFilters(
         scope_id=bundle.snapshot.scope_id,
@@ -460,6 +612,17 @@ def test_safe_revision_one_downgrade_and_reupgrade_preserve_data_and_retrieval(
         )
         assert initial.selection.revision == 1
         assert initial.event.operation == "initial_activate"
+        ann_filters = RetrievalFilters(
+            scope_id=bundle.snapshot.scope_id,
+            snapshot_id=bundle.snapshot.snapshot_id,
+            profile_id=bundle.embedding_profile.profile_id,
+        )
+        ann_manager = PostgresHnswIndexManager(engine)
+        ann_build = ann_manager.ensure_index(
+            filters=ann_filters,
+            expected_profile=bundle.embedding_profile.to_identity(),
+        )
+        assert ann_build.reused is False
         corpus_before = _corpus_signature(engine, bundle.snapshot.snapshot_id)
         retrieval_before = _retrieval_signature(engine, bundle)
 
@@ -467,6 +630,11 @@ def test_safe_revision_one_downgrade_and_reupgrade_preserve_data_and_retrieval(
 
         assert _current_revision(engine) == LEGACY_REVISION
         _assert_no_0003_residue(engine)
+        with engine.connect() as connection:
+            assert connection.scalar(
+                text("SELECT to_regclass(:index_name) IS NOT NULL"),
+                {"index_name": ann_build.physical_index_name},
+            )
         assert _corpus_signature(engine, bundle.snapshot.snapshot_id) == corpus_before
         assert _retrieval_signature(engine, bundle) == retrieval_before
 
@@ -475,6 +643,11 @@ def test_safe_revision_one_downgrade_and_reupgrade_preserve_data_and_retrieval(
         assert _current_revision(engine) == HEAD_REVISION
         assert _corpus_signature(engine, bundle.snapshot.snapshot_id) == corpus_before
         assert _retrieval_signature(engine, bundle) == retrieval_before
+        reused_build = PostgresHnswIndexManager(engine).ensure_index(
+            filters=ann_filters,
+            expected_profile=bundle.embedding_profile.to_identity(),
+        )
+        assert reused_build == replace(ann_build, reused=True)
         restored = PostgresLegalCatalogRepository(engine).get_active_snapshot(
             bundle.snapshot.scope_id
         )
@@ -488,3 +661,106 @@ def test_safe_revision_one_downgrade_and_reupgrade_preserve_data_and_retrieval(
         assert history[0].target_snapshot_id == bundle.snapshot.snapshot_id
         assert history[0].activation_id == restored.activation_id
         assert history[0].occurred_at == restored.activated_at
+
+
+def test_embeddings_added_while_downgraded_force_a_new_ann_physical_instance(
+    integration_database_url: str,
+) -> None:
+    with _temporary_database(integration_database_url, "ann_downgrade_write") as engine:
+        upgrade_database(engine)
+        first_bundle = _fixture_bundle(
+            prefix="ann-before-downgrade",
+            scope_id="scope-ann-before-downgrade",
+            snapshot_id="snapshot-ann-before-downgrade",
+        )
+        repository = PostgresCorpusRepository(engine)
+        repository.import_bundle(first_bundle)
+        profile = first_bundle.embedding_profile.to_identity()
+        filters = RetrievalFilters(
+            scope_id=first_bundle.snapshot.scope_id,
+            snapshot_id=first_bundle.snapshot.snapshot_id,
+            profile_id=profile.profile_id,
+        )
+        first_build = PostgresHnswIndexManager(engine).ensure_index(
+            filters=filters,
+            expected_profile=profile,
+        )
+
+        _downgrade_database(engine, LEGACY_REVISION)
+        second_bundle = _fixture_bundle(
+            prefix="ann-while-downgraded",
+            scope_id="scope-ann-while-downgraded",
+            snapshot_id="snapshot-ann-while-downgraded",
+        )
+        assert second_bundle.embedding_profile.profile_id == profile.profile_id
+        repository.import_bundle(second_bundle)
+        upgrade_database(engine)
+
+        replacement = PostgresHnswIndexManager(engine).ensure_index(
+            filters=filters,
+            expected_profile=profile,
+        )
+        assert replacement.reused is False
+        assert replacement.profile_embedding_count == 2
+        assert replacement.build_id != first_build.build_id
+        assert replacement.physical_instance_id != first_build.physical_instance_id
+        assert replacement.physical_index_name != first_build.physical_index_name
+        with engine.connect() as connection:
+            assert (
+                connection.scalar(
+                    text("SELECT to_regclass(:index_name)"),
+                    {"index_name": first_build.physical_index_name},
+                )
+                is None
+            )
+        outcome = PostgresAnnRetrievalRepository(engine).search_vector(
+            [1.0, 0.0, 0.0],
+            top_k=1,
+            filters=filters,
+            expected_profile=profile,
+            build=replacement,
+        )
+        assert outcome.status == "ann_complete"
+        assert outcome.results[0].provenance is not None
+        assert (
+            outcome.results[0].provenance.snapshot_id
+            == first_bundle.snapshot.snapshot_id
+        )
+
+
+def test_equal_profile_counts_with_different_rows_have_distinct_manifest_hashes(
+    integration_database_url: str,
+) -> None:
+    observations: list[tuple[str, int, str]] = []
+    for purpose, prefix in (
+        ("manifest_a", "manifest-rowset-a"),
+        ("manifest_b", "manifest-rowset-b"),
+    ):
+        with _temporary_database(integration_database_url, purpose) as engine:
+            upgrade_database(engine)
+            bundle = _fixture_bundle(
+                prefix=prefix,
+                scope_id=f"scope-{prefix}",
+                snapshot_id=f"snapshot-{prefix}",
+            )
+            PostgresCorpusRepository(engine).import_bundle(bundle)
+            profile = bundle.embedding_profile.to_identity()
+            build = PostgresHnswIndexManager(engine).ensure_index(
+                filters=RetrievalFilters(
+                    scope_id=bundle.snapshot.scope_id,
+                    snapshot_id=bundle.snapshot.snapshot_id,
+                    profile_id=profile.profile_id,
+                ),
+                expected_profile=profile,
+            )
+            observations.append(
+                (
+                    build.profile_id,
+                    build.profile_embedding_count,
+                    build.profile_embedding_manifest_hash,
+                )
+            )
+
+    assert observations[0][0] == observations[1][0]
+    assert observations[0][1] == observations[1][1] == 1
+    assert observations[0][2] != observations[1][2]

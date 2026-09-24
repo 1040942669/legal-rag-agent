@@ -1077,7 +1077,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=1.26.0" },
     { name = "openai", specifier = ">=1.0.0" },
     { name = "pandas", specifier = ">=2.0.0" },
-    { name = "pgvector", marker = "extra == 'database'", specifier = ">=0.4,<1" },
+    { name = "pgvector", marker = "extra == 'database'", specifier = ">=0.5,<0.6" },
     { name = "psutil", specifier = ">=5.9.0" },
     { name = "psycopg", extras = ["binary"], marker = "extra == 'database'", specifier = ">=3.2,<4" },
     { name = "pyyaml", specifier = ">=6.0.0" },

@@ -130,8 +130,16 @@ class PostgresExactRetrievalRepository:
         top_k: int,
         filters: RetrievalFilters,
         expected_profile: EmbeddingProfileIdentity,
+        statement_timeout_ms: int | None = None,
     ) -> list[SearchResult]:
         resolved_top_k = _validate_top_k(top_k)
+        if statement_timeout_ms is not None:
+            if isinstance(statement_timeout_ms, bool) or not isinstance(
+                statement_timeout_ms, int
+            ):
+                raise TypeError("statement_timeout_ms must be an integer or None")
+            if statement_timeout_ms < 1 or statement_timeout_ms > 60_000:
+                raise ValueError("statement_timeout_ms must be between 1 and 60000")
         if filters.profile_id != expected_profile.profile_id:
             raise RetrievalContractError(
                 "expected embedding profile does not match bound profile_id"
@@ -139,6 +147,12 @@ class PostgresExactRetrievalRepository:
         vector = _canonical_query_vector(query_vector, expected_profile)
 
         with self.engine.connect() as connection:
+            if statement_timeout_ms is not None:
+                # Transaction-local so a pooled connection cannot leak the
+                # fallback budget into later exact requests.
+                connection.exec_driver_sql(
+                    f"SET LOCAL statement_timeout = {statement_timeout_ms}"
+                )
             profile = self._validated_context(
                 connection, filters, expected_profile=expected_profile
             )
@@ -433,7 +447,7 @@ class PostgresExactRetrievalRepository:
         return stored_identity
 
     @staticmethod
-    def _relation_filter(filters: RetrievalFilters):
+    def _relation_filter(filters: RetrievalFilters, *, chunk_id_column=None):
         match_conditions = []
         if filters.law_ids is not None:
             match_conditions.append(law_articles.c.law_id.in_(filters.law_ids))
@@ -468,7 +482,10 @@ class PostgresExactRetrievalRepository:
                 law_versions.c.law_id == law_articles.c.law_id,
             ),
         )
-        same_chunk = chunk_articles.c.chunk_id == chunks.c.chunk_id
+        resolved_chunk_id = (
+            chunks.c.chunk_id if chunk_id_column is None else chunk_id_column
+        )
+        same_chunk = chunk_articles.c.chunk_id == resolved_chunk_id
         match = and_(*match_conditions)
         matching_relation = exists(
             select(1).select_from(relation_join).where(same_chunk, match)
