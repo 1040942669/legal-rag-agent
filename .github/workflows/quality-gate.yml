@@ -172,6 +172,14 @@ jobs:
           --receipt "${RUNNER_TEMP}/m3-restart-receipt.json"
           > "${RUNNER_TEMP}/m3-restart-verification.json"
 
+      - name: Run the M3 cumulative integration quality gate
+        run: >-
+          uv run --offline --frozen --no-sync python scripts/quality_gate.py
+          --milestone M3
+          --mode integration
+          --restart-receipt "${RUNNER_TEMP}/m3-restart-receipt.json"
+          --output "${RUNNER_TEMP}/m3-quality-gate.json"
+
       - name: Build the wheel and verify packaged migration resources
         run: |
           uv build --wheel --out-dir "${RUNNER_TEMP}/m3-wheel"
@@ -186,5 +194,6 @@ jobs:
             ${{ runner.temp }}/m3-storage-junit.xml
             ${{ runner.temp }}/m3-restart-receipt.json
             ${{ runner.temp }}/m3-restart-verification.json
+            ${{ runner.temp }}/m3-quality-gate.json
           if-no-files-found: error
           retention-days: 14

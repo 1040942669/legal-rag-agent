@@ -38,6 +38,21 @@ class ImportResult:
     status: str
 
 
+@dataclass(frozen=True)
+class ImportValidationResult:
+    snapshot_id: str
+    scope_id: str
+    profile_id: str
+    corpus_hash: str
+    bundle_hash: str
+    status: str
+    dimensions: int
+    law_version_count: int
+    article_count: int
+    chunk_count: int
+    embedding_count: int
+
+
 def _existing_mapping(
     connection: Connection, table, key_column, key_value: str
 ) -> Mapping[str, Any] | None:
@@ -465,6 +480,82 @@ class PostgresCorpusRepository:
             chunk_count=len(bundle.chunks),
             embedding_count=len(bundle.embeddings),
             status=status,
+        )
+
+    def validate_bundle(self, bundle: StorageImportBundle) -> ImportValidationResult:
+        """Read back one immutable snapshot/profile import and verify every hash.
+
+        This is intentionally separate from ``import_bundle`` so a release or
+        operator command can validate an existing database without writing or
+        silently repairing it.  Missing, extra, or drifted rows fail closed.
+        """
+
+        validate_storage_import_bundle(bundle)
+        with self.engine.connect() as connection:
+            snapshot = _existing_mapping(
+                connection,
+                corpus_snapshots,
+                corpus_snapshots.c.snapshot_id,
+                bundle.snapshot.snapshot_id,
+            )
+            if snapshot is None:
+                raise ImportConflictError(
+                    f"snapshot_id {bundle.snapshot.snapshot_id!r} is missing"
+                )
+            expected_snapshot = {
+                "scope_id": bundle.snapshot.scope_id,
+                "source_manifest": json.loads(bundle.snapshot.source_manifest_json),
+                "source_manifest_hash": bundle.snapshot.source_manifest_hash,
+                "corpus_hash": bundle.corpus_hash,
+            }
+            mismatches = [
+                field_name
+                for field_name, expected in expected_snapshot.items()
+                if snapshot[field_name] != expected
+            ]
+            if mismatches:
+                raise ImportConflictError(
+                    f"snapshot_id {bundle.snapshot.snapshot_id!r} failed persisted "
+                    "validation for fields: " + ", ".join(mismatches)
+                )
+            if snapshot["status"] not in {"validated", "active"}:
+                raise ImportConflictError(
+                    f"snapshot_id {bundle.snapshot.snapshot_id!r} is not serviceable"
+                )
+            self._verify_existing_corpus(connection, bundle)
+            receipt = (
+                connection.execute(
+                    select(embedding_imports).where(
+                        embedding_imports.c.snapshot_id == bundle.snapshot.snapshot_id,
+                        embedding_imports.c.profile_id
+                        == bundle.embedding_profile.profile_id,
+                    )
+                )
+                .mappings()
+                .one_or_none()
+            )
+            if receipt is None:
+                raise ImportConflictError("snapshot/profile import receipt is missing")
+            if (
+                receipt["bundle_hash"] != bundle.bundle_hash
+                or receipt["status"] != "validated"
+            ):
+                raise ImportConflictError(
+                    "snapshot/profile import receipt failed persisted validation"
+                )
+            self._verify_embedding_batch(connection, bundle)
+        return ImportValidationResult(
+            snapshot_id=bundle.snapshot.snapshot_id,
+            scope_id=bundle.snapshot.scope_id,
+            profile_id=bundle.embedding_profile.profile_id,
+            corpus_hash=bundle.corpus_hash,
+            bundle_hash=bundle.bundle_hash,
+            status=snapshot["status"],
+            dimensions=bundle.embedding_profile.dimensions,
+            law_version_count=len(bundle.law_versions),
+            article_count=len(bundle.articles),
+            chunk_count=len(bundle.chunks),
+            embedding_count=len(bundle.embeddings),
         )
 
     def table_counts(self) -> dict[str, int]:

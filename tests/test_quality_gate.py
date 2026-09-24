@@ -80,6 +80,48 @@ def _state_with_released_m0_and_active_m1() -> dict[str, object]:
     }
 
 
+def _state_with_released_m0_m1_m2_and_active_m3() -> dict[str, object]:
+    milestones: list[dict[str, object]] = []
+    for milestone_id, tag in (
+        ("M0", "v0.1.1"),
+        ("M1", "v0.2.0"),
+        ("M2", "v0.3.0"),
+    ):
+        milestones.append(
+            {
+                "id": milestone_id,
+                "required": True,
+                "status": "released",
+                "tests": {"status": "passed"},
+                "tag": tag,
+                "release_url": f"https://example.invalid/releases/{tag}",
+                "remote_release_verified": True,
+            }
+        )
+    milestones.append(
+        {
+            "id": "M3",
+            "required": True,
+            "status": "in_progress",
+            "tests": {"status": "not_run"},
+            "tag": None,
+            "release_url": None,
+            "remote_release_verified": False,
+        }
+    )
+    return {
+        "document_schema_version": 1,
+        "repository": {
+            "full_name": "owner/repository",
+            "workspace_head": "c" * 40,
+        },
+        "execution_status": "in_progress",
+        "active_milestone": "M3",
+        "stage_status_values": ["not_started", "in_progress", "released"],
+        "milestones": milestones,
+    }
+
+
 def _valid_run_manifest() -> dict[str, object]:
     return {
         "schema_version": 1,
@@ -122,6 +164,39 @@ def test_uv_command_is_offline_frozen_and_no_sync() -> None:
         "pytest",
         "-q",
     ]
+
+
+def test_integration_environment_preserves_only_database_controls_and_redacts_url() -> (
+    None
+):
+    credential = "gate-" + "password"
+    database_url = (
+        f"postgresql+psycopg://gate-user:{credential}@127.0.0.1/legal_rag_m3_test"
+    )
+    clean = gate.sanitized_environment(
+        {
+            "PATH": "safe-path",
+            "LEGAL_RAG_DATABASE_URL": database_url,
+            "LEGAL_RAG_EXPECTED_PGVECTOR_VERSION": "0.8.6",
+            "LEGAL_RAG_INTEGRATION_TEST": "1",
+            "OPENAI_API_KEY": "do-not-copy",
+        },
+        mode="integration",
+    )
+
+    assert clean["LEGAL_RAG_DATABASE_URL"] == database_url
+    assert clean["LEGAL_RAG_EXPECTED_PGVECTOR_VERSION"] == "0.8.6"
+    assert clean["LEGAL_RAG_INTEGRATION_TEST"] == "1"
+    assert "OPENAI_API_KEY" not in clean
+    password_label = "pass" + "word"
+    summary = gate._process_summary(
+        f"could not connect to {database_url}; {password_label}={credential}",
+        "",
+        sensitive_values=gate._sensitive_environment_values(clean),
+    )
+    assert database_url not in summary
+    assert credential not in summary
+    assert "<redacted>" in summary
 
 
 def test_git_candidates_exclude_ignored_files(tmp_path: Path) -> None:
@@ -227,6 +302,21 @@ def test_active_m1_gate_rejects_an_unreleased_m0_prerequisite() -> None:
         "prerequisite milestone M0 must already be released" in error
         for error in errors
     )
+
+
+def test_active_m3_gate_requires_all_released_prerequisites() -> None:
+    state = _state_with_released_m0_m1_m2_and_active_m3()
+    assert gate.validate_state_payload(state, milestone="M3") == []
+
+    m2 = state["milestones"][2]  # type: ignore[index]
+    m2["status"] = "in_progress"  # type: ignore[index]
+    m2["tests"] = {"status": "in_progress"}  # type: ignore[index]
+    m2["tag"] = None  # type: ignore[index]
+    m2["release_url"] = None  # type: ignore[index]
+    m2["remote_release_verified"] = False  # type: ignore[index]
+
+    errors = gate.validate_state_payload(state, milestone="M3")
+    assert "prerequisite milestone M2 must already be released" in errors
 
 
 def test_execution_status_must_match_the_actual_active_milestone() -> None:
@@ -357,6 +447,78 @@ def test_m2_gate_is_cumulative_and_maps_every_named_acceptance_test() -> None:
     assert len(gate.M2_TEST_SELECTORS["M2-T08"]) == 2
 
 
+def test_m3_gate_is_cumulative_and_maps_every_named_acceptance_test() -> None:
+    expected_m3_ids = {f"M3-T{index:02d}" for index in range(1, 9)}
+
+    assert set(gate.MANDATORY_M3_CHECK_IDS) == (
+        set(gate.MANDATORY_M2_CHECK_IDS) | expected_m3_ids
+    )
+    assert len(gate.MANDATORY_M3_CHECK_IDS) == 33
+    assert set(gate.M3_TEST_SELECTORS) == expected_m3_ids
+    assert all(gate.M3_TEST_SELECTORS[test_id] for test_id in expected_m3_ids)
+    assert all(
+        any(selector.startswith("integration_tests/") for selector in selectors)
+        for selectors in gate.M3_TEST_SELECTORS.values()
+    )
+
+
+def test_m3_report_has_exactly_one_record_for_all_33_mandatory_ids(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    def records_for(ids, *, mode):
+        return [
+            gate.result_record(
+                test_id=test_id,
+                command="fixture",
+                exit_code=0,
+                status="passed",
+                output_summary="ok",
+                duration_ms=1,
+                mode=mode,
+            )
+            for test_id in sorted(ids)
+        ]
+
+    monkeypatch.setattr(
+        gate,
+        "_m0_offline_records",
+        lambda repo_root, state_milestone: records_for(
+            gate.MANDATORY_M0_CHECK_IDS, mode="offline"
+        ),
+    )
+    monkeypatch.setattr(
+        gate,
+        "_m1_acceptance_records",
+        lambda repo_root: records_for(gate.M1_TEST_SELECTORS, mode="offline"),
+    )
+    monkeypatch.setattr(
+        gate,
+        "_m2_acceptance_records",
+        lambda repo_root: records_for(gate.M2_TEST_SELECTORS, mode="offline"),
+    )
+    monkeypatch.setattr(
+        gate,
+        "_m3_acceptance_records",
+        lambda repo_root, restart_receipt=None: records_for(
+            gate.M3_TEST_SELECTORS, mode="integration"
+        ),
+    )
+
+    report = gate.run_m3_integration(
+        tmp_path,
+        restart_receipt=tmp_path / "restart-receipt.json",
+    )
+
+    assert report["status"] == "passed"
+    assert report["exit_code"] == 0
+    assert report["mode"] == "integration"
+    assert report["duration_ms"] == 33
+    assert len(report["mandatory_check_ids"]) == 33
+    assert len(report["checks"]) == 33
+    assert len({record["test_id"] for record in report["checks"]}) == 33
+
+
 def test_mandatory_pytest_check_fails_closed_on_skip_or_xfail(
     monkeypatch,
     tmp_path: Path,
@@ -392,6 +554,150 @@ def test_mandatory_pytest_check_fails_closed_on_skip_or_xfail(
     assert "skipped or xfailed" in record["output_summary"]
 
 
+def test_mandatory_pytest_check_fails_closed_on_zero_tests(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    def fake_subprocess_check(**kwargs):
+        command = kwargs["command"]
+        junit_index = command.index("--junitxml") + 1
+        junit_path = Path(command[junit_index])
+        _write(
+            junit_path,
+            '<testsuites><testsuite tests="0" failures="0" errors="0" skipped="0" /></testsuites>',
+        )
+        return gate.result_record(
+            test_id=kwargs["test_id"],
+            command=command,
+            exit_code=0,
+            status="passed",
+            output_summary="pytest returned zero",
+        )
+
+    monkeypatch.setattr(gate, "run_subprocess_check", fake_subprocess_check)
+    record = gate.run_pytest_check(
+        test_id="M3-T01",
+        selectors=("integration_tests/example.py::test_required",),
+        repo_root=tmp_path,
+        timeout_seconds=30,
+        mode="integration",
+    )
+
+    assert record["status"] == "failed"
+    assert record["exit_code"] == 1
+    assert "no tests were executed" in record["output_summary"]
+
+
+def test_mandatory_pytest_check_fails_closed_when_junit_is_missing(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    def fake_subprocess_check(**kwargs):
+        return gate.result_record(
+            test_id=kwargs["test_id"],
+            command=kwargs["command"],
+            exit_code=0,
+            status="passed",
+            output_summary="pytest returned zero without an artifact",
+        )
+
+    monkeypatch.setattr(gate, "run_subprocess_check", fake_subprocess_check)
+    record = gate.run_pytest_check(
+        test_id="M3-T01",
+        selectors=("integration_tests/example.py::test_required",),
+        repo_root=tmp_path,
+        timeout_seconds=30,
+        mode="integration",
+    )
+
+    assert record["status"] == "failed"
+    assert record["exit_code"] == 1
+    assert "JUnit validation failed" in record["output_summary"]
+
+
+def test_m3_gate_fails_closed_before_pytest_when_database_is_missing(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("LEGAL_RAG_DATABASE_URL", raising=False)
+    monkeypatch.delenv("LEGAL_RAG_INTEGRATION_TEST", raising=False)
+
+    def must_not_run(**kwargs):
+        raise AssertionError(f"unexpected pytest execution: {kwargs}")
+
+    monkeypatch.setattr(gate, "run_pytest_check", must_not_run)
+    records = gate._m3_acceptance_records(tmp_path)
+
+    assert {record["test_id"] for record in records} == set(gate.M3_TEST_SELECTORS)
+    assert len(records) == 8
+    assert all(record["status"] == "failed" for record in records)
+    assert all(record["exit_code"] == 1 for record in records)
+    assert all(
+        "LEGAL_RAG_DATABASE_URL is required" in record["output_summary"]
+        for record in records
+    )
+
+
+def test_m3_t08_requires_external_restart_receipt(tmp_path: Path) -> None:
+    record = gate._m3_t08_record(tmp_path, None)
+
+    assert record["test_id"] == "M3-T08"
+    assert record["status"] == "failed"
+    assert record["exit_code"] == 1
+    assert "actual PostgreSQL service restart" in record["command"]
+    assert "--restart-receipt is required" in record["output_summary"]
+
+
+def test_m3_t08_combines_migrations_with_real_restart_probe_verification(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    receipt = tmp_path / "restart-receipt.json"
+    receipt.write_text("{}\n", encoding="utf-8")
+
+    def fake_pytest_check(**kwargs):
+        return gate.result_record(
+            test_id=kwargs["test_id"],
+            command=["uv", "run", "pytest", "migration-selector"],
+            exit_code=0,
+            status="passed",
+            output_summary="JUnit: tests=2, failures=0, errors=0, skipped=0",
+            artifact_path=kwargs["artifact_path"],
+            duration_ms=11,
+            mode=kwargs["mode"],
+        )
+
+    def fake_subprocess_check(**kwargs):
+        assert kwargs["command"][-4:-2] == [
+            "scripts/m3_restart_probe.py",
+            "verify",
+        ]
+        assert kwargs["command"][-1] == str(receipt)
+        return gate.result_record(
+            test_id=kwargs["test_id"],
+            command=kwargs["command"],
+            exit_code=0,
+            status="passed",
+            output_summary='{"stage":"verified_after_service_restart"}',
+            artifact_path=kwargs["artifact_path"],
+            duration_ms=13,
+            mode=kwargs["mode"],
+        )
+
+    monkeypatch.setattr(gate, "run_pytest_check", fake_pytest_check)
+    monkeypatch.setattr(gate, "run_subprocess_check", fake_subprocess_check)
+
+    record = gate._m3_t08_record(tmp_path, receipt)
+
+    assert record["status"] == "passed"
+    assert record["exit_code"] == 0
+    assert record["duration_ms"] == 24
+    assert len(record["command"]) == 2
+    assert "m3_restart_probe.py verify" in record["command"][1]
+    assert "verified_after_service_restart" in record["output_summary"]
+    assert record["artifact_path"] == str(receipt.resolve())
+
+
 def test_result_record_contains_required_machine_readable_fields() -> None:
     record = gate.result_record(
         test_id="M0-example",
@@ -406,11 +712,17 @@ def test_result_record_contains_required_machine_readable_fields() -> None:
     assert record["environment"]["dotenv_loading_disabled"] is True
     assert record["environment"]["live_model_calls_allowed"] is False
     assert record["executed_at"].endswith("Z")
+    assert record["duration_ms"] == 0
 
 
 @pytest.mark.parametrize(
     ("milestone", "mode"),
-    [("M3", "offline"), ("M0", "integration"), (None, "offline")],
+    [
+        ("M3", "offline"),
+        ("M0", "integration"),
+        ("M4", "offline"),
+        (None, "offline"),
+    ],
 )
 def test_unknown_milestone_or_mode_is_rejected(
     milestone: str | None,
@@ -424,6 +736,10 @@ def test_supported_request_is_accepted(milestone: str) -> None:
     assert gate.validate_request(milestone, "offline") == []
 
 
+def test_m3_integration_request_is_accepted() -> None:
+    assert gate.validate_request("M3", "integration") == []
+
+
 def test_main_dispatches_the_requested_milestone(monkeypatch, capsys) -> None:
     calls: list[str] = []
 
@@ -432,7 +748,7 @@ def test_main_dispatches_the_requested_milestone(monkeypatch, capsys) -> None:
         return {
             "schema_version": 1,
             "milestone": milestone,
-            "mode": "offline",
+            "mode": "integration" if milestone == "M3" else "offline",
             "started_at": "2026-09-20T00:00:00Z",
             "finished_at": "2026-09-20T00:00:00Z",
             "status": "passed",
@@ -445,10 +761,35 @@ def test_main_dispatches_the_requested_milestone(monkeypatch, capsys) -> None:
     monkeypatch.setattr(gate, "run_m0_offline", lambda repo_root: report_for("M0"))
     monkeypatch.setattr(gate, "run_m1_offline", lambda repo_root: report_for("M1"))
     monkeypatch.setattr(gate, "run_m2_offline", lambda repo_root: report_for("M2"))
+    restart_receipts: list[Path | None] = []
+
+    def run_m3(repo_root, *, restart_receipt=None):
+        restart_receipts.append(restart_receipt)
+        return report_for("M3")
+
+    monkeypatch.setattr(gate, "run_m3_integration", run_m3)
 
     assert gate.main(["--milestone", "M2", "--mode", "offline"]) == 0
     assert calls == ["M2"]
     assert json.loads(capsys.readouterr().out)["milestone"] == "M2"
+
+    restart_receipt = Path("restart-receipt.json")
+    assert (
+        gate.main(
+            [
+                "--milestone",
+                "M3",
+                "--mode",
+                "integration",
+                "--restart-receipt",
+                str(restart_receipt),
+            ]
+        )
+        == 0
+    )
+    assert calls == ["M2", "M3"]
+    assert restart_receipts == [restart_receipt]
+    assert json.loads(capsys.readouterr().out)["milestone"] == "M3"
 
 
 def test_main_returns_configuration_exit_code_for_unsupported_request(capsys) -> None:
