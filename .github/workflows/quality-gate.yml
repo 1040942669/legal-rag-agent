@@ -80,3 +80,120 @@ jobs:
           path: ${{ runner.temp }}/m2-quality-gate.json
           if-no-files-found: error
           retention-days: 14
+
+  m3-storage-integration:
+    name: m3 storage / PostgreSQL 18 + pgvector 0.8.6
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      ALLOW_LIVE_MODEL_CALLS: "false"
+      LEGAL_RAG_DATABASE_URL: "postgresql+psycopg://m3_test@127.0.0.1:5432/legal_rag_m3_test"
+      LEGAL_RAG_DISABLE_DOTENV: "1"
+      LEGAL_RAG_EXPECTED_PGVECTOR_VERSION: "0.8.6"
+      LEGAL_RAG_INTEGRATION_TEST: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
+
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.6-pg18@sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a
+        env:
+          POSTGRES_DB: legal_rag_m3_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_USER: m3_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U m3_test -d legal_rag_m3_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    steps:
+      - name: Check out the pull request head commit
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Check out the pushed commit
+        if: github.event_name == 'push'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.13"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.10.10"
+          enable-cache: false
+
+      - name: Verify the lock file
+        run: uv lock --check
+
+      - name: Install locked database dependencies
+        run: uv sync --frozen --group dev --extra database
+
+      - name: Run storage integration tests against a fresh database
+        run: >-
+          uv run --frozen --no-sync pytest -q
+          integration_tests
+          --junitxml="${RUNNER_TEMP}/m3-storage-junit.xml"
+
+      - name: Prepare persistent state for the PostgreSQL service restart
+        run: >-
+          uv run --frozen --no-sync python scripts/m3_restart_probe.py prepare
+          --receipt "${RUNNER_TEMP}/m3-restart-receipt.json"
+
+      - name: Restart the PostgreSQL service container
+        env:
+          POSTGRES_SERVICE_CONTAINER_ID: ${{ job.services.postgres.id }}
+        run: |
+          test -n "${POSTGRES_SERVICE_CONTAINER_ID}"
+          docker restart "${POSTGRES_SERVICE_CONTAINER_ID}"
+          for attempt in {1..30}; do
+            if docker exec "${POSTGRES_SERVICE_CONTAINER_ID}" pg_isready -U m3_test -d legal_rag_m3_test; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs "${POSTGRES_SERVICE_CONTAINER_ID}"
+          exit 1
+
+      - name: Verify persistent state from a new process after restart
+        run: >-
+          uv run --frozen --no-sync python scripts/m3_restart_probe.py verify
+          --receipt "${RUNNER_TEMP}/m3-restart-receipt.json"
+          > "${RUNNER_TEMP}/m3-restart-verification.json"
+
+      - name: Run the M3 cumulative integration quality gate
+        run: >-
+          uv run --offline --frozen --no-sync python scripts/quality_gate.py
+          --milestone M3
+          --mode integration
+          --restart-receipt "${RUNNER_TEMP}/m3-restart-receipt.json"
+          --output "${RUNNER_TEMP}/m3-quality-gate.json"
+
+      - name: Build the wheel and verify packaged migration resources
+        run: |
+          uv build --wheel --out-dir "${RUNNER_TEMP}/m3-wheel"
+          uv run --frozen --no-sync python -c "import glob,zipfile; p=glob.glob('${RUNNER_TEMP}/m3-wheel/*.whl')[0]; names=zipfile.ZipFile(p).namelist(); required={'legal_rag/storage/alembic/env.py','legal_rag/storage/alembic/script.py.mako','legal_rag/storage/alembic/versions/0001_m3_storage_baseline.py','legal_rag/storage/alembic/versions/0002_m3_immutable_corpus_rows.py','legal_rag/storage/alembic/versions/0003_m3_snapshot_activation.py','legal_rag/storage/alembic/versions/0004_m3_ann_build_guards.py'}; missing=required-set(names); assert not missing, missing"
+
+      - name: Upload the M3 storage integration report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: m3-storage-${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/m3-storage-junit.xml
+            ${{ runner.temp }}/m3-restart-receipt.json
+            ${{ runner.temp }}/m3-restart-verification.json
+            ${{ runner.temp }}/m3-quality-gate.json
+          if-no-files-found: error
+          retention-days: 14

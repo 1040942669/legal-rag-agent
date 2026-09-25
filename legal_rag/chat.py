@@ -26,7 +26,13 @@ from .query import (
     extract_article_numbers,
     extract_law_names,
 )
-from .retrieval import Retriever, format_sources
+from .retrieval import (
+    Retriever,
+    assert_results_match_boundary,
+    format_sources,
+    retrieval_boundary as resolve_retrieval_boundary,
+)
+from .retrieval_contracts import RetrievalBoundary, RetrievalBoundaryViolation
 from .verifier import (
     SAFE_CLARIFICATION_QUESTION,
     SAFE_CLARIFICATION_RESPONSE,
@@ -303,6 +309,8 @@ class RetrievedTurn:
     terminal_kind: str | None = None
     terminal_answer: StructuredAnswer | None = None
     terminal_expected_answer_mode: str | None = None
+    # Appended to preserve the legacy positional constructor ABI.
+    retrieval_boundary: RetrievalBoundary | None = None
 
 
 @dataclass(frozen=True)
@@ -546,6 +554,7 @@ class LegalChatAssistant:
             )
 
     def retrieve_turn(self, prepared: PreparedQuestion) -> RetrievedTurn:
+        boundary = resolve_retrieval_boundary(self.retriever)
         if should_refuse_before_retrieval(prepared.analysis.risk_flags):
             answer = programmatic_answer(
                 build_risk_refusal_answer(prepared.analysis.risk_flags),
@@ -557,6 +566,7 @@ class LegalChatAssistant:
                 adaptive_result=None,
                 results=(),
                 evidence_check=None,
+                retrieval_boundary=boundary,
                 terminal_kind="pre_retrieval_refusal",
                 terminal_answer=answer,
                 terminal_expected_answer_mode="out_of_scope",
@@ -603,18 +613,30 @@ class LegalChatAssistant:
             )
 
         evidence_check = adaptive_result.evidence_check
+        # Detach the staged result from every mutable object owned by a
+        # retriever.  A later caller mutation must not poison a bound corpus or
+        # race with prompt construction.
+        staged_results = deepcopy(results)
+        assert_results_match_boundary(
+            staged_results, boundary, stage="chat retrieval staging"
+        )
+        adaptive_result = replace(
+            adaptive_result,
+            results=deepcopy(staged_results),
+        )
         terminal_answer = None
         terminal_kind = None
         terminal_expected_answer_mode = None
-        if not results or not evidence_check.sufficient:
+        if not staged_results or not evidence_check.sufficient:
             terminal_answer = build_limited_structured_answer(evidence_check)
             terminal_kind = "evidence_limited"
             terminal_expected_answer_mode = expected_limited_answer_mode(evidence_check)
         return RetrievedTurn(
             prepared=prepared,
             adaptive_result=adaptive_result,
-            results=tuple(results),
+            results=tuple(staged_results),
             evidence_check=evidence_check,
+            retrieval_boundary=boundary,
             rejected_source_ids=tuple(rejected_source_ids),
             source_id_map=dict(source_id_map),
             terminal_kind=terminal_kind,
@@ -628,6 +650,9 @@ class LegalChatAssistant:
         *,
         generate: bool,
     ) -> GeneratedTurn:
+        results = self._validated_stage_results(
+            retrieved, stage="chat generation input"
+        )
         if retrieved.terminal_answer is not None:
             if (
                 retrieved.terminal_kind is None
@@ -641,7 +666,6 @@ class LegalChatAssistant:
                 answer=retrieved.terminal_answer,
                 expected_answer_mode=retrieved.terminal_expected_answer_mode,
             )
-        results = list(retrieved.results)
         if not generate:
             answer_text = append_disclaimer(render_retrieval_only_answer(results))
             return GeneratedTurn(
@@ -695,7 +719,9 @@ class LegalChatAssistant:
 
     def verify_turn(self, generated: GeneratedTurn) -> VerifiedTurn:
         retrieved = generated.retrieved
-        results = list(retrieved.results)
+        results = self._validated_stage_results(
+            retrieved, stage="chat verification input"
+        )
         if generated.kind == "retrieval_only":
             expected_text = append_disclaimer(render_retrieval_only_answer(results))
             if (
@@ -863,6 +889,32 @@ class LegalChatAssistant:
             final_answer=answer,
             verification=verification,
         )
+
+    def _validated_stage_results(
+        self,
+        retrieved: RetrievedTurn,
+        *,
+        stage: str,
+    ) -> list[SearchResult]:
+        """Take and validate a private evidence snapshot for one transition."""
+
+        if not isinstance(retrieved, RetrievedTurn):
+            raise TypeError("retrieved stage must be a RetrievedTurn")
+        current_boundary = resolve_retrieval_boundary(self.retriever)
+        captured_boundary = retrieved.retrieval_boundary
+        if current_boundary != captured_boundary:
+            raise RetrievalBoundaryViolation(
+                f"{stage} retrieval boundary changed after retrieval"
+            )
+        results = deepcopy(list(retrieved.results))
+        if retrieved.adaptive_result is not None and tuple(
+            retrieved.adaptive_result.results
+        ) != tuple(retrieved.results):
+            raise RetrievalBoundaryViolation(
+                f"{stage} adaptive and staged evidence snapshots differ"
+            )
+        assert_results_match_boundary(results, captured_boundary, stage=stage)
+        return results
 
     def commit_turn(self, verified: VerifiedTurn) -> None:
         if not isinstance(verified, VerifiedTurn):

@@ -17,6 +17,12 @@ from legal_rag.evaluation_artifacts import (
     search_result_to_artifact,
 )
 from legal_rag.models import Chunk, EvalCase, SearchResult
+from legal_rag.retrieval_contracts import (
+    RetrievedArticleProvenance,
+    RetrievalBoundary,
+    RetrievalProvenance,
+    chunk_payload_fingerprint,
+)
 
 
 class _EmptyRetriever:
@@ -75,6 +81,71 @@ def _evaluated_record():
         retriever=_EmptyRetriever(),
         chunk_strategy="synthetic",
     ).record
+
+
+def _bound_search_result() -> SearchResult:
+    boundary = RetrievalBoundary(
+        scope_id="scope-a",
+        snapshot_id="snapshot-a",
+        profile_id="a" * 64,
+        law_ids=("law-a",),
+        version_ids=("version-a",),
+        article_ids=("article-a",),
+        article_numbers=("第一条",),
+        effective_on="2025-01-15",
+    )
+    article = RetrievedArticleProvenance(
+        article_id="article-a",
+        law_id="law-a",
+        version_id="version-a",
+        article_number="第一条",
+        title="虚构测试法",
+        valid_from="2025-01-01",
+        valid_to="2026-01-01",
+        source_ref="fixtures/bound.txt",
+        source_line=7,
+        verification_status="verified",
+    )
+    chunk = Chunk(
+        chunk_id="bound-chunk-a",
+        text="受不可变检索边界约束的完整证据",
+        law_names=[article.title],
+        article_numbers=[article.article_number],
+        source_files=[article.source_ref],
+        line_nos=[article.source_line],
+        strategy="article",
+        metadata={
+            "scope_id": boundary.scope_id,
+            "snapshot_id": boundary.snapshot_id,
+            "profile_id": boundary.profile_id,
+            "access_scope_ids": [boundary.scope_id],
+            "law_ids": [article.law_id],
+            "version_ids": [article.version_id],
+            "article_ids": [article.article_id],
+            "article_refs": [article.to_metadata()],
+            "boundary_fingerprint": boundary.fingerprint,
+        },
+    )
+    provenance = RetrievalProvenance(
+        boundary=boundary,
+        scope_id=boundary.scope_id,
+        snapshot_id=boundary.snapshot_id,
+        profile_id=boundary.profile_id,
+        chunk_id=chunk.chunk_id,
+        chunk_content_hash="c" * 64,
+        chunk_payload_hash=chunk_payload_fingerprint(chunk),
+        snapshot_ordinal=3,
+        embedding_hash="e" * 64,
+        articles=(article,),
+    )
+    return SearchResult(
+        chunk=chunk,
+        score=0.99,
+        rank=1,
+        retriever="postgres-exact",
+        trace={"boundary_fingerprint": boundary.fingerprint},
+        provenance=provenance,
+    )
 
 
 def test_evaluate_case_matches_legacy_batch_record_and_trace(monkeypatch) -> None:
@@ -170,6 +241,106 @@ def test_search_result_artifact_preserves_complete_evidence() -> None:
     assert restored == result
     assert result.chunk.text == "完整的合成证据正文"
     assert result.trace["bm25_rank"] == 1
+
+
+def test_bound_search_result_artifact_round_trip_preserves_typed_provenance() -> None:
+    result = _bound_search_result()
+
+    artifact = search_result_to_artifact(result)
+    restored = search_result_from_artifact(artifact)
+
+    assert artifact["artifact_schema_version"] == 1
+    assert artifact["search_result"]["provenance"]["boundary"]["effective_on"] == (
+        "2025-01-15"
+    )
+    assert (
+        artifact["search_result"]["provenance"]["articles"][0]["valid_from"]
+        == "2025-01-01"
+    )
+    assert restored == result
+    assert isinstance(restored.provenance, RetrievalProvenance)
+    assert isinstance(restored.provenance.boundary, RetrievalBoundary)
+    assert isinstance(restored.provenance.articles[0], RetrievedArticleProvenance)
+
+
+def test_legacy_unbound_search_result_artifact_without_provenance_is_accepted() -> None:
+    artifact = search_result_to_artifact(
+        SearchResult(
+            chunk=Chunk(
+                chunk_id="legacy-unbound",
+                text="legacy evidence",
+                law_names=[],
+                article_numbers=[],
+                source_files=["legacy.txt"],
+                line_nos=[1],
+                strategy="article",
+                metadata={},
+            ),
+            score=1.0,
+            rank=1,
+            retriever="legacy",
+            trace={},
+        )
+    )
+    artifact["search_result"].pop("provenance")
+
+    restored = search_result_from_artifact(artifact)
+
+    assert restored.provenance is None
+    assert restored.chunk.chunk_id == "legacy-unbound"
+
+
+@pytest.mark.parametrize("marker_location", ["metadata", "trace"])
+def test_legacy_bound_marker_without_provenance_is_rejected(
+    marker_location: str,
+) -> None:
+    artifact = search_result_to_artifact(_bound_search_result())
+    artifact["search_result"].pop("provenance")
+    if marker_location == "metadata":
+        artifact["search_result"]["trace"].pop("boundary_fingerprint")
+    else:
+        artifact["search_result"]["chunk"]["metadata"].pop("boundary_fingerprint")
+
+    with pytest.raises(ValueError, match="requires complete typed provenance"):
+        search_result_from_artifact(artifact)
+
+
+def test_scope_bound_artifact_cannot_hide_by_removing_only_fingerprints() -> None:
+    artifact = search_result_to_artifact(_bound_search_result())
+    artifact["search_result"].pop("provenance")
+    artifact["search_result"]["chunk"]["metadata"].pop("boundary_fingerprint")
+    artifact["search_result"]["trace"].pop("boundary_fingerprint")
+
+    with pytest.raises(ValueError, match="requires complete typed provenance"):
+        search_result_from_artifact(artifact)
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda artifact: artifact["search_result"]["chunk"].update(
+            {"text": "tampered evidence"}
+        ),
+        lambda artifact: artifact["search_result"]["trace"].update(
+            {"boundary_fingerprint": "f" * 64}
+        ),
+        lambda artifact: artifact["search_result"]["provenance"]["boundary"].update(
+            {"scope_id": "scope-b"}
+        ),
+        lambda artifact: artifact["search_result"]["provenance"]["articles"][0].update(
+            {"article_id": "article-b"}
+        ),
+        lambda artifact: artifact["search_result"]["provenance"]["articles"][0].update(
+            {"unexpected": True}
+        ),
+    ],
+)
+def test_bound_search_result_artifact_tampering_is_rejected(mutate) -> None:
+    artifact = search_result_to_artifact(_bound_search_result())
+    mutate(artifact)
+
+    with pytest.raises(ValueError):
+        search_result_from_artifact(artifact)
 
 
 @pytest.mark.parametrize(
@@ -294,9 +465,7 @@ def test_eval_record_artifact_accepts_explicit_service_failure() -> None:
         lambda artifact: artifact["evaluation_record"]["execution"]["judge"].update(
             {"status": "succeeded", "reason": None}
         ),
-        lambda artifact: artifact["evaluation_record"]["canonical_metrics"].pop(
-            "mrr"
-        ),
+        lambda artifact: artifact["evaluation_record"]["canonical_metrics"].pop("mrr"),
         lambda artifact: artifact["evaluation_record"]["canonical_metrics"][
             "semantic_support_status"
         ].update({"value": "definitely_supported", "unavailable_reason": None}),
@@ -306,9 +475,7 @@ def test_eval_record_artifact_accepts_explicit_service_failure() -> None:
         lambda artifact: artifact["evaluation_record"].update(
             {"generation_attempt": {"attempted": True}}
         ),
-        lambda artifact: artifact["evaluation_record"].update(
-            {"llm_failed_calls": 10}
-        ),
+        lambda artifact: artifact["evaluation_record"].update({"llm_failed_calls": 10}),
         lambda artifact: artifact["evaluation_record"].update(
             {
                 "assistant_llm_calls": 1,

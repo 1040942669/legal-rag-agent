@@ -1,14 +1,26 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 from .models import NormalizedQuery, RetrievalPlan, SearchResult
 from .evidence import check_evidence_sufficiency, with_stop_reason
 from .planning import build_retrieval_plans
 from .query import QueryAnalysis, analyze_query, should_use_adaptive
-from .query_understanding import CompletionClient, fallback_normalized_query, normalize_query
-from .retrieval import Retriever
+from .query_understanding import (
+    CompletionClient,
+    fallback_normalized_query,
+    normalize_query,
+)
+from .retrieval import (
+    Retriever,
+    assert_results_match_boundary,
+    retrieval_boundary,
+)
+from .retrieval_contracts import (
+    RetrievalBoundaryViolation,
+    validate_retrieval_top_k,
+)
 
 
 @dataclass(frozen=True)
@@ -30,7 +42,9 @@ class AdaptiveRetrievalResult:
             "enabled": self.adaptive_enabled,
             "used": self.adaptive_used,
             "trigger_reasons": self.trigger_reasons,
-            "normalized_query": self.normalized_query.to_dict() if self.normalized_query else {},
+            "normalized_query": self.normalized_query.to_dict()
+            if self.normalized_query
+            else {},
             "plans": [plan.to_dict() for plan in self.plans],
             "planner": self.planner_trace,
             "merge": self.merge_trace,
@@ -52,10 +66,17 @@ def retrieve_adaptive(
     normalizer_retries: int = 0,
     max_followup_rounds: int = 1,
 ) -> AdaptiveRetrievalResult:
+    top_k = validate_retrieval_top_k(top_k)
+    if per_plan_top_k is not None:
+        per_plan_top_k = validate_retrieval_top_k(per_plan_top_k)
+    boundary = retrieval_boundary(retriever)
     analysis = analyze_query(query)
     trigger = enabled and should_use_adaptive(analysis)
     if not trigger:
         results = retriever.retrieve(query, top_k=top_k)
+        assert_results_match_boundary(
+            results, boundary, stage="adaptive direct retrieval"
+        )
         evidence = check_evidence_sufficiency(query, results, analysis=analysis)
         results, evidence, followup_trace = run_bounded_followup(
             query,
@@ -66,13 +87,20 @@ def retrieve_adaptive(
             max_rounds=max_followup_rounds,
             analysis=analysis,
         )
+        assert_results_match_boundary(
+            results, boundary, stage="adaptive direct/follow-up merge"
+        )
         return AdaptiveRetrievalResult(
             results=results,
             analysis=analysis,
             normalized_query=None,
             plans=[],
             planner_trace={"mode": "direct"},
-            merge_trace={"mode": "direct", "input_result_count": len(results), "deduped_count": len(results)},
+            merge_trace={
+                "mode": "direct",
+                "input_result_count": len(results),
+                "deduped_count": len(results),
+            },
             evidence_check=evidence,
             followup_trace=followup_trace,
             adaptive_used=False,
@@ -97,6 +125,7 @@ def retrieve_adaptive(
         plans,
         final_top_k=top_k,
     )
+    assert_results_match_boundary(merged, boundary, stage="adaptive multi-plan merge")
     evidence = check_evidence_sufficiency(
         query,
         merged,
@@ -114,6 +143,9 @@ def retrieve_adaptive(
         analysis=analysis,
         normalized_query=normalized,
         plans=plans,
+    )
+    assert_results_match_boundary(
+        merged, boundary, stage="adaptive multi-plan/follow-up merge"
     )
     return AdaptiveRetrievalResult(
         results=merged,
@@ -136,12 +168,17 @@ def retrieve_and_merge_plans(
     *,
     final_top_k: int = 5,
 ) -> tuple[list[SearchResult], dict[str, Any]]:
+    final_top_k = validate_retrieval_top_k(final_top_k)
+    boundary = retrieval_boundary(retriever)
     by_chunk_id: dict[str, SearchResult] = {}
     source_trace: dict[str, list[dict[str, Any]]] = {}
     input_result_count = 0
 
     for plan in plans:
         results = retriever.retrieve(plan.query, top_k=plan.top_k)
+        assert_results_match_boundary(
+            results, boundary, stage="adaptive plan retrieval"
+        )
         input_result_count += len(results)
         for result in results:
             chunk_id = result.chunk.chunk_id
@@ -156,6 +193,13 @@ def retrieve_and_merge_plans(
                 }
             )
             existing = by_chunk_id.get(chunk_id)
+            if existing is not None and (
+                existing.chunk != result.chunk
+                or existing.provenance != result.provenance
+            ):
+                raise RetrievalBoundaryViolation(
+                    "adaptive plans returned conflicting payloads for one chunk ID"
+                )
             if existing is None or result.score > existing.score:
                 by_chunk_id[chunk_id] = result
 
@@ -173,8 +217,8 @@ def retrieve_and_merge_plans(
         chunk_id = result.chunk.chunk_id
         sources = source_trace[chunk_id]
         merged.append(
-            SearchResult(
-                chunk=result.chunk,
+            replace(
+                result,
                 score=result.score,
                 rank=rank,
                 retriever=f"adaptive_{result.retriever}",
@@ -190,6 +234,7 @@ def retrieve_and_merge_plans(
             )
         )
 
+    assert_results_match_boundary(merged, boundary, stage="adaptive plan ranking")
     return merged, {
         "mode": "multi_query",
         "plan_count": len(plans),
@@ -212,6 +257,11 @@ def run_bounded_followup(
     normalized_query: NormalizedQuery | None = None,
     plans: list[RetrievalPlan] | None = None,
 ) -> tuple[list[SearchResult], Any, dict[str, Any]]:
+    top_k = validate_retrieval_top_k(top_k)
+    boundary = retrieval_boundary(retriever)
+    assert_results_match_boundary(
+        results, boundary, stage="adaptive initial follow-up candidates"
+    )
     trace: dict[str, Any] = {
         "max_rounds": max_rounds,
         "rounds_used": 0,
@@ -232,6 +282,9 @@ def run_bounded_followup(
     followup_results: list[SearchResult] = []
     for followup_query in evidence.followup_queries:
         retrieved = retriever.retrieve(followup_query, top_k=top_k)
+        assert_results_match_boundary(
+            retrieved, boundary, stage="adaptive follow-up retrieval"
+        )
         trace["queries"].append(
             {
                 "query": followup_query,
@@ -241,6 +294,7 @@ def run_bounded_followup(
         followup_results.extend(retrieved)
     trace["rounds_used"] = 1
     merged = merge_followup_results(results, followup_results, final_top_k=top_k)
+    assert_results_match_boundary(merged, boundary, stage="adaptive follow-up merge")
     checked = check_evidence_sufficiency(
         query,
         merged,
@@ -248,7 +302,9 @@ def run_bounded_followup(
         normalized_query=normalized_query,
         plans=plans,
     )
-    stop_reason = "sufficient_after_followup" if checked.sufficient else "max_rounds_reached"
+    stop_reason = (
+        "sufficient_after_followup" if checked.sufficient else "max_rounds_reached"
+    )
     trace["stop_reason"] = stop_reason
     return merged, with_stop_reason(checked, stop_reason), trace
 
@@ -259,9 +315,16 @@ def merge_followup_results(
     *,
     final_top_k: int,
 ) -> list[SearchResult]:
+    final_top_k = validate_retrieval_top_k(final_top_k)
     by_chunk_id: dict[str, SearchResult] = {}
     for result in initial_results + followup_results:
         existing = by_chunk_id.get(result.chunk.chunk_id)
+        if existing is not None and (
+            existing.chunk != result.chunk or existing.provenance != result.provenance
+        ):
+            raise RetrievalBoundaryViolation(
+                "adaptive follow-up returned conflicting payloads for one chunk ID"
+            )
         if existing is None or result.score > existing.score:
             by_chunk_id[result.chunk.chunk_id] = result
     ranked = sorted(
@@ -269,8 +332,8 @@ def merge_followup_results(
         key=lambda result: (-result.score, result.rank, result.chunk.chunk_id),
     )[:final_top_k]
     return [
-        SearchResult(
-            chunk=result.chunk,
+        replace(
+            result,
             score=result.score,
             rank=rank,
             retriever=result.retriever,
@@ -291,5 +354,7 @@ def direct_normalized_trace(query: str, analysis: QueryAnalysis) -> NormalizedQu
 
 
 def best_source_rank(sources: list[dict[str, Any]]) -> int:
-    ranks = [int(source["source_rank"]) for source in sources if source.get("source_rank")]
+    ranks = [
+        int(source["source_rank"]) for source in sources if source.get("source_rank")
+    ]
     return min(ranks) if ranks else 999999

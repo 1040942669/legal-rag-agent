@@ -27,6 +27,7 @@ from legal_rag.models import (
     StructuredAnswer,
     VerificationContext,
 )
+from legal_rag.retrieval_contracts import RetrievalBoundary, RetrievalBoundaryViolation
 
 
 QUESTION = "《合成测试法》第一条规定什么？"
@@ -64,6 +65,16 @@ class _DeterministicRetriever:
     def retrieve(self, query: str, top_k: int = 5) -> list[SearchResult]:
         self.queries.append(query)
         return deepcopy(self.results[:top_k])
+
+
+class _BoundEmptyRetriever(_DeterministicRetriever):
+    def __init__(self, boundary: RetrievalBoundary) -> None:
+        super().__init__(results=[])
+        self._boundary = boundary
+
+    @property
+    def retrieval_boundary(self) -> RetrievalBoundary:
+        return self._boundary
 
 
 class _TextAnswerClient:
@@ -639,6 +650,71 @@ def test_artifacts_and_decoders_defensively_copy_mutable_values() -> None:
     assert restored_result.chunk.metadata["nested"]["permissions"] == ["public"]
     assert restored.prepared.analysis.risk_flags == []
     assert restored_result.trace["scores"] == [1.0]
+
+
+def test_empty_bound_retrieval_artifact_preserves_captured_boundary() -> None:
+    boundary = RetrievalBoundary(
+        scope_id="scope-artifact",
+        snapshot_id="snapshot-artifact-v1",
+        profile_id="a" * 64,
+    )
+    assistant = _assistant(retriever=_BoundEmptyRetriever(boundary))
+    prepared = assistant.prepare_question(QUESTION)
+    retrieved = assistant.retrieve_turn(prepared)
+    assert retrieved.results == ()
+    assert retrieved.retrieval_boundary == boundary
+
+    artifact = retrieved_turn_to_artifact(retrieved)
+    restored = retrieved_turn_from_artifact(deepcopy(artifact), prepared=prepared)
+
+    assert restored.retrieval_boundary == boundary
+    generated = assistant.generate_turn(restored, generate=True)
+    assert generated.kind == "evidence_limited"
+
+    legacy = deepcopy(artifact)
+    legacy["payload"].pop("retrieval_boundary")
+    legacy_restored = retrieved_turn_from_artifact(legacy, prepared=prepared)
+    assert legacy_restored.retrieval_boundary is None
+    with pytest.raises(RetrievalBoundaryViolation, match="boundary changed"):
+        assistant.generate_turn(legacy_restored, generate=True)
+
+
+def test_complete_m2_artifact_hash_chain_remains_readable() -> None:
+    assistant = _assistant()
+    original, _, artifacts = _round_trip_full_turn(assistant)
+    prepared, _, _, verified = original
+    legacy_retrieved = deepcopy(artifacts[1])
+    legacy_retrieved["payload"].pop("retrieval_boundary")
+
+    def strip_provenance(value) -> None:
+        if isinstance(value, dict):
+            search_result = value.get("search_result")
+            if isinstance(search_result, dict):
+                search_result.pop("provenance", None)
+            for nested in value.values():
+                strip_provenance(nested)
+        elif isinstance(value, list):
+            for nested in value:
+                strip_provenance(nested)
+
+    strip_provenance(legacy_retrieved)
+    legacy_generated = deepcopy(artifacts[2])
+    legacy_generated["payload"]["retrieved_sha256"] = canonical_hash(legacy_retrieved)
+    legacy_verified = deepcopy(artifacts[3])
+    legacy_verified["payload"]["generated_sha256"] = canonical_hash(legacy_generated)
+
+    restored_retrieved = retrieved_turn_from_artifact(
+        legacy_retrieved, prepared=prepared
+    )
+    restored_generated = generated_turn_from_artifact(
+        legacy_generated, retrieved=restored_retrieved
+    )
+    restored_verified = verified_turn_from_artifact(
+        legacy_verified, generated=restored_generated
+    )
+
+    assert restored_verified.answer_text == verified.answer_text
+    assert restored_verified.verification == verified.verification
 
 
 def test_standalone_structured_answer_codec_preserves_invalid_evidence() -> None:

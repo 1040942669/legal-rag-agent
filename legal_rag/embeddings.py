@@ -4,6 +4,7 @@ import hashlib
 import json
 import math
 import os
+import re
 import time
 from dataclasses import dataclass
 from numbers import Real
@@ -11,6 +12,15 @@ from pathlib import Path
 from typing import Any
 
 from .chunking import load_chunks
+from .embedding_contracts import (
+    EMBEDDING_DOCUMENT_RECIPE_VERSION,
+    EMBEDDING_ENCODER_ADAPTER_VERSION,
+    EMBEDDING_QUERY_RECIPE_VERSION,
+    EmbeddingProfileIdentity,
+    EmbeddingVectorContractError,
+    canonicalize_embedding_matrix,
+    canonicalize_embedding_vector,
+)
 from .env import load_dotenv, require_live_model_calls_allowed
 from .manifest import new_run_id, summarize_path, write_artifact_manifest
 from .models import Chunk
@@ -46,8 +56,14 @@ class EmbeddingModelConfig:
     # Retained after the legacy max_retries field to preserve positional callers.
     # Provider SDK retries are disabled; orchestration owns any explicit retry.
     request_timeout: float = 120
+    # Optional for legacy/offline caches; mandatory for version-bound storage.
+    revision: str = ""
 
     def __post_init__(self) -> None:
+        if not isinstance(self.revision, str) or self.revision != self.revision.strip():
+            raise ValueError(
+                "embedding model revision must be a string without surrounding whitespace"
+            )
         if self.dimensions is not None and (
             type(self.dimensions) is not int or self.dimensions <= 0
         ):
@@ -139,6 +155,8 @@ class SentenceTransformerEncoder:
             ) from exc
 
         kwargs: dict[str, Any] = {"trust_remote_code": model_config.trust_remote_code}
+        if model_config.revision:
+            kwargs["revision"] = model_config.revision
         if device and device != "auto":
             kwargs["device"] = device
         self.model_config = model_config
@@ -338,6 +356,7 @@ def resolve_embedding_model(
         provider=item.get("provider", "sentence_transformers"),
         model_name=item["model_name"],
         role=item.get("role", ""),
+        revision=item.get("revision", ""),
         normalize=bool(item.get("normalize", True)),
         trust_remote_code=bool(item.get("trust_remote_code", False)),
         api_base_url=item.get("api_base_url", ""),
@@ -416,7 +435,19 @@ def build_embedding_cache(
             "Embedding cache requires numpy. Run `uv sync` first."
         ) from exc
 
-    matrix = np.asarray(vectors, dtype="float32")
+    source_matrix = np.asarray(vectors)
+    if source_matrix.ndim != 2 or source_matrix.shape[1] <= 0:
+        raise ValueError("embedding provider returned an invalid matrix")
+    expected_dimension = int(model_config.dimensions or source_matrix.shape[1])
+    try:
+        matrix = canonicalize_embedding_matrix(
+            source_matrix,
+            expected_dimension=expected_dimension,
+            normalized=model_config.normalize,
+            label="embedding provider matrix",
+        )
+    except EmbeddingVectorContractError as exc:
+        raise ValueError(str(exc)) from exc
     cache_dir = embedding_cache_dir(output_root, chunk_strategy, model_config.key)
     cache_dir.mkdir(parents=True, exist_ok=True)
     vectors_path = cache_dir / "vectors.npy"
@@ -439,6 +470,7 @@ def build_embedding_cache(
         "provider": model_config.provider,
         "api_base_url": model_config.api_base_url,
         "model_name": model_config.model_name,
+        "revision": model_config.revision,
         "role": model_config.role,
         "chunk_strategy": chunk_strategy,
         "chunk_count": len(chunks),
@@ -447,6 +479,7 @@ def build_embedding_cache(
         "dtype": str(matrix.dtype),
         "chunk_fingerprint": chunk_corpus_fingerprint(chunks),
         "embedding_contract_fingerprint": embedding_contract_fingerprint(model_config),
+        "encoder_adapter_version": EMBEDDING_ENCODER_ADAPTER_VERSION,
         "vectors_path": str(vectors_path),
         "chunk_ids_path": str(chunk_ids_path),
         "chunks_path": str(chunks_path),
@@ -474,6 +507,7 @@ def build_embedding_cache(
             "embedding_key": model_config.key,
             "provider": model_config.provider,
             "model_name": model_config.model_name,
+            "revision": model_config.revision,
             "normalize": model_config.normalize,
             "trust_remote_code": model_config.trust_remote_code,
             "query_prefix": model_config.query_prefix,
@@ -484,6 +518,7 @@ def build_embedding_cache(
             "embedding_contract_fingerprint": metadata[
                 "embedding_contract_fingerprint"
             ],
+            "encoder_adapter_version": EMBEDDING_ENCODER_ADAPTER_VERSION,
             "batch_size": batch_size,
             "device": device,
         },
@@ -525,6 +560,110 @@ def build_encoder(
             expected_dimension=expected_dimension,
         )
     raise ValueError(f"Unsupported embedding provider: {model_config.provider}")
+
+
+@dataclass(frozen=True, slots=True)
+class BoundQueryEncoder:
+    """Query encoder created from the same immutable profile as stored vectors."""
+
+    delegate: Any
+    profile: EmbeddingProfileIdentity
+
+    def encode_query(self, text: str) -> Any:
+        value = self.delegate.encode_query(text)
+        return canonicalize_embedding_vector(
+            value,
+            expected_dimension=self.profile.dimensions,
+            normalized=self.profile.normalization,
+            label="query embedding vector",
+        )
+
+
+def embedding_profile_identity(
+    model_config: EmbeddingModelConfig,
+    *,
+    expected_dimension: int,
+) -> EmbeddingProfileIdentity:
+    if not model_config.revision:
+        raise ValueError(
+            "embedding model revision must be explicit before binding a query encoder"
+        )
+    if model_config.dimensions is not None and (
+        model_config.dimensions != expected_dimension
+    ):
+        raise ValueError("embedding model dimension does not match the bound profile")
+    return EmbeddingProfileIdentity(
+        provider=model_config.provider,
+        model=model_config.model_name,
+        revision=model_config.revision,
+        dimensions=expected_dimension,
+        normalization=model_config.normalize,
+        query_prefix=model_config.query_prefix,
+        document_prefix=model_config.document_prefix,
+        embed_with_metadata=model_config.embed_with_metadata,
+    )
+
+
+def build_bound_query_encoder(
+    model_config: EmbeddingModelConfig,
+    *,
+    expected_dimension: int,
+    device: str = "auto",
+) -> BoundQueryEncoder:
+    _validate_serviceable_bound_embedding_model(model_config)
+    profile = embedding_profile_identity(
+        model_config, expected_dimension=expected_dimension
+    )
+    delegate = build_encoder(
+        model_config,
+        device=device,
+        expected_dimension=expected_dimension,
+    )
+    return BoundQueryEncoder(delegate=delegate, profile=profile)
+
+
+_IMMUTABLE_HF_REVISION = re.compile(r"[0-9a-f]{40}")
+_HF_REPOSITORY_SEGMENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+
+
+def _validate_serviceable_bound_embedding_model(
+    model_config: EmbeddingModelConfig,
+) -> None:
+    """Require a provider-verifiable immutable model for online bound queries.
+
+    A declared profile identity is sufficient for validating an offline import,
+    but it is not proof that a live provider served the same model revision.
+    """
+
+    if model_config.trust_remote_code:
+        raise ValueError("version-bound query encoders do not allow trust_remote_code")
+    if model_config.provider == "siliconflow":
+        raise ValueError(
+            "siliconflow does not attest an immutable embedding revision; "
+            "it cannot serve a version-bound query encoder"
+        )
+    if model_config.provider != "sentence_transformers":
+        raise ValueError(
+            "version-bound query encoders require a verifiable provider adapter"
+        )
+    if _IMMUTABLE_HF_REVISION.fullmatch(model_config.revision) is None:
+        raise ValueError(
+            "sentence-transformers bound revision must be a lowercase "
+            "40-character commit SHA"
+        )
+    parts = model_config.model_name.split("/")
+    if (
+        len(parts) != 2
+        or any(_HF_REPOSITORY_SEGMENT.fullmatch(part) is None for part in parts)
+        or any(part in {".", ".."} for part in parts)
+        or "\\" in model_config.model_name
+        or ":" in model_config.model_name
+        or Path(model_config.model_name).exists()
+    ):
+        raise ValueError(
+            "sentence-transformers bound model_name must be a canonical "
+            "Hub repository ID in owner/model form"
+        )
 
 
 def load_embedding_cache(cache_dir: str | Path) -> EmbeddingCache:
@@ -584,7 +723,12 @@ def embedding_contract_fingerprint(model_config: EmbeddingModelConfig) -> str:
         "query_prefix": model_config.query_prefix,
         "document_prefix": model_config.document_prefix,
         "embed_with_metadata": model_config.embed_with_metadata,
+        "encoder_adapter_version": EMBEDDING_ENCODER_ADAPTER_VERSION,
+        "query_recipe_version": EMBEDDING_QUERY_RECIPE_VERSION,
+        "document_recipe_version": EMBEDDING_DOCUMENT_RECIPE_VERSION,
     }
+    if model_config.revision:
+        payload["revision"] = model_config.revision
     encoded = json.dumps(
         payload,
         ensure_ascii=False,
@@ -705,33 +849,28 @@ def embedding_cache_issues(
                 )
             )
         try:
-            import numpy as np  # type: ignore
-
-            if not bool(np.isfinite(vectors).all()):
-                issues.append(
-                    CacheHealthIssue(
-                        "error",
-                        "non_finite_vectors",
-                        "Vector matrix contains NaN or infinity.",
-                    )
-                )
-            elif metadata.get("normalize") and rows:
-                norms = np.linalg.norm(vectors, axis=1)
-                max_deviation = float(np.max(np.abs(norms - 1.0)))
-                if max_deviation > 0.02:
-                    issues.append(
-                        CacheHealthIssue(
-                            "warning",
-                            "normalization_drift",
-                            f"Normalized cache has max L2 norm deviation {max_deviation:.4f}.",
-                        )
-                    )
-        except (TypeError, ValueError):
+            canonicalize_embedding_matrix(
+                vectors,
+                expected_dimension=dimension,
+                normalized=bool(metadata.get("normalize")),
+                label="embedding cache",
+                require_float32=True,
+            )
+        except EmbeddingVectorContractError as exc:
+            message = str(exc)
+            if "finite" in message:
+                code = "non_finite_vectors"
+            elif "L2 norm" in message:
+                code = "normalization_drift"
+            elif "dtype" in message:
+                code = "vector_dtype"
+            else:
+                code = "vector_validation"
             issues.append(
                 CacheHealthIssue(
                     "error",
-                    "vector_validation",
-                    "Vector matrix could not be validated numerically.",
+                    code,
+                    message,
                 )
             )
 
@@ -791,6 +930,8 @@ def embedding_cache_issues(
                 model_config
             ),
         }
+        if model_config.revision:
+            expected_contract["revision"] = model_config.revision
         if model_config.dimensions is not None:
             expected_contract["dimension"] = model_config.dimensions
         for key, expected in expected_contract.items():

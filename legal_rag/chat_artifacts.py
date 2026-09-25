@@ -28,6 +28,8 @@ from .chat import (
     should_refuse_before_retrieval,
 )
 from .evaluation_artifacts import (
+    _retrieval_boundary_from_payload,
+    _retrieval_boundary_to_payload,
     search_result_from_artifact,
     search_result_to_artifact,
 )
@@ -45,6 +47,8 @@ from .models import (
     VerificationResult,
 )
 from .query import QueryAnalysis, analyze_query
+from .retrieval import assert_results_match_boundary
+from .retrieval_contracts import RetrievalBoundary
 from .verifier import parse_structured_answer
 
 
@@ -776,7 +780,7 @@ def prepared_question_from_artifact(
     )
 
 
-_RETRIEVED_PAYLOAD_FIELDS = {
+_LEGACY_RETRIEVED_PAYLOAD_FIELDS = {
     "prepared_sha256",
     "adaptive_result",
     "results",
@@ -787,6 +791,7 @@ _RETRIEVED_PAYLOAD_FIELDS = {
     "terminal_answer",
     "terminal_expected_answer_mode",
 }
+_RETRIEVED_PAYLOAD_FIELDS = _LEGACY_RETRIEVED_PAYLOAD_FIELDS | {"retrieval_boundary"}
 
 
 def _validate_scope_filtered_retrieval_mapping(
@@ -909,6 +914,17 @@ def _validate_retrieved_relationships(turn: RetrievedTurn) -> None:
     adaptive = turn.adaptive_result
     evidence = turn.evidence_check
     results = tuple(turn.results)
+    boundary = turn.retrieval_boundary
+    if boundary is not None and not isinstance(boundary, RetrievalBoundary):
+        raise ValueError("retrieved boundary is invalid")
+    try:
+        assert_results_match_boundary(
+            results, boundary, stage="retrieved turn artifact"
+        )
+    except (TypeError, ValueError, RuntimeError) as exc:
+        raise ValueError("retrieved results violate their captured boundary") from exc
+    if boundary is None and any(result.provenance is not None for result in results):
+        raise ValueError("retrieved provenance requires a captured boundary")
     terminal_values = (
         turn.terminal_kind,
         turn.terminal_answer,
@@ -995,6 +1011,11 @@ def retrieved_turn_to_artifact(turn: RetrievedTurn) -> dict[str, Any]:
         "adaptive_result": adaptive_payload,
         "results": result_artifacts,
         "evidence_check": evidence_payload,
+        "retrieval_boundary": (
+            _retrieval_boundary_to_payload(turn.retrieval_boundary)
+            if turn.retrieval_boundary is not None
+            else None
+        ),
         "rejected_source_ids": _string_list(
             "retrieved.rejected_source_ids", list(turn.rejected_source_ids)
         ),
@@ -1023,11 +1044,24 @@ def retrieved_turn_from_artifact(
     if not isinstance(prepared, PreparedQuestion):
         raise ValueError("prepared must be a PreparedQuestion")
     prepared_copy = deepcopy(prepared)
-    payload = _exact_mapping(
-        "retrieved turn",
-        _artifact_payload("retrieved_turn", artifact),
-        _RETRIEVED_PAYLOAD_FIELDS,
-    )
+    raw_payload = _artifact_payload("retrieved_turn", artifact)
+    payload_fields = set(raw_payload)
+    if payload_fields == _RETRIEVED_PAYLOAD_FIELDS:
+        payload = _exact_mapping(
+            "retrieved turn", raw_payload, _RETRIEVED_PAYLOAD_FIELDS
+        )
+        serialized_boundary = (
+            None
+            if payload["retrieval_boundary"] is None
+            else _retrieval_boundary_from_payload(payload["retrieval_boundary"])
+        )
+    elif payload_fields == _LEGACY_RETRIEVED_PAYLOAD_FIELDS:
+        payload = _exact_mapping(
+            "legacy retrieved turn", raw_payload, _LEGACY_RETRIEVED_PAYLOAD_FIELDS
+        )
+        serialized_boundary = None
+    else:
+        raise ValueError("retrieved turn fields are invalid")
     expected_prepared_hash = canonical_hash(
         prepared_question_to_artifact(prepared_copy)
     )
@@ -1064,6 +1098,11 @@ def retrieved_turn_from_artifact(
         adaptive_result=adaptive,
         results=results,
         evidence_check=evidence,
+        retrieval_boundary=(
+            serialized_boundary
+            if payload_fields == _RETRIEVED_PAYLOAD_FIELDS
+            else _retrieval_boundary_from_results(results)
+        ),
         rejected_source_ids=tuple(
             _string_list(
                 "retrieved.rejected_source_ids", payload["rejected_source_ids"]
@@ -1083,6 +1122,56 @@ def retrieved_turn_from_artifact(
     )
     _validate_retrieved_relationships(restored)
     return restored
+
+
+def _retrieval_boundary_from_results(
+    results: tuple[SearchResult, ...],
+) -> RetrievalBoundary | None:
+    boundaries = {
+        result.provenance.boundary
+        for result in results
+        if result.provenance is not None
+    }
+    if not boundaries:
+        return None
+    if len(boundaries) != 1 or any(result.provenance is None for result in results):
+        raise ValueError("retrieved results contain mixed retrieval boundaries")
+    return next(iter(boundaries))
+
+
+def _strip_search_result_provenance(value: Any) -> None:
+    """Convert current nested SearchResult artifacts to their M2 shape."""
+
+    if isinstance(value, dict):
+        result_payload = value.get("search_result")
+        if set(value) == {"artifact_schema_version", "search_result"} and isinstance(
+            result_payload, dict
+        ):
+            result_payload.pop("provenance", None)
+        for nested in value.values():
+            _strip_search_result_provenance(nested)
+    elif isinstance(value, list):
+        for nested in value:
+            _strip_search_result_provenance(nested)
+
+
+def _retrieved_artifact_hash_candidates(turn: RetrievedTurn) -> set[str]:
+    current = retrieved_turn_to_artifact(turn)
+    candidates = {canonical_hash(current)}
+    adaptive_results = (
+        () if turn.adaptive_result is None else tuple(turn.adaptive_result.results)
+    )
+    if turn.retrieval_boundary is not None or any(
+        result.provenance is not None
+        for result in (*tuple(turn.results), *adaptive_results)
+    ):
+        return candidates
+    without_boundary = deepcopy(current)
+    without_boundary["payload"].pop("retrieval_boundary", None)
+    m2_legacy = deepcopy(without_boundary)
+    _strip_search_result_provenance(m2_legacy)
+    candidates.update({canonical_hash(without_boundary), canonical_hash(m2_legacy)})
+    return candidates
 
 
 _GENERATED_PAYLOAD_FIELDS = {
@@ -1261,9 +1350,8 @@ def generated_turn_from_artifact(
         _artifact_payload("generated_turn", artifact),
         _GENERATED_PAYLOAD_FIELDS,
     )
-    expected_retrieved_hash = canonical_hash(retrieved_turn_to_artifact(retrieved_copy))
     retrieved_hash = _digest("generated.retrieved_sha256", payload["retrieved_sha256"])
-    if retrieved_hash != expected_retrieved_hash:
+    if retrieved_hash not in _retrieved_artifact_hash_candidates(retrieved_copy):
         raise ValueError("generated turn retrieved artifact hash does not match")
     raw_answer = payload["answer"]
     answer = None if raw_answer is None else _structured_answer_from_payload(raw_answer)
@@ -1379,6 +1467,16 @@ def verified_turn_to_artifact(turn: VerifiedTurn) -> dict[str, Any]:
     return _artifact("verified_turn", payload)
 
 
+def _generated_artifact_hash_candidates(turn: GeneratedTurn) -> set[str]:
+    current = generated_turn_to_artifact(turn)
+    candidates: set[str] = set()
+    for retrieved_hash in _retrieved_artifact_hash_candidates(turn.retrieved):
+        candidate = deepcopy(current)
+        candidate["payload"]["retrieved_sha256"] = retrieved_hash
+        candidates.add(canonical_hash(candidate))
+    return candidates
+
+
 def verified_turn_from_artifact(
     artifact: Mapping[str, Any],
     *,
@@ -1392,9 +1490,8 @@ def verified_turn_from_artifact(
         _artifact_payload("verified_turn", artifact),
         _VERIFIED_PAYLOAD_FIELDS,
     )
-    expected_generated_hash = canonical_hash(generated_turn_to_artifact(generated_copy))
     generated_hash = _digest("verified.generated_sha256", payload["generated_sha256"])
-    if generated_hash != expected_generated_hash:
+    if generated_hash not in _generated_artifact_hash_candidates(generated_copy):
         raise ValueError("verified turn generated artifact hash does not match")
     final_answer = (
         None

@@ -2,6 +2,12 @@
 
 ## 当前真实状态
 
+- M3 已按用户授权完成模块 A-D 的实现候选，当前状态是 `ready_for_review / awaiting final candidate CI`，不是 `released`。工作分支为 `codex/m3-storage-snapshots`，基线为 `6cd07d982ffeecec3632ff47c8473118585a9693`，最近单独验证的实现提交为 `cf2c7a82195b63786d77bfb0d5cea9799b18013b`。
+- M3 跟踪对象为仍处于 open 状态的 [Issue #12](https://github.com/1040942669/legal-rag-agent/issues/12)、[Milestone 4](https://github.com/1040942669/legal-rag-agent/milestone/4) 和 draft/open [PR #13](https://github.com/1040942669/legal-rag-agent/pull/13)。模块 A-D 均已验收并推送，但版本/候选文档形成的新 PR head 仍需精确 CI；PR 尚未合并，`candidate_sha`、`release_target_sha`、Tag、GitHub Release 和发布回执均不存在。
+- 模块 A 已建立版本化语料/法条/分块/embedding schema、事务导入、不可变导入回执、Alembic 迁移与数据库 CI。模块 B 已完成 exact pgvector repository、typed retrieval boundary/provenance、全检索路径 fail-closed 约束、不可变语料行迁移和 SearchResult artifact 向后兼容。模块 C 已完成法名 + 条号 + 可选精确版本/生效日的 typed catalog 查询，以及带 revision、activation ID、不可变事件账本和完整 CAS 的 active snapshot 原子激活、替换与回滚。模块 D 已完成显式实验 HNSW、generation-bound build receipt、typed underfill/同边界 exact fallback、`0004` 迁移、真实服务重启、新进程复验和累计 M3 gate。
+- 模块 A 的原始验收历史继续保留：实现 head `68f89ed0cd1393d8acda7570a83bb0714f57a868`、12 项单元测试、9 项 PostgreSQL 集成测试及 [CI 35697224230](https://github.com/1040942669/legal-rag-agent/actions/runs/35697224230) 均已通过；这些历史对象没有被后续模块的累计结果改写。
+- 完整实现 head 的本地证据为 `671 passed, 157 subtests passed`、PostgreSQL 18.1 + pgvector 0.8.1 集成测试 `61 passed`、M0-M3 累计强制检查 `33/33` 和真实服务 stop/start 后新进程复验成功；真实模型与付费调用为 0。
+- 精确实现 head `cf2c7a8...` 的 [CI 36073478416](https://github.com/1040942669/legal-rag-agent/actions/runs/36073478416) 已成功：offline 与 PostgreSQL 18 + pgvector 0.8.6 storage 两个 job 均成功，离线 JUnit 为 828/0/0/0，数据库集成为 `61 passed`，累计门禁 `33/33`。offline artifact digest 为 `sha256:24b2c6ae741859bea2b472c5a9b59f9fb0f406bddaaa729dd57c1102bf050de4`，storage artifact digest 为 `sha256:8d3c65df1f09044df2c34fa8668915d6249e99af6695b42a4f96bc0c4e97d2dd`，gate JSON SHA-256 为 `4bb6d3cef8f1bc5e69d8e61cd70f413e64aaecb02eace1b6a492a4ba59476aad`。
 - M2 软件与文档状态均为 `released`。最终 PR head 为 `170da868831e2730ea15d56ed88ad24b1159e67b`；[PR #9](https://github.com/1040942669/legal-rag-agent/pull/9) 于 `2026-09-22T04:32:15Z` 普通合并，release target 为 `da7023a659672121fd772364e475870a0167e1be`。
 - M2 的 [Issue #8](https://github.com/1040942669/legal-rag-agent/issues/8) 于 `2026-09-22T05:04:04Z` 关闭，[Milestone 3](https://github.com/1040942669/legal-rag-agent/milestone/3) 于 `2026-09-22T05:04:05Z` 关闭。annotated `v0.3.0` 已发布并远端核验：[GitHub Release](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.3.0)，发布时间 `2026-09-22T04:36:35Z`，非 draft、非 prerelease、附件 0。
 - tag object `191bbf7dd26bf4010731309aa7d8bdfc40d9a50b` peeled 到 `da7023a659672121fd772364e475870a0167e1be`，与远端 `master` 和 Release target 一致。软件 Tag 不会为后续回执移动。
@@ -12,14 +18,36 @@
 - Tag / Release：`v0.2.0` / [GitHub Release](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.2.0)，发布时间 `2026-09-19T18:59:07Z`；非 draft、非 prerelease、无附件。
 - M1 回执分支为 `codex/m1-release-receipt`，从已发布的 `origin/master` 创建；软件 Tag 不包含也不需要包含后续回执提交。
 - M1 终态为 `released`；机器可读回执 [PR #6](https://github.com/1040942669/legal-rag-agent/pull/6) 已于 `2026-09-19T19:16:26Z` 普通合并，merge `fee92b4457dc68edc413608fb3a0d263af740922` 的 [master CI 35463832520](https://github.com/1040942669/legal-rag-agent/actions/runs/35463832520) 成功。Issue #4 和 Milestone 2 均已关闭。
-- M2 独立回执 [PR #10](https://github.com/1040942669/legal-rag-agent/pull/10) 已普通合并：最终 head `4ba8282a7ed6eba61a31f2cf2fcd88c7a5811dfc`，merge `6decc0f2e675300f1a175f7ab49c85852d35b38d`；最终 PR CI 与 merge 后 [master CI 35689024928](https://github.com/1040942669/legal-rag-agent/actions/runs/35689024928) 均成功。M3-M7 尚未开始。
+- M2 独立回执 [PR #10](https://github.com/1040942669/legal-rag-agent/pull/10) 已普通合并：最终 head `4ba8282a7ed6eba61a31f2cf2fcd88c7a5811dfc`，merge `6decc0f2e675300f1a175f7ab49c85852d35b38d`；最终 PR CI 与 merge 后 [master CI 35689024928](https://github.com/1040942669/legal-rag-agent/actions/runs/35689024928) 均成功。M3 已启动，M4-M7 尚未开始。
+
+## M3 启动边界
+
+- 计划版本：`v0.4.0`；只实现 PostgreSQL/pgvector 持久化、版本化语料快照、精确检索等价、全路径范围过滤、法条版本查询、原子激活/回滚、受控 ANN 和 M3-T01 至 M3-T08。
+- 原离线 CLI 路径继续可用；只有显式选择数据库 profile 才要求数据库。正确性顺序是：先导入同一批已缓存 float32 向量，再证明 exact 等价和过滤闭包，最后才把 ANN 作为可关闭优化。
+- 模块 A-D 提供 schema、四个迁移、可复现导入、exact retrieval、全路径边界、精确法条目录查询、active snapshot 原子状态机和受控实验 ANN。实现完成不能被解释为生产数据库部署、真实法律质量提升或 `v0.4.0` 已发布。
+- 默认仍禁止真实模型和付费调用；测试使用合成数据与已有缓存向量契约，不读取或上传私密 `.env`、完整私人语料或本地产物。
+
+## M3 当前进展与下一步
+
+- 数据模型覆盖 corpus snapshot、law/version/article、chunk 与多对多 article 映射、embedding profile、chunk embedding、导入回执、index build 和按 scope 的 active snapshot pointer；跨表约束确保 active pointer 不能指向错误租户/集合范围。
+- 导入 bundle 先做 canonical 校验：ID、顺序闭包、维度、float32、有限数、关系引用、content hash、profile-sensitive bundle hash 均显式验证。重复导入必须完全匹配才幂等；冲突数据拒绝覆盖。
+- importer 在单一事务和 PostgreSQL advisory lock 内运行；任一后段写入失败会整体回滚。集成测试覆盖首次导入、重复导入、并发导入、实际向量回读、维度 trigger、冲突和失败回滚。
+- exact pgvector repository 使用规范化 float32/query 合同，显式把 pgvector `<#>` negative-inner-product distance 转回越大越好的 inner-product score，并稳定处理同分排序；它与现有 dense 基线做等价验证，边界由 scope、snapshot、embedding profile、法律/版本/法条 selector 和生效日期共同定义。
+- typed `RetrievalBoundary` 与 `RetrievalProvenance` 绑定完整 chunk payload hash 和 article provenance；exact retrieval、RRF、rerank、adaptive、chat 与 evaluation/artifact 恢复路径均重新校验，任何边界丢失、降级、混合或篡改均 fail closed。旧五字段、真正 unbound 的 SearchResult artifact 仍可读取；携带 M3 强边界标记却缺 provenance 的旧产物会拒绝恢复。
+- 第三个迁移加入 revisioned activation ledger、pointer/event 复合外键、deferred consistency trigger 和反向 article/chunk 索引；升级先锁住 legacy pointer/snapshot 写入，再校验并 bootstrap。独立临时 PostgreSQL 数据库已真实覆盖健康 0002 双 active pointer 到 0003 的带数据升级，包括旧分隔符拼接会碰撞的 ID 组合。
+- catalog 查询只做精确法名、规范化条号和显式版本/生效日选择，返回 `found`、`not_found` 或 `needs_disambiguation` 及受约束 reason；没有 fuzzy/semantic fallback，也不会用其他版本编造命中。active snapshot 更换在同 scope advisory transaction lock、pointer/snapshot row lock 和完整 `(snapshot_id, revision, activation_id)` CAS 下单事务提交；失败保持旧 active 不变。
+- 可复现 import CLI 将 `plan/dry-run`、`validate` 和 `apply` 分开：前两步只校验 source-root 内本地产物，apply 在连接数据库前重新验证，并在单事务导入、回读、写 receipt；导入绝不隐式激活快照。
+- exact 继续是默认。HNSW 只有显式实验策略才启用，按 snapshot/profile/dimension/参数/embedding generation 隔离；查询前核验唯一物理实例与 `EXPLAIN`。过滤 underfill 使用 typed outcome，可在完全相同边界内做有时限 exact fallback，不能为凑满 top-k 移除过滤。
+- `0004_m3_ann_build_guards`、不一致 legacy fail-closed、安全 downgrade/re-upgrade、embedding generation 变化和真实 PostgreSQL 服务 restart 已进入自动回归；重启后由新进程复核 migration、持久化数据、activation、exact、catalog 和 ANN receipt。
+- 当前实现 head 的本地结果为 `671 passed, 157 subtests passed`、数据库 `61 passed`、累计 `33/33`；CI 同样为 671 +157、JUnit 828/0/0/0、数据库 61、33/33。四个 migration 资源、lock、目标 Ruff、workflow YAML 和 diff check 均通过。
+- 下一步只做候选收口：提交 `0.4.0` 版本和文档，在精确新 PR head 重跑两个 CI job 与包验证；通过后才转 ready、正常合并、核验 master CI、创建 `v0.4.0` Tag/Release，并走独立 receipt/finalize PR。不要开始 M4。
 
 ## M2 启动边界
 
 - 只实现实验分层、精确复用、回放、逐 case 原子结果、断点续评、并发 fake 隔离、分层计时与 `M2-T01` 至 `M2-T08`。
 - 复用 v3 120 条评测集与固定 30 条生成子集；它们标记为 `legacy_regression`，不冒充新的盲测集。
 - 默认离线、并发 1、真实模型调用关闭；dense query embedding 或 adaptive normalizer 是否产生外部调用必须由 manifest 与调用账本显式记录，不能笼统写成 retrieval-only 永远零调用。
-- 本阶段不引入 PostgreSQL/pgvector、FastAPI、LangGraph、Redis/Celery、UI 或生产部署；这些仍属于 M3-M7。
+- M2 阶段本身没有引入 PostgreSQL/pgvector、FastAPI、LangGraph、Redis/Celery、UI 或生产部署；PostgreSQL/pgvector 基础现已在后续 M3-A 引入，其他能力仍属于后续里程碑。
 - 发布前必须累计通过 M0、M1 和 M2 门禁；发布 `v0.3.0` 后另以文档回执记录真实远端状态，不移动软件 Tag。
 
 ## M2 当前进展与唯一下一步
@@ -34,7 +62,7 @@
 - 候选文件定向 Ruff、compileall、diff check 和门禁高置信凭证扫描通过。额外的全仓 Ruff 仍有本分支未修改的 `legal_rag/indexing.py` F841；它不是 M2 门禁或本次改动引入的问题，不在候选冻结中扩大为无关重构。
 - 已知边界仍包括：跨进程/分布式唯一所有权未提供；生命周期命令依赖 Git 源码工作区；直接执行只覆盖 provider-free BM25；真实 provider、完整法律语料和法律质量未运行。
 - 最终 PR head 的 [CI 35686885130](https://github.com/1040942669/legal-rag-agent/actions/runs/35686885130) 与 release target 的 [master CI 35687258856](https://github.com/1040942669/legal-rag-agent/actions/runs/35687258856) 均为 25/25、`548 passed, 157 subtests passed`、JUnit 705/0/0/0。两份 artifact digest 与 JSON hash 已写入 STATE、M2 报告和机器可读回执。
-- M2 唯一剩余动作是合并这份事后事实的最终文档收口；完成后停止。不得修改 `v0.3.0`，也不得自动开始 M3。
+- M2 已完全收口，不得修改 `v0.3.0`。当前执行焦点已经转到获授权的 M3；M2 的历史证据不随 M3 分支移动。
 
 ## M1 启动边界
 
@@ -75,6 +103,9 @@
 
 ## 真实验证结果
 
+- M3-A-D 实现 head `cf2c7a82195b63786d77bfb0d5cea9799b18013b`：本地累计离线回归 `671 passed, 157 subtests passed`；PostgreSQL 18.1 + pgvector 0.8.1 integration `61 passed`；M0-M3 mandatory `33/33`；真实服务重启后新进程 verify 通过；真实模型与付费调用 0。
+- 精确实现 head [CI 36073478416](https://github.com/1040942669/legal-rag-agent/actions/runs/36073478416) 的 offline 与 PostgreSQL 18 + pgvector 0.8.6 storage 两个 job 均成功；离线 JUnit 828/0/0/0，integration 61，累计 33/33。offline/storage artifact digest 分别为 `sha256:24b2c6ae741859bea2b472c5a9b59f9fb0f406bddaaa729dd57c1102bf050de4` 和 `sha256:8d3c65df1f09044df2c34fa8668915d6249e99af6695b42a4f96bc0c4e97d2dd`。
+- M3-A-D 的 wheel 内容、lock、改动目标文件 Ruff、workflow YAML 和 diff check 均通过，包含 4/4 Alembic migrations。最终包输入快照已独立离线构建 `0.4.0`：wheel 309,061 bytes / 66 entries / SHA-256 `cafe1b43cf6d30bb146e6aee54492eebebc9794dc29dcd0de715004e2b03a269`；sdist 419,532 bytes / 109 entries / SHA-256 `7bb7a6b22b405c4ff4f01fad159ba4fd47322ca8a9da643a79bd45796cc0242c`；禁止路径 0、migration 4/4、Python 3.12.13 隔离 no-index/no-deps 安装与 entry point 通过。包含版本/文档的精确候选 head 仍须重新跑 CI；实现 head 的 `0.3.0` wheel 不能冒充最终包。额外全仓 Ruff 仍报告既存 `legal_rag/indexing.py:83` F841。
 - 修改前基线：`70 passed in 0.43s`。
 - M0 候选本地统一门禁：7/7 必需检查通过；全量 89 passed；合成 smoke 1 passed。
 - 最终 PR CI：89 passed，24 个 Markdown、2 个 JSON、79 个 Git candidate 文本凭证形状扫描均通过。
@@ -92,8 +123,8 @@
 
 - 没有运行在线或本地生成模型、Embedding、reranker、LLM judge、真实法律语料实验或付费调用。
 - 没有读取/上传 `.env` 值、完整语料、Embedding cache、私人课程/简历/面试材料或大型产物。
-- 没有引入数据库、FastAPI、LangGraph、Redis/Celery，没有部署生产。
-- M1 软件、发布回执和 Milestone 收尾均已完成；没有重复发版或移动 Tag。M2 软件也已通过 PR #9 合并并发布为 `v0.3.0`，当前只剩独立回执与 Issue/Milestone 收尾。
+- 已在 M3 工作分支引入可选 PostgreSQL/pgvector 基础，但没有生产部署、完整语料迁移、FastAPI、LangGraph、Redis/Celery 或 M4 以后的能力。
+- M1、M2 软件、发布回执和 Milestone 收尾均已完成；没有重复发版或移动既有 Tag。M3 模块 A-D 已通过实现候选验收，但尚未合并或发布，也没有 M3 发布回执。
 - 本地门禁 JSON、下载的 CI JSON 与包构建物只保存在被忽略的本地 `.tmp`；它们没有进入 Git 或 Release 附件。GitHub Actions 产物按平台保留策略远端保存。
 - 没有把历史 203 部法律或模型质量数字冒充 M0 新实测。
 
@@ -105,13 +136,20 @@
 - 项目声明 Python `>=3.10`，M0 必需门禁只固定验证 Python 3.12 系列。
 - 凭证形状扫描不是绝对无泄漏保证，候选另经人工文件清单与完整 diff 审查。
 - GitHub CI 安装锁定依赖时可以联网；门禁子进程使用离线依赖模式、禁用 dotenv 并在项目 provider 边界拒绝真实模型调用，合成 smoke 另在 Python 进程内阻断 socket，但仍不是 runner 的 OS 级 air-gap。
+- 非阻塞 P2：snapshot 在 repository preflight 之后、encoder 调用之前被 archive 时，可再增加一次 encoder 前 preflight 以更早停止无效编码。当前数据读取仍由数据库边界 fail closed，且 bound online 路径只允许本地可验证的 SentenceTransformer 编码器，因此这不是越权读取缺口，也不阻塞模块 B 验收。
+- 非阻塞 P2：并发 activation 集成测试已使用两个真实线程并证明同一 stale CAS 只有一胜一冲突，但入口 Barrier 没有单独证明两个事务在 advisory-lock 关键区重叠；后续可用 SQLAlchemy event 加第二个 Barrier 强化证据。
+- 非阻塞 P2：deferred activation consistency trigger 当前按受影响行扫描全库 active/pointer/event 历史，逻辑正确，但规模增长后应限制到受影响 scope 以降低提交成本。
+- 非阻塞 P2：自动迁移测试已覆盖空库、健康 0002 双 pointer、矛盾 legacy fail-closed、downgrade/re-upgrade 和 0004 generation guard；法条 catalog API 仍未接入默认 CLI/chat 产品入口。
+- 非阻塞 P2：实验 HNSW 尚未在完整真实法律语料上基准 recall、build time、index size 与 P95；exact 因而继续是默认，不声称 ANN 带来已量化性能或质量提升。
+- 非阻塞 P2：多父 snapshot 的数据库 trigger 在未来可对父行锁查询使用稳定 `ORDER BY`，进一步降低并发事务以相反顺序取锁时的死锁概率。现有不可变约束、正确性测试和集成测试均已通过，该项属于后续并发稳健性加固。
 
 ## 回滚
 
-- 代码：发布后如需撤销，通过新的 revert PR 回滚 M1 merge commit `d51ed481f986dde807163f4b5583b07bc9ef6750`，不强推、不重写历史。
-- 数据：本版没有数据库或语料迁移，无数据回滚动作。
-- 任务/服务：本版没有队列、后台任务或生产部署，无运行中任务需要恢复。
-- 版本：已发布 `v0.1.1` 与 `v0.2.0` 均不移动、不复用；修复使用后续版本。
+- 代码：M3 尚未合并；发布后如需撤销，使用新的 revert/fix PR，不强推、不重写历史，也不移动已发布 Tag。
+- 数据：优先通过 revisioned activation rollback 切回仍为 validated 且具备所需 profile 的历史 snapshot；代码 `git revert` 不能替代数据库恢复。Schema downgrade 只在兼容检查允许时执行，不删除数据库卷来伪造回滚。
+- ANN：HNSW 是可重建派生索引；停止选择实验 build 并回到 exact，不删除 corpus、不篡改 generation/build receipt。
+- 任务/服务：本版没有队列、后台任务或生产部署，无运行中生产任务需要恢复。
+- 版本：已发布 `v0.1.1`、`v0.2.0` 与 `v0.3.0` 均不移动、不复用；`v0.4.0` 仍不存在，只有候选和 master 门禁通过后才创建。
 
 ## M0 回执收尾核对
 
@@ -123,7 +161,13 @@
 
 | 项目 | 当前值 |
 |---|---|
-| 当前里程碑 | M2 / `released`（软件、Release、回执、Issue 与 Milestone 均已核验收尾） |
+| 当前里程碑 | M3 / `ready_for_review`；模块 A-D 已验收并推送，最终候选 CI 待运行，未合并、未发布 |
+| M3 branch / base | `codex/m3-storage-snapshots` / `6cd07d982ffeecec3632ff47c8473118585a9693` |
+| M3 Issue / Milestone / PR | [#12](https://github.com/1040942669/legal-rag-agent/issues/12) / [Milestone 4](https://github.com/1040942669/legal-rag-agent/milestone/4) / draft [PR #13](https://github.com/1040942669/legal-rag-agent/pull/13) |
+| M3-A-D implementation / CI | `cf2c7a82195b63786d77bfb0d5cea9799b18013b` / exact-head [run 36073478416](https://github.com/1040942669/legal-rag-agent/actions/runs/36073478416)；2/2 jobs success |
+| M3 实现 head 测试 | 本地 671 passed + 157 subtests；PostgreSQL 18.1 + pgvector 0.8.1 integration 61；33/33；CI JUnit 828/0/0/0、PostgreSQL 18 + pgvector 0.8.6 integration 61、真实 restart passed |
+| M3 CI artifacts | offline `sha256:24b2c6ae741859bea2b472c5a9b59f9fb0f406bddaaa729dd57c1102bf050de4`；storage `sha256:8d3c65df1f09044df2c34fa8668915d6249e99af6695b42a4f96bc0c4e97d2dd`；gate JSON `4bb6d3ce...` |
+| M3 Tag / Release | 未创建；`v0.4.0` 仍是计划版本 |
 | M2 branch / base | `codex/m2-experiment-lifecycle` / `00ec3ad5b193a7442e427486e8bfade2dbabd482` |
 | M2 Issue / Milestone | [#8](https://github.com/1040942669/legal-rag-agent/issues/8) / [Milestone 3](https://github.com/1040942669/legal-rag-agent/milestone/3) |
 | M2 PR / Tag / Release | [PR #9](https://github.com/1040942669/legal-rag-agent/pull/9) merged / `v0.3.0` / [published](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.3.0) |
@@ -142,8 +186,8 @@
 | M1 Issue / Milestone | [#4](https://github.com/1040942669/legal-rag-agent/issues/4) / [Milestone 2](https://github.com/1040942669/legal-rag-agent/milestone/2) |
 | M2 receipt | [PR #10](https://github.com/1040942669/legal-rag-agent/pull/10) merged；final `4ba8282...` / merge `6decc0f...` / final PR 与 master CI success |
 | 阻塞 | 无 |
-| 下一条可执行动作 | 本最终文档 PR 通过并合并后停止；M3 保持 `not_started`，等待用户明确授权 |
+| 下一条可执行动作 | 提交并推送 `0.4.0` 候选版本/文档；精确 PR head 两个 CI job、33/33、61 integration、真实 restart 与候选包通过后才转 ready/合并/发布 |
 
 ## 完成说明
 
-`v0.3.0` 的 `release_target_sha` 固定为 `da7023a659672121fd772364e475870a0167e1be`。即使 `master` 已因回执 merge 前进到 `6decc0f2e675300f1a175f7ab49c85852d35b38d` 并将继续包含本收口文档，annotated Tag 仍 peeled 到软件 target；回执与收口 PR 都不属于新的软件版本。M2 已完成，M3 未启动。
+`v0.3.0` 的 `release_target_sha` 固定为 `da7023a659672121fd772364e475870a0167e1be`。即使 `master` 已因回执 merge 前进到 `6cd07d982ffeecec3632ff47c8473118585a9693`，annotated Tag 仍 peeled 到软件 target。M2 已完成；M3 模块 A-D 已获得本地与精确实现-head CI 证据并推送，当前在 draft PR #13 冻结 `0.4.0` 候选。M3 尚未合并、打 Tag、发布或创建发布回执，必须先验证包含版本和全部候选文档的精确 PR head。

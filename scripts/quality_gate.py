@@ -17,6 +17,7 @@ import platform
 import re
 import subprocess
 import tempfile
+import time
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -25,13 +26,22 @@ from urllib.parse import unquote, urlsplit
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SUPPORTED_MILESTONES = frozenset({"M0", "M1", "M2"})
-SUPPORTED_MODES = frozenset({"offline"})
+SUPPORTED_REQUESTS: dict[str, frozenset[str]] = {
+    "M0": frozenset({"offline"}),
+    "M1": frozenset({"offline"}),
+    "M2": frozenset({"offline"}),
+    "M3": frozenset({"integration"}),
+}
+SUPPORTED_MILESTONES = frozenset(SUPPORTED_REQUESTS)
+SUPPORTED_MODES = frozenset(
+    mode for modes in SUPPORTED_REQUESTS.values() for mode in modes
+)
 REPORT_SCHEMA_VERSION = 1
 MILESTONE_PREREQUISITES: dict[str, tuple[str, ...]] = {
     "M0": (),
     "M1": ("M0",),
     "M2": ("M0", "M1"),
+    "M3": ("M0", "M1", "M2"),
 }
 
 MANDATORY_M0_CHECK_IDS = frozenset(
@@ -136,6 +146,54 @@ MANDATORY_M2_CHECK_IDS = frozenset(
     }
 )
 
+M3_TEST_SELECTORS: dict[str, tuple[str, ...]] = {
+    "M3-T01": (
+        "tests/test_m3_import_workflow.py::test_plan_is_deterministic_private_and_explicitly_non_activating",
+        "tests/test_m3_import_workflow.py::test_cli_plan_validate_and_no_clobber_are_machine_readable",
+        "tests/test_m3_import_workflow.py::test_cli_apply_revalidates_locally_before_database_configuration_or_migration",
+        "integration_tests/test_m3_import_workflow_db.py::test_import_workflow_receipt_verifies_content_dimension_and_idempotency",
+        "integration_tests/test_m3_storage_import.py::test_import_is_idempotent_and_preserves_hash_count_and_dimension",
+        "integration_tests/test_m3_storage_import.py::test_repeat_import_detects_persisted_text_tampering",
+    ),
+    "M3-T02": (
+        "integration_tests/test_m3_exact_retrieval.py::test_pgvector_exact_matches_numpy_inner_product_and_stable_ties",
+    ),
+    "M3-T03": (
+        "integration_tests/test_m3_catalog.py::test_catalog_resolves_exact_title_normalized_number_version_and_effective_date",
+        "integration_tests/test_m3_catalog.py::test_catalog_never_falls_back_across_scope_snapshot_title_or_article",
+    ),
+    "M3-T04": (
+        "integration_tests/test_m3_exact_retrieval.py::test_filters_apply_before_limit_and_isolate_scope_snapshot_profile_and_version",
+        "integration_tests/test_m3_exact_retrieval.py::test_multi_article_hard_filters_do_not_expose_nonmatching_relations_and_rrf_is_bound",
+        "tests/test_m3_bound_retrieval.py",
+    ),
+    "M3-T05": (
+        "integration_tests/test_m3_ann_retrieval.py::test_filtered_underfill_is_typed_and_exact_fallback_is_boundary_preserving",
+        "integration_tests/test_m3_ann_contracts.py::test_list_only_ann_retriever_refuses_partial_underfill",
+    ),
+    "M3-T06": (
+        "integration_tests/test_m3_ann_retrieval.py::test_dimension_above_hnsw_limit_is_rejected_before_ddl_but_exact_works",
+        "integration_tests/test_m3_storage_import.py::test_database_trigger_rejects_profile_dimension_mismatch",
+        "integration_tests/test_m3_exact_retrieval.py::test_filters_apply_before_limit_and_isolate_scope_snapshot_profile_and_version",
+    ),
+    "M3-T07": (
+        "integration_tests/test_m3_storage_import.py::test_conflicting_immutable_content_rolls_back_without_new_snapshot",
+        "integration_tests/test_m3_catalog.py::test_active_snapshot_replace_pins_requests_and_rollback_is_revisioned",
+        "integration_tests/test_m3_catalog.py::test_deferred_activation_guard_rejects_partial_state_change",
+    ),
+    "M3-T08": (
+        "integration_tests/test_m3_storage_import.py::test_empty_database_upgrades_to_head_with_vector_extension",
+        "integration_tests/test_m3_migration_resilience.py::test_safe_revision_one_downgrade_and_reupgrade_preserve_data_and_retrieval",
+    ),
+}
+
+MANDATORY_M3_CHECK_IDS = frozenset(
+    {
+        *MANDATORY_M2_CHECK_IDS,
+        *M3_TEST_SELECTORS,
+    }
+)
+
 REQUIRED_RECORD_FIELDS = frozenset(
     {
         "test_id",
@@ -146,6 +204,7 @@ REQUIRED_RECORD_FIELDS = frozenset(
         "status",
         "output_summary",
         "artifact_path",
+        "duration_ms",
     }
 )
 
@@ -202,6 +261,14 @@ _PLACEHOLDER_MARKERS = (
     "{{",
 )
 
+_INTEGRATION_ENVIRONMENT_NAMES = frozenset(
+    {
+        "LEGAL_RAG_DATABASE_URL",
+        "LEGAL_RAG_EXPECTED_PGVECTOR_VERSION",
+        "LEGAL_RAG_INTEGRATION_TEST",
+    }
+)
+
 
 class GateConfigurationError(RuntimeError):
     """Raised when a required repository input cannot be inspected safely."""
@@ -215,20 +282,45 @@ def utc_now() -> str:
     )
 
 
-def environment_summary() -> dict[str, Any]:
+def environment_summary(
+    *,
+    mode: str = "offline",
+    source: Mapping[str, str] | None = None,
+) -> dict[str, Any]:
     """Describe the execution environment without exposing environment values."""
 
-    return {
+    original = os.environ if source is None else source
+    summary: dict[str, Any] = {
         "dotenv_loading_disabled": True,
         "live_model_calls_allowed": False,
-        "mode": "offline",
+        "mode": mode,
         "os": platform.system() or os.name,
         "python": platform.python_version(),
         "sanitized_environment": True,
     }
+    if mode == "integration":
+        summary.update(
+            {
+                "database_url_configured": bool(
+                    original.get("LEGAL_RAG_DATABASE_URL", "").strip()
+                ),
+                "database_url_redacted": True,
+                "integration_test_guard": (
+                    original.get("LEGAL_RAG_INTEGRATION_TEST") == "1"
+                ),
+                "pgvector_version_expectation_configured": bool(
+                    original.get("LEGAL_RAG_EXPECTED_PGVECTOR_VERSION", "").strip()
+                ),
+            }
+        )
+    return summary
 
 
-def sanitized_environment(source: Mapping[str, str] | None = None) -> dict[str, str]:
+def sanitized_environment(
+    source: Mapping[str, str] | None = None,
+    *,
+    mode: str = "offline",
+) -> dict[str, str]:
     """Build a minimal subprocess environment with offline controls and no credentials."""
 
     original = dict(os.environ if source is None else source)
@@ -258,6 +350,14 @@ def sanitized_environment(source: Mapping[str, str] | None = None) -> dict[str, 
     clean = {
         key: value for key, value in original.items() if key.upper() in allowed_names
     }
+    if mode == "integration":
+        clean.update(
+            {
+                key: value
+                for key, value in original.items()
+                if key.upper() in _INTEGRATION_ENVIRONMENT_NAMES
+            }
+        )
     clean.update(
         {
             "ALLOW_LIVE_MODEL_CALLS": "false",
@@ -319,13 +419,41 @@ def _clean_summary(text: str, limit: int = MAX_SUMMARY_CHARS) -> str:
     return f"{cleaned[:limit]}\n... [{omitted} characters omitted]"
 
 
-def _process_summary(stdout: str, stderr: str) -> str:
+def _sensitive_environment_values(environment: Mapping[str, str]) -> tuple[str, ...]:
+    database_url = environment.get("LEGAL_RAG_DATABASE_URL", "").strip()
+    if not database_url:
+        return ()
+    values = {database_url}
+    try:
+        parsed = urlsplit(database_url)
+    except ValueError:
+        parsed = None
+    if parsed is not None and parsed.password:
+        values.add(parsed.password)
+        values.add(unquote(parsed.password))
+    return tuple(sorted((value for value in values if value), key=len, reverse=True))
+
+
+def _redact_sensitive_text(text: str, sensitive_values: Iterable[str]) -> str:
+    redacted = text
+    for value in sensitive_values:
+        redacted = redacted.replace(value, "<redacted>")
+    return redacted
+
+
+def _process_summary(
+    stdout: str,
+    stderr: str,
+    *,
+    sensitive_values: Iterable[str] = (),
+) -> str:
     parts: list[str] = []
     if stdout.strip():
         parts.append(f"stdout:\n{stdout.strip()}")
     if stderr.strip():
         parts.append(f"stderr:\n{stderr.strip()}")
-    return _clean_summary("\n".join(parts) or "command produced no output")
+    combined = "\n".join(parts) or "command produced no output"
+    return _clean_summary(_redact_sensitive_text(combined, sensitive_values))
 
 
 def result_record(
@@ -337,18 +465,21 @@ def result_record(
     output_summary: str,
     artifact_path: str | None = None,
     executed_at: str | None = None,
+    duration_ms: int = 0,
+    mode: str = "offline",
 ) -> dict[str, Any]:
     """Create one result record with the required stable schema."""
 
     return {
         "test_id": test_id,
         "command": list(command) if not isinstance(command, str) else command,
-        "environment": environment_summary(),
+        "environment": environment_summary(mode=mode),
         "executed_at": executed_at or utc_now(),
         "exit_code": int(exit_code),
         "status": status,
         "output_summary": _clean_summary(output_summary),
         "artifact_path": artifact_path,
+        "duration_ms": max(0, int(duration_ms)),
     }
 
 
@@ -359,15 +490,19 @@ def run_subprocess_check(
     repo_root: Path,
     timeout_seconds: int,
     artifact_path: str | None = None,
+    mode: str = "offline",
 ) -> dict[str, Any]:
     """Run one subprocess check and always return a result record."""
 
     executed_at = utc_now()
+    started_ns = time.perf_counter_ns()
+    subprocess_environment = sanitized_environment(mode=mode)
+    sensitive_values = _sensitive_environment_values(subprocess_environment)
     try:
         completed = subprocess.run(
             list(command),
             cwd=repo_root,
-            env=sanitized_environment(),
+            env=subprocess_environment,
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -376,7 +511,11 @@ def run_subprocess_check(
             check=False,
         )
         exit_code = completed.returncode
-        summary = _process_summary(completed.stdout, completed.stderr)
+        summary = _process_summary(
+            completed.stdout,
+            completed.stderr,
+            sensitive_values=sensitive_values,
+        )
     except FileNotFoundError as exc:
         exit_code = 127
         summary = f"command unavailable: {exc.filename or command[0]}"
@@ -384,11 +523,18 @@ def run_subprocess_check(
         exit_code = 124
         stdout = exc.stdout if isinstance(exc.stdout, str) else ""
         stderr = exc.stderr if isinstance(exc.stderr, str) else ""
-        summary = _process_summary(stdout, stderr)
+        summary = _process_summary(
+            stdout,
+            stderr,
+            sensitive_values=sensitive_values,
+        )
         summary = f"timed out after {timeout_seconds} seconds\n{summary}"
     except OSError as exc:
         exit_code = 126
         summary = f"command could not start: {exc}"
+
+    summary = _redact_sensitive_text(summary, sensitive_values)
+    duration_ms = (time.perf_counter_ns() - started_ns) // 1_000_000
 
     return result_record(
         test_id=test_id,
@@ -398,6 +544,8 @@ def run_subprocess_check(
         output_summary=summary,
         artifact_path=artifact_path,
         executed_at=executed_at,
+        duration_ms=duration_ms,
+        mode=mode,
     )
 
 
@@ -435,6 +583,7 @@ def run_pytest_check(
     repo_root: Path,
     timeout_seconds: int,
     artifact_path: str | None = None,
+    mode: str = "offline",
 ) -> dict[str, Any]:
     """Run mandatory pytest selectors and fail closed on skip, xfail, or no tests."""
 
@@ -455,6 +604,7 @@ def run_pytest_check(
             repo_root=repo_root,
             timeout_seconds=timeout_seconds,
             artifact_path=artifact_path,
+            mode=mode,
         )
         if record["exit_code"] != 0:
             return record
@@ -1138,6 +1288,7 @@ def _m0_offline_records(
 def _gate_report(
     *,
     milestone: str,
+    mode: str,
     started_at: str,
     records: list[dict[str, Any]],
     mandatory_check_ids: frozenset[str],
@@ -1146,9 +1297,14 @@ def _gate_report(
     return {
         "schema_version": REPORT_SCHEMA_VERSION,
         "milestone": milestone,
-        "mode": "offline",
+        "mode": mode,
         "started_at": started_at,
         "finished_at": utc_now(),
+        "duration_ms": sum(
+            record.get("duration_ms", 0)
+            for record in records
+            if isinstance(record.get("duration_ms"), int)
+        ),
         "status": "passed" if passed else "failed",
         "exit_code": 0 if passed else 1,
         "mandatory_check_ids": sorted(mandatory_check_ids),
@@ -1164,6 +1320,7 @@ def run_m0_offline(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
     records = _m0_offline_records(repo_root, state_milestone="M0")
     return _gate_report(
         milestone="M0",
+        mode="offline",
         started_at=started_at,
         records=records,
         mandatory_check_ids=MANDATORY_M0_CHECK_IDS,
@@ -1193,6 +1350,7 @@ def run_m1_offline(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
     records.extend(_m1_acceptance_records(repo_root))
     return _gate_report(
         milestone="M1",
+        mode="offline",
         started_at=started_at,
         records=records,
         mandatory_check_ids=MANDATORY_M1_CHECK_IDS,
@@ -1223,9 +1381,173 @@ def run_m2_offline(repo_root: Path = REPO_ROOT) -> dict[str, Any]:
     records.extend(_m2_acceptance_records(repo_root))
     return _gate_report(
         milestone="M2",
+        mode="offline",
         started_at=started_at,
         records=records,
         mandatory_check_ids=MANDATORY_M2_CHECK_IDS,
+    )
+
+
+def _m3_integration_preflight_errors(
+    source: Mapping[str, str] | None = None,
+) -> list[str]:
+    environment = os.environ if source is None else source
+    errors: list[str] = []
+    if environment.get("LEGAL_RAG_INTEGRATION_TEST") != "1":
+        errors.append(
+            "LEGAL_RAG_INTEGRATION_TEST=1 is required for destructive integration fixtures"
+        )
+    if not environment.get("LEGAL_RAG_DATABASE_URL", "").strip():
+        errors.append(
+            "LEGAL_RAG_DATABASE_URL is required for PostgreSQL integration tests"
+        )
+    return errors
+
+
+def _m3_preflight_failure_records(errors: Sequence[str]) -> list[dict[str, Any]]:
+    summary = "integration preflight failed; commands were not executed:\n" + "\n".join(
+        f"- {error}" for error in errors
+    )
+    records: list[dict[str, Any]] = []
+    for test_id, selectors in M3_TEST_SELECTORS.items():
+        records.append(
+            result_record(
+                test_id=test_id,
+                command=uv_run_command("pytest", "-q", *selectors),
+                exit_code=1,
+                status="failed",
+                output_summary=summary,
+                artifact_path=selectors[0].split("::", maxsplit=1)[0],
+                mode="integration",
+            )
+        )
+    return records
+
+
+def _m3_t08_record(
+    repo_root: Path,
+    restart_receipt: Path | None,
+) -> dict[str, Any]:
+    selectors = M3_TEST_SELECTORS["M3-T08"]
+    if restart_receipt is None:
+        return result_record(
+            test_id="M3-T08",
+            command=(
+                "quality_gate:M3-T08 requires --restart-receipt produced before "
+                "an actual PostgreSQL service restart"
+            ),
+            exit_code=1,
+            status="failed",
+            output_summary=(
+                "M3-T08 was not executed: --restart-receipt is required. Run "
+                "scripts/m3_restart_probe.py prepare before a real PostgreSQL service "
+                "restart, then run this gate after the restart."
+            ),
+            artifact_path=None,
+            mode="integration",
+        )
+
+    migration_record = run_pytest_check(
+        test_id="M3-T08",
+        selectors=selectors,
+        repo_root=repo_root,
+        timeout_seconds=600,
+        artifact_path=selectors[0].split("::", maxsplit=1)[0],
+        mode="integration",
+    )
+    verify_command = uv_run_command(
+        "python",
+        "scripts/m3_restart_probe.py",
+        "verify",
+        "--receipt",
+        str(restart_receipt),
+    )
+    if migration_record["status"] != "passed":
+        migration_record["command"] = [
+            subprocess.list2cmdline(migration_record["command"]),
+            subprocess.list2cmdline(verify_command),
+        ]
+        migration_record["output_summary"] = _clean_summary(
+            f"migration/re-upgrade prerequisite failed; restart verification was not "
+            f"executed\n{migration_record['output_summary']}"
+        )
+        return migration_record
+
+    verify_record = run_subprocess_check(
+        test_id="M3-T08",
+        command=verify_command,
+        repo_root=repo_root,
+        timeout_seconds=600,
+        artifact_path=str(restart_receipt.resolve(strict=False)),
+        mode="integration",
+    )
+    return result_record(
+        test_id="M3-T08",
+        command=[
+            subprocess.list2cmdline(migration_record["command"]),
+            subprocess.list2cmdline(verify_command),
+        ],
+        exit_code=int(verify_record["exit_code"]),
+        status=str(verify_record["status"]),
+        output_summary=(
+            "migration/re-upgrade evidence:\n"
+            f"{migration_record['output_summary']}\n"
+            "service-restart evidence from a new process:\n"
+            f"{verify_record['output_summary']}"
+        ),
+        artifact_path=str(restart_receipt.resolve(strict=False)),
+        executed_at=str(migration_record["executed_at"]),
+        duration_ms=int(migration_record["duration_ms"])
+        + int(verify_record["duration_ms"]),
+        mode="integration",
+    )
+
+
+def _m3_acceptance_records(
+    repo_root: Path,
+    *,
+    restart_receipt: Path | None = None,
+) -> list[dict[str, Any]]:
+    preflight_errors = _m3_integration_preflight_errors()
+    if preflight_errors:
+        return _m3_preflight_failure_records(preflight_errors)
+
+    records: list[dict[str, Any]] = []
+    for test_id, selectors in M3_TEST_SELECTORS.items():
+        if test_id == "M3-T08":
+            continue
+        records.append(
+            run_pytest_check(
+                test_id=test_id,
+                selectors=selectors,
+                repo_root=repo_root,
+                timeout_seconds=600,
+                artifact_path=selectors[0].split("::", maxsplit=1)[0],
+                mode="integration",
+            )
+        )
+    records.append(_m3_t08_record(repo_root, restart_receipt))
+    return records
+
+
+def run_m3_integration(
+    repo_root: Path = REPO_ROOT,
+    *,
+    restart_receipt: Path | None = None,
+) -> dict[str, Any]:
+    """Execute the cumulative M0-M3 gate with real PostgreSQL/pgvector checks."""
+
+    started_at = utc_now()
+    records = _m0_offline_records(repo_root, state_milestone="M3")
+    records.extend(_m1_acceptance_records(repo_root))
+    records.extend(_m2_acceptance_records(repo_root))
+    records.extend(_m3_acceptance_records(repo_root, restart_receipt=restart_receipt))
+    return _gate_report(
+        milestone="M3",
+        mode="integration",
+        started_at=started_at,
+        records=records,
+        mandatory_check_ids=MANDATORY_M3_CHECK_IDS,
     )
 
 
@@ -1235,9 +1557,10 @@ def validate_request(milestone: str | None, mode: str | None) -> list[str]:
         errors.append(
             f"unsupported milestone {milestone!r}; supported: {', '.join(sorted(SUPPORTED_MILESTONES))}"
         )
-    if mode not in SUPPORTED_MODES:
+    elif mode not in SUPPORTED_REQUESTS[milestone]:
         errors.append(
-            f"unsupported mode {mode!r}; supported: {', '.join(sorted(SUPPORTED_MODES))}"
+            f"unsupported mode {mode!r} for {milestone}; supported: "
+            f"{', '.join(sorted(SUPPORTED_REQUESTS[milestone]))}"
         )
     return errors
 
@@ -1254,6 +1577,7 @@ def _invalid_request_report(
         "mode": mode,
         "started_at": now,
         "finished_at": now,
+        "duration_ms": 0,
         "status": "failed",
         "exit_code": 2,
         "mandatory_check_ids": [],
@@ -1280,9 +1604,19 @@ def _write_report(path: Path, report: Mapping[str, Any]) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run a milestone quality gate.")
-    parser.add_argument("--milestone", help="Milestone identifier (M0, M1, or M2).")
-    parser.add_argument("--mode", help="Gate mode (currently offline).")
+    parser.add_argument("--milestone", help="Milestone identifier (M0, M1, M2, or M3).")
+    parser.add_argument(
+        "--mode", help="Gate mode (offline for M0-M2; integration for M3)."
+    )
     parser.add_argument("--output", help="Optional path for the JSON report.")
+    parser.add_argument(
+        "--restart-receipt",
+        type=Path,
+        help=(
+            "M3 only: receipt created by m3_restart_probe.py prepare before the "
+            "PostgreSQL service restart."
+        ),
+    )
     return parser
 
 
@@ -1291,6 +1625,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     request_errors = validate_request(args.milestone, args.mode)
     if request_errors:
         report = _invalid_request_report(args.milestone, args.mode, request_errors)
+    elif args.milestone == "M3":
+        report = run_m3_integration(
+            REPO_ROOT,
+            restart_receipt=args.restart_receipt,
+        )
     elif args.milestone == "M2":
         report = run_m2_offline(REPO_ROOT)
     elif args.milestone == "M1":

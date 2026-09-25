@@ -4,6 +4,7 @@ import json
 import math
 from collections.abc import Mapping
 from dataclasses import fields
+from datetime import date
 from typing import Any
 
 from .evaluation_contracts import validate_eval_case
@@ -17,6 +18,12 @@ from .models import (
     EvalCase,
     EvalRecord,
     SearchResult,
+)
+from .retrieval_contracts import (
+    RetrievedArticleProvenance,
+    RetrievalBoundary,
+    RetrievalBoundaryViolation,
+    RetrievalProvenance,
 )
 
 
@@ -90,6 +97,50 @@ _UNIT_INTERVAL_METRICS = frozenset(
         "judge_faithfulness",
         "judge_relevance",
         "judge_completeness",
+    }
+)
+_SEARCH_RESULT_LEGACY_FIELDS = frozenset(
+    {"chunk", "score", "rank", "retriever", "trace"}
+)
+_SEARCH_RESULT_FIELDS = _SEARCH_RESULT_LEGACY_FIELDS | {"provenance"}
+_RETRIEVAL_BOUNDARY_FIELDS = frozenset(
+    {
+        "scope_id",
+        "snapshot_id",
+        "profile_id",
+        "law_ids",
+        "version_ids",
+        "article_ids",
+        "article_numbers",
+        "effective_on",
+    }
+)
+_ARTICLE_PROVENANCE_FIELDS = frozenset(
+    {
+        "article_id",
+        "law_id",
+        "version_id",
+        "article_number",
+        "title",
+        "valid_from",
+        "valid_to",
+        "source_ref",
+        "source_line",
+        "verification_status",
+    }
+)
+_RETRIEVAL_PROVENANCE_FIELDS = frozenset(
+    {
+        "boundary",
+        "scope_id",
+        "snapshot_id",
+        "profile_id",
+        "chunk_id",
+        "chunk_content_hash",
+        "chunk_payload_hash",
+        "snapshot_ordinal",
+        "embedding_hash",
+        "articles",
     }
 )
 
@@ -172,6 +223,193 @@ def _integer_list(name: str, value: Any) -> list[int]:
         _integer(f"{name}[{index}]", item, minimum=1)
         for index, item in enumerate(value)
     ]
+
+
+def _optional_string_tuple(name: str, value: Any) -> tuple[str, ...] | None:
+    if value is None:
+        return None
+    return tuple(_string_list(name, value))
+
+
+def _date_to_iso(value: date | None) -> str | None:
+    return value.isoformat() if value is not None else None
+
+
+def _retrieval_boundary_to_payload(boundary: RetrievalBoundary) -> dict[str, Any]:
+    if not isinstance(boundary, RetrievalBoundary):
+        raise ValueError("provenance boundary must be a RetrievalBoundary")
+    return {
+        "scope_id": boundary.scope_id,
+        "snapshot_id": boundary.snapshot_id,
+        "profile_id": boundary.profile_id,
+        "law_ids": list(boundary.law_ids) if boundary.law_ids is not None else None,
+        "version_ids": (
+            list(boundary.version_ids) if boundary.version_ids is not None else None
+        ),
+        "article_ids": (
+            list(boundary.article_ids) if boundary.article_ids is not None else None
+        ),
+        "article_numbers": (
+            list(boundary.article_numbers)
+            if boundary.article_numbers is not None
+            else None
+        ),
+        "effective_on": _date_to_iso(boundary.effective_on),
+    }
+
+
+def _retrieval_boundary_from_payload(value: Any) -> RetrievalBoundary:
+    payload = _exact_mapping(
+        "search result provenance boundary",
+        value,
+        _RETRIEVAL_BOUNDARY_FIELDS,
+    )
+    return RetrievalBoundary(
+        scope_id=_string("provenance.boundary.scope_id", payload["scope_id"]),
+        snapshot_id=_string("provenance.boundary.snapshot_id", payload["snapshot_id"]),
+        profile_id=_string("provenance.boundary.profile_id", payload["profile_id"]),
+        law_ids=_optional_string_tuple(
+            "provenance.boundary.law_ids", payload["law_ids"]
+        ),
+        version_ids=_optional_string_tuple(
+            "provenance.boundary.version_ids", payload["version_ids"]
+        ),
+        article_ids=_optional_string_tuple(
+            "provenance.boundary.article_ids", payload["article_ids"]
+        ),
+        article_numbers=_optional_string_tuple(
+            "provenance.boundary.article_numbers", payload["article_numbers"]
+        ),
+        effective_on=_optional_string(
+            "provenance.boundary.effective_on", payload["effective_on"]
+        ),
+    )
+
+
+def _article_provenance_to_payload(
+    article: RetrievedArticleProvenance,
+) -> dict[str, Any]:
+    if not isinstance(article, RetrievedArticleProvenance):
+        raise ValueError(
+            "provenance articles must contain RetrievedArticleProvenance values"
+        )
+    return {
+        "article_id": article.article_id,
+        "law_id": article.law_id,
+        "version_id": article.version_id,
+        "article_number": article.article_number,
+        "title": article.title,
+        "valid_from": _date_to_iso(article.valid_from),
+        "valid_to": _date_to_iso(article.valid_to),
+        "source_ref": article.source_ref,
+        "source_line": article.source_line,
+        "verification_status": article.verification_status,
+    }
+
+
+def _article_provenance_from_payload(
+    value: Any,
+    *,
+    index: int,
+) -> RetrievedArticleProvenance:
+    payload = _exact_mapping(
+        f"search result provenance article {index}",
+        value,
+        _ARTICLE_PROVENANCE_FIELDS,
+    )
+    prefix = f"provenance.articles[{index}]"
+    return RetrievedArticleProvenance(
+        article_id=_string(
+            f"{prefix}.article_id", payload["article_id"], non_empty=True
+        ),
+        law_id=_string(f"{prefix}.law_id", payload["law_id"], non_empty=True),
+        version_id=_string(
+            f"{prefix}.version_id", payload["version_id"], non_empty=True
+        ),
+        article_number=_string(f"{prefix}.article_number", payload["article_number"]),
+        title=_string(f"{prefix}.title", payload["title"], non_empty=True),
+        valid_from=_optional_string(f"{prefix}.valid_from", payload["valid_from"]),
+        valid_to=_optional_string(f"{prefix}.valid_to", payload["valid_to"]),
+        source_ref=_string(
+            f"{prefix}.source_ref", payload["source_ref"], non_empty=True
+        ),
+        source_line=_integer(
+            f"{prefix}.source_line", payload["source_line"], minimum=1
+        ),
+        verification_status=_string(
+            f"{prefix}.verification_status",
+            payload["verification_status"],
+            non_empty=True,
+        ),
+    )
+
+
+def _retrieval_provenance_to_payload(
+    provenance: RetrievalProvenance | None,
+) -> dict[str, Any] | None:
+    if provenance is None:
+        return None
+    if not isinstance(provenance, RetrievalProvenance):
+        raise ValueError("result provenance must be a RetrievalProvenance")
+    return {
+        "boundary": _retrieval_boundary_to_payload(provenance.boundary),
+        "scope_id": provenance.scope_id,
+        "snapshot_id": provenance.snapshot_id,
+        "profile_id": provenance.profile_id,
+        "chunk_id": provenance.chunk_id,
+        "chunk_content_hash": provenance.chunk_content_hash,
+        "chunk_payload_hash": provenance.chunk_payload_hash,
+        "snapshot_ordinal": provenance.snapshot_ordinal,
+        "embedding_hash": provenance.embedding_hash,
+        "articles": [
+            _article_provenance_to_payload(article) for article in provenance.articles
+        ],
+    }
+
+
+def _retrieval_provenance_from_payload(value: Any) -> RetrievalProvenance | None:
+    if value is None:
+        return None
+    payload = _exact_mapping(
+        "search result provenance",
+        value,
+        _RETRIEVAL_PROVENANCE_FIELDS,
+    )
+    articles_payload = payload["articles"]
+    if not isinstance(articles_payload, list) or not articles_payload:
+        raise ValueError("provenance.articles must be a non-empty list")
+    articles = tuple(
+        _article_provenance_from_payload(article, index=index)
+        for index, article in enumerate(articles_payload)
+    )
+    return RetrievalProvenance(
+        boundary=_retrieval_boundary_from_payload(payload["boundary"]),
+        scope_id=_string("provenance.scope_id", payload["scope_id"], non_empty=True),
+        snapshot_id=_string(
+            "provenance.snapshot_id", payload["snapshot_id"], non_empty=True
+        ),
+        profile_id=_string(
+            "provenance.profile_id", payload["profile_id"], non_empty=True
+        ),
+        chunk_id=_string("provenance.chunk_id", payload["chunk_id"], non_empty=True),
+        chunk_content_hash=_string(
+            "provenance.chunk_content_hash",
+            payload["chunk_content_hash"],
+            non_empty=True,
+        ),
+        chunk_payload_hash=_string(
+            "provenance.chunk_payload_hash",
+            payload["chunk_payload_hash"],
+            non_empty=True,
+        ),
+        snapshot_ordinal=_integer(
+            "provenance.snapshot_ordinal", payload["snapshot_ordinal"], minimum=0
+        ),
+        embedding_hash=_optional_string(
+            "provenance.embedding_hash", payload["embedding_hash"]
+        ),
+        articles=articles,
+    )
 
 
 def _artifact_payload(name: str, artifact: Any, payload_field: str) -> dict[str, Any]:
@@ -258,6 +496,7 @@ def search_result_to_artifact(result: SearchResult) -> dict[str, Any]:
             "rank": result.rank,
             "retriever": result.retriever,
             "trace": result.trace,
+            "provenance": _retrieval_provenance_to_payload(result.provenance),
         },
     }
     restored = search_result_from_artifact(artifact)
@@ -272,6 +511,7 @@ def search_result_to_artifact(result: SearchResult) -> dict[str, Any]:
             "rank": restored.rank,
             "retriever": restored.retriever,
             "trace": restored.trace,
+            "provenance": _retrieval_provenance_to_payload(restored.provenance),
         },
     }
     return _json_copy(canonical_artifact)
@@ -279,11 +519,10 @@ def search_result_to_artifact(result: SearchResult) -> dict[str, Any]:
 
 def search_result_from_artifact(artifact: Mapping[str, Any]) -> SearchResult:
     payload = _artifact_payload("search result artifact", artifact, "search_result")
-    result_payload = _exact_mapping(
-        "search result",
-        payload,
-        {"chunk", "score", "rank", "retriever", "trace"},
-    )
+    payload_fields = set(payload)
+    if payload_fields not in {_SEARCH_RESULT_LEGACY_FIELDS, _SEARCH_RESULT_FIELDS}:
+        raise ValueError("search result fields are invalid")
+    result_payload = _exact_mapping("search result", payload, payload_fields)
     chunk_payload = _exact_mapping(
         "search result chunk",
         result_payload["chunk"],
@@ -309,13 +548,48 @@ def search_result_from_artifact(artifact: Mapping[str, Any]) -> SearchResult:
         "chunk.strategy", chunk_payload["strategy"], non_empty=True
     )
     chunk_payload["metadata"] = _object("chunk.metadata", chunk_payload["metadata"])
-    return SearchResult(
+    trace = _object("trace", result_payload["trace"])
+    provenance = _retrieval_provenance_from_payload(result_payload.get("provenance"))
+    metadata = chunk_payload["metadata"]
+    trace_filters = trace.get("filters")
+    has_boundary_marker = (
+        "boundary_fingerprint" in metadata
+        or "boundary_fingerprint" in trace
+        or "profile_id" in metadata
+        or "article_refs" in metadata
+        or {"scope_id", "snapshot_id", "access_scope_ids"}.issubset(metadata)
+        or (
+            isinstance(trace_filters, Mapping)
+            and (
+                "profile_id" in trace_filters
+                or {"scope_id", "snapshot_id"}.issubset(trace_filters)
+            )
+        )
+    )
+    if provenance is None and has_boundary_marker:
+        raise ValueError(
+            "bound search result artifact requires complete typed provenance"
+        )
+    result = SearchResult(
         chunk=Chunk(**chunk_payload),
         score=_number("score", result_payload["score"]),
         rank=_integer("rank", result_payload["rank"], minimum=1),
         retriever=_string("retriever", result_payload["retriever"], non_empty=True),
-        trace=_object("trace", result_payload["trace"]),
+        trace=trace,
+        provenance=provenance,
     )
+    if provenance is not None:
+        from .retrieval import assert_results_match_boundary
+
+        try:
+            assert_results_match_boundary(
+                [result],
+                provenance.boundary,
+                stage="search result artifact restore",
+            )
+        except RetrievalBoundaryViolation as exc:
+            raise ValueError("search result provenance is inconsistent") from exc
+    return result
 
 
 def _validate_execution(value: Any) -> dict[str, Any]:

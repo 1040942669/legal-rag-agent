@@ -3,8 +3,10 @@ from __future__ import annotations
 import math
 import re
 from collections import Counter, defaultdict
+from dataclasses import replace
+from numbers import Real
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Mapping, Protocol, Sequence
 
 from .embeddings import (
     EmbeddingModelConfig,
@@ -12,14 +14,156 @@ from .embeddings import (
     load_embedding_cache,
     validate_cache_matches_chunks,
 )
+from .embedding_contracts import (
+    EmbeddingVectorContractError,
+    canonicalize_embedding_vector,
+)
 from .models import Chunk, SearchResult
 from .provider_errors import ProviderCallError, raise_sanitized_provider_error
+from .retrieval_contracts import (
+    RetrievalBoundary,
+    RetrievalBoundaryViolation,
+    RetrievalContractError,
+    article_provenance_from_mapping,
+    chunk_payload_fingerprint,
+    validate_retrieval_top_k,
+)
 
 
 class Retriever(Protocol):
     name: str
 
     def retrieve(self, query: str, top_k: int = 5) -> list[SearchResult]: ...
+
+
+def retrieval_boundary(retriever: Retriever) -> RetrievalBoundary | None:
+    """Return a bound retriever's complete immutable request boundary."""
+
+    value = getattr(retriever, "retrieval_boundary", None)
+    if value is None:
+        if getattr(retriever, "boundary_fingerprint", None) is not None:
+            raise ValueError("bound retriever must expose a complete RetrievalBoundary")
+        return None
+    if not isinstance(value, RetrievalBoundary):
+        raise ValueError("retriever retrieval_boundary must be immutable and typed")
+    return value
+
+
+def retrieval_boundary_fingerprint(retriever: Retriever) -> str | None:
+    boundary = retrieval_boundary(retriever)
+    return boundary.fingerprint if boundary is not None else None
+
+
+def assert_results_match_boundary(
+    results: Sequence[SearchResult],
+    boundary: RetrievalBoundary | None,
+    *,
+    stage: str,
+) -> None:
+    """Validate typed provenance and its compatibility metadata fail-closed."""
+
+    if boundary is None:
+        return
+    seen_ranks: set[int] = set()
+    for result in results:
+        if not isinstance(result, SearchResult):
+            raise RetrievalBoundaryViolation(
+                f"{stage} returned a non-SearchResult value"
+            )
+        score = result.score
+        rank = result.rank
+        structural_valid = (
+            not isinstance(score, bool)
+            and isinstance(score, Real)
+            and math.isfinite(float(score))
+            and type(rank) is int
+            and rank > 0
+            and rank not in seen_ranks
+            and isinstance(result.retriever, str)
+            and bool(result.retriever.strip())
+            and isinstance(result.trace, Mapping)
+        )
+        if not structural_valid:
+            raise RetrievalBoundaryViolation(
+                f"{stage} returned an invalid bound SearchResult"
+            )
+        seen_ranks.add(rank)
+        provenance = result.provenance
+        metadata = result.chunk.metadata
+        try:
+            if not isinstance(metadata, Mapping):
+                raise RetrievalContractError("chunk metadata must be an object")
+            metadata_articles = tuple(
+                article_provenance_from_mapping(item)
+                for item in metadata.get("article_refs", ())
+            )
+        except (RetrievalContractError, TypeError):
+            metadata_articles = ()
+        expected_law_ids = (
+            _unique_values(article.law_id for article in provenance.articles)
+            if provenance is not None
+            else []
+        )
+        expected_version_ids = (
+            _unique_values(article.version_id for article in provenance.articles)
+            if provenance is not None
+            else []
+        )
+        expected_article_ids = (
+            [article.article_id for article in provenance.articles]
+            if provenance is not None
+            else []
+        )
+        expected_law_names = (
+            _unique_values(article.title for article in provenance.articles)
+            if provenance is not None
+            else []
+        )
+        expected_article_numbers = (
+            _unique_values(
+                article.article_number
+                for article in provenance.articles
+                if article.article_number
+            )
+            if provenance is not None
+            else []
+        )
+        expected_source_files = (
+            _unique_values(article.source_ref for article in provenance.articles)
+            if provenance is not None
+            else []
+        )
+        expected_line_nos = (
+            [article.source_line for article in provenance.articles]
+            if provenance is not None
+            else []
+        )
+        valid = (
+            provenance is not None
+            and provenance.boundary == boundary
+            and boundary.allows(provenance)
+            and provenance.chunk_id == result.chunk.chunk_id
+            and provenance.chunk_payload_hash == chunk_payload_fingerprint(result.chunk)
+            and isinstance(metadata, Mapping)
+            and metadata.get("boundary_fingerprint") == boundary.fingerprint
+            and metadata.get("scope_id") == provenance.scope_id
+            and metadata.get("snapshot_id") == provenance.snapshot_id
+            and metadata.get("profile_id") == provenance.profile_id
+            and metadata.get("access_scope_ids") == [provenance.scope_id]
+            and metadata.get("law_ids") == expected_law_ids
+            and metadata.get("version_ids") == expected_version_ids
+            and metadata.get("article_ids") == expected_article_ids
+            and metadata_articles == provenance.articles
+            and result.chunk.law_names == expected_law_names
+            and result.chunk.article_numbers == expected_article_numbers
+            and result.chunk.source_files == expected_source_files
+            and result.chunk.line_nos == expected_line_nos
+            and result.trace.get("boundary_fingerprint") == boundary.fingerprint
+        )
+        if not valid:
+            raise RetrievalBoundaryViolation(
+                f"{stage} returned results outside the bound retrieval boundary"
+            )
 
 
 class BM25Retriever:
@@ -52,6 +196,7 @@ class BM25Retriever:
         self.total_docs = len(chunks)
 
     def retrieve(self, query: str, top_k: int = 5) -> list[SearchResult]:
+        resolved_top_k = validate_retrieval_top_k(top_k)
         query_terms = tokenize(query)
         law_hints = extract_law_hints(query, known_hints=self.known_law_hints)
         article_hints = extract_article_terms(query)
@@ -105,7 +250,9 @@ class BM25Retriever:
                 retriever=self.name,
                 trace=trace,
             )
-            for rank, (index, score, trace) in enumerate(scores[:top_k], start=1)
+            for rank, (index, score, trace) in enumerate(
+                scores[:resolved_top_k], start=1
+            )
         ]
 
 
@@ -129,11 +276,12 @@ class DenseRetriever:
         )
 
     def retrieve(self, query: str, top_k: int = 5) -> list[SearchResult]:
+        resolved_top_k = validate_retrieval_top_k(top_k)
         query_embedding = self.model.encode([query], normalize_embeddings=True)[0]
         scores = self.embeddings @ query_embedding
         ranked = sorted(
             enumerate(scores), key=lambda item: float(item[1]), reverse=True
-        )[:top_k]
+        )[:resolved_top_k]
         return [
             SearchResult(
                 chunk=self.chunks[index],
@@ -176,6 +324,7 @@ class CachedDenseRetriever:
         ]
 
     def retrieve(self, query: str, top_k: int = 5) -> list[SearchResult]:
+        resolved_top_k = validate_retrieval_top_k(top_k)
         expected_dimension = int(self.cache.vectors.shape[1])
         try:
             query_embedding = self.encoder.encode_query(query)
@@ -183,6 +332,7 @@ class CachedDenseRetriever:
                 query_embedding,
                 expected_dimension=expected_dimension,
                 provider=self.model_config.provider,
+                normalized=self.model_config.normalize,
             )
         except ProviderCallError as exc:
             error = exc
@@ -204,7 +354,7 @@ class CachedDenseRetriever:
                     scores[index] = scores[index] * multiplier
         ranked = sorted(
             enumerate(scores), key=lambda item: float(item[1]), reverse=True
-        )[:top_k]
+        )[:resolved_top_k]
         return [
             SearchResult(
                 chunk=self.chunks[index],
@@ -221,32 +371,38 @@ def _validated_query_embedding(
     *,
     expected_dimension: int,
     provider: str,
+    normalized: bool,
 ) -> Any:
     """Validate encoder output before NumPy can fail or rank unsafe scores."""
 
     try:
-        import numpy as np  # type: ignore
-
-        vector = np.asarray(value)
-        valid = (
-            vector.ndim == 1
-            and int(vector.shape[0]) == expected_dimension
-            and vector.dtype.kind in {"f", "i", "u"}
-            and bool(np.isfinite(vector).all())
+        return canonicalize_embedding_vector(
+            value,
+            expected_dimension=expected_dimension,
+            normalized=normalized,
+            label="query embedding vector",
         )
-    except (TypeError, ValueError, OverflowError):
-        valid = False
-        vector = None
-    if valid:
-        return vector
+    except EmbeddingVectorContractError as exc:
+        error = exc
     if provider == "siliconflow":
         raise ProviderCallError(
             "invalid_response",
             provider="siliconflow",
             operation="embedding",
             cause_type="InvalidQueryVector",
-        )
-    raise ValueError("query embedding vector is invalid")
+        ) from error
+    raise ValueError(str(error)) from error
+
+
+def _unique_values(values) -> list[Any]:
+    resolved: list[Any] = []
+    seen: set[Any] = set()
+    for value in values:
+        if value in seen:
+            continue
+        seen.add(value)
+        resolved.append(value)
+    return resolved
 
 
 class RRFHybridRetriever:
@@ -261,24 +417,96 @@ class RRFHybridRetriever:
         bm25_weight: float = 1.0,
         dense_weight: float = 1.0,
     ) -> None:
-        self.bm25 = bm25
-        self.dense = dense
+        if type(rrf_k) is not int or rrf_k < 0:
+            raise ValueError("rrf_k must be a non-negative integer")
+        for name, value in (
+            ("bm25_weight", bm25_weight),
+            ("dense_weight", dense_weight),
+        ):
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, Real)
+                or not math.isfinite(float(value))
+                or value < 0
+            ):
+                raise ValueError(f"{name} must be a finite non-negative number")
+        if bm25_weight == 0 and dense_weight == 0:
+            raise ValueError("at least one RRF weight must be positive")
+        bm25_boundary = retrieval_boundary(bm25)
+        dense_boundary = retrieval_boundary(dense)
+        if (bm25_boundary is None) != (dense_boundary is None):
+            raise ValueError(
+                "RRF retrievers must both be unbound or share one bound boundary"
+            )
+        if bm25_boundary is not None and bm25_boundary != dense_boundary:
+            raise ValueError("RRF retrievers use different retrieval boundaries")
+        self._bm25 = bm25
+        self._dense = dense
+        self._boundary = bm25_boundary
         self.rrf_k = rrf_k
         self.bm25_weight = bm25_weight
         self.dense_weight = dense_weight
 
+    @property
+    def retrieval_boundary(self) -> RetrievalBoundary | None:
+        return self._boundary
+
+    @property
+    def bm25(self) -> Retriever:
+        """Read-only compatibility view of the lexical leaf retriever."""
+
+        return self._bm25
+
+    @property
+    def dense(self) -> Retriever:
+        """Read-only compatibility view of the dense leaf retriever."""
+
+        return self._dense
+
+    @property
+    def boundary_fingerprint(self) -> str | None:
+        return self._boundary.fingerprint if self._boundary is not None else None
+
     def retrieve(self, query: str, top_k: int = 5) -> list[SearchResult]:
-        bm25_results = self.bm25.retrieve(query, top_k=max(top_k * 3, 10))
-        dense_results = self.dense.retrieve(query, top_k=max(top_k * 3, 10))
+        resolved_top_k = validate_retrieval_top_k(top_k)
+        if (
+            retrieval_boundary(self._bm25) != self._boundary
+            or retrieval_boundary(self._dense) != self._boundary
+        ):
+            raise RetrievalBoundaryViolation(
+                "RRF leaf retrieval boundary changed after construction"
+            )
+        candidate_top_k = min(max(resolved_top_k * 3, 10), 10_000)
+        bm25_results = self._bm25.retrieve(query, top_k=candidate_top_k)
+        dense_results = self._dense.retrieve(query, top_k=candidate_top_k)
+        boundary = self._boundary
+        assert_results_match_boundary(
+            bm25_results, boundary, stage="RRF BM25 retrieval"
+        )
+        assert_results_match_boundary(
+            dense_results, boundary, stage="RRF dense retrieval"
+        )
         fused_scores: dict[str, float] = defaultdict(float)
-        chunk_by_id: dict[str, Chunk] = {}
+        result_by_id: dict[str, SearchResult] = {}
         trace_by_id: dict[str, dict] = defaultdict(dict)
+
+        def remember(result: SearchResult) -> None:
+            chunk_id = result.chunk.chunk_id
+            existing = result_by_id.get(chunk_id)
+            if existing is not None and (
+                existing.chunk != result.chunk
+                or existing.provenance != result.provenance
+            ):
+                raise RetrievalBoundaryViolation(
+                    "RRF leaves returned conflicting payloads for one chunk ID"
+                )
+            result_by_id.setdefault(chunk_id, result)
 
         for result in bm25_results:
             contribution = self.bm25_weight * reciprocal_rank(result.rank, k=self.rrf_k)
             chunk_id = result.chunk.chunk_id
             fused_scores[chunk_id] += contribution
-            chunk_by_id[chunk_id] = result.chunk
+            remember(result)
             trace_by_id[chunk_id].update(
                 {
                     "bm25_rank": result.rank,
@@ -293,7 +521,7 @@ class RRFHybridRetriever:
             )
             chunk_id = result.chunk.chunk_id
             fused_scores[chunk_id] += contribution
-            chunk_by_id[chunk_id] = result.chunk
+            remember(result)
             trace_by_id[chunk_id].update(
                 {
                     "dense_rank": result.rank,
@@ -303,12 +531,12 @@ class RRFHybridRetriever:
                 }
             )
 
-        ranked = sorted(fused_scores.items(), key=lambda item: item[1], reverse=True)[
-            :top_k
+        ranked = sorted(fused_scores.items(), key=lambda item: (-item[1], item[0]))[
+            :resolved_top_k
         ]
-        return [
-            SearchResult(
-                chunk=chunk_by_id[chunk_id],
+        results = [
+            replace(
+                result_by_id[chunk_id],
                 score=score,
                 rank=rank,
                 retriever=self.name,
@@ -318,10 +546,17 @@ class RRFHybridRetriever:
                     "rrf_k": self.rrf_k,
                     "bm25_weight": self.bm25_weight,
                     "dense_weight": self.dense_weight,
+                    **(
+                        {"boundary_fingerprint": boundary.fingerprint}
+                        if boundary is not None
+                        else {}
+                    ),
                 },
             )
             for rank, (chunk_id, score) in enumerate(ranked, start=1)
         ]
+        assert_results_match_boundary(results, boundary, stage="RRF fusion")
+        return results
 
 
 def build_retriever(
