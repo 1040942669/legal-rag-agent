@@ -6,6 +6,42 @@
 
 尚无未发布变更。
 
+## [0.4.0] - 2026-09-25
+
+> 发布候选：M3 实现 head 已通过候选验收，但包含本 changelog、README、版本元数据和最终验收文档的候选提交尚待 CI。PR #13 仍为 draft/open，`v0.4.0` Tag、GitHub Release 与发布回执尚不存在。
+
+### Added
+
+- PostgreSQL/pgvector 版本化语料 schema 与 Alembic `0001` 至 `0004` 迁移，覆盖不可变 corpus 行、active snapshot activation ledger、HNSW build generation guard 和可打包 migration 资源。
+- 可复现存储导入入口 `python -m legal_rag.storage.import_cli`：`plan`/`dry-run`、`validate` 与 `apply` 分离；计划与验证默认不连接数据库，apply 会重新验证本地产物、事务导入、回读并生成机器 receipt，且不会隐式激活快照。
+- 绑定 scope、snapshot、embedding profile、law、version、article 与 effective date 的 typed retrieval boundary/provenance；数据库 exact pgvector、bounded BM25、RRF、adaptive、rerank、chat 和 artifact 恢复路径共享同一边界闭包。
+- Profile-free 的精确法条目录，按精确法名、规范化条号以及可选 law/version/date 返回 `found`、`not_found` 或 `needs_disambiguation`，并携带可重算的 snapshot membership proof。
+- Revisioned active snapshot pointer、不可变 activation event、完整 CAS、scope 级事务锁，以及原子 activate/replace/rollback。
+- 显式实验 HNSW index manager 与 retriever，物理索引和 build receipt 绑定 snapshot/profile/dimension/generation；typed ANN underfill 可保持显式失败，或在同一 hard boundary 下执行有时限的 exact fallback。
+- M3-T01 至 M3-T08 累计质量门禁，共 `33/33` 个机器可读必检 ID；另有真实 PostgreSQL 服务重启、新进程复核、downgrade/re-upgrade 和 wheel migration 资源检查。
+
+### Changed
+
+- 数据库向量检索继续以 exact inner product 为默认和权威路径；HNSW 不会自动替代 exact，只有调用方显式选择实验策略且验证对应 generation-bound build receipt 后才可使用。
+- Hard filter 现在在数据库排序和 `LIMIT` 之前执行；多 article chunk、ANN underfill 和 exact fallback 均保留完整组合 selector，不允许先全局召回后在应用层补过滤。
+- Active snapshot 从单一指针升级为 `(snapshot_id, revision, activation_id)`；运行中的 `REPEATABLE READ` 请求固定其起始快照，后续请求才观察新 activation。
+- 版本候选升级到 `0.4.0`；数据库依赖仍是可选安装项，既有 provider-free 离线/M2 artifact 路径保持兼容。
+
+### Security
+
+- Snapshot/profile/import receipt、向量维度/归一化、模型 revision、chunk/vector/payload hash 和 HNSW generation 在执行前或读取时失败关闭；trace fingerprint 不替代完整 typed authorization boundary。
+- 导入 manifest 只接受 source-root 内的安全相对路径并拒绝敏感字段；输出 plan/receipt 采用 no-clobber，数据库 URL 的公开表示会脱敏，apply 先完成本地复核才解析数据库配置。
+- ANN fallback 只能在原边界内运行，无法通过 underfill 移除 scope、snapshot、profile、law/version/article 或日期过滤；超时和候选不足是显式状态。
+- M3 验收只使用 loopback 测试数据库，禁用 dotenv 和 live provider；真实模型、远程 embedding、reranker、Judge 与付费调用均为 0。
+
+### Known limitations
+
+- 本节描述的是 `v0.4.0` 候选内容，不是已发布事实；最终候选提交、PR 合并、Tag、GitHub Release 和发布回执仍须按仓库规则依次完成。
+- HNSW 是显式实验能力，pgvector HNSW 维度上限为 2000；不支持的维度仍可使用 exact。ANN recall 和性能没有在真实完整法律语料上做发布级基准，本版不把它设为默认。
+- 日期过滤只证明版本元数据覆盖 `[valid_from, valid_to)`，不判断具体案件应适用哪一版法律；本里程碑也不证明法律内容、模型回答或引用语义正确。
+- 当前 CLI 尚未实现终端用户认证、多租户授权或默认 active snapshot 注入；typed scope 是可信上层必须提供的边界，不应被误解为完整生产权限系统。
+- Deferred activation consistency trigger 仍会扫描全历史，导入 repository 的全局事务锁牺牲并发；后续可按 scope/父 snapshot 优化，但不影响当前正确性结论。
+
 ## [0.3.0] - 2026-09-22
 
 ### Added
