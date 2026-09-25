@@ -1,0 +1,133 @@
+{
+  "schema_version": 1,
+  "record_kind": "verified_release_receipt",
+  "milestone_id": "M3",
+  "version": "v0.4.0",
+  "repository": "1040942669/legal-rag-agent",
+  "branch": "master",
+  "pr_url": "https://github.com/1040942669/legal-rag-agent/pull/13",
+  "receipt_pr_url": "https://github.com/1040942669/legal-rag-agent/pull/14",
+  "receipt_candidate_sha": "b50f9028ecf47e2e94ceef304f59c467f7ad0a4d",
+  "receipt_candidate_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36077892987",
+  "receipt_candidate_ci_artifacts": {
+    "offline": {
+      "name": "m2-quality-gate-b50f9028ecf47e2e94ceef304f59c467f7ad0a4d-1",
+      "digest": "sha256:21bf9b4e75e45ec153dfe91ec09b2a95288fd104f318bec39b589cbf74b386f1",
+      "gate_json_sha256": "cd585831a50de9ce6ccee38672890cb56b32deff6100b2056f1a135cf518ca02"
+    },
+    "storage": {
+      "name": "m3-storage-b50f9028ecf47e2e94ceef304f59c467f7ad0a4d-1",
+      "digest": "sha256:5b4b1203a174dd4f5a324fee401a3fe1fd6f794b9946442f6646d56903684ea9",
+      "gate_json_sha256": "f53aadd881311af09d93f983474a1b9aa96bab689a3f841b9ac78aa750ba685a",
+      "junit_sha256": "73f9f82d193063c5b2c02c14ca2051c83b309e80cac1bf8badadad95f0123cb9",
+      "restart_prepare_sha256": "058394d39ad736f70f666740d68286e01091db32442c5644fd837bc07c9ce857",
+      "restart_verify_sha256": "9f71ce7ecb9071360ae9f539d72c8c04dfefc05a7070aef7bf5937a636a1ddca"
+    }
+  },
+  "receipt_final_sha": null,
+  "receipt_final_ci_url": null,
+  "receipt_final_ci_artifacts": null,
+  "receipt_merge_sha": null,
+  "receipt_master_ci_url": null,
+  "receipt_master_ci_sha": null,
+  "receipt_master_ci_artifacts": null,
+  "issue_state": "open",
+  "issue_closed_at": null,
+  "milestone_state": "open",
+  "milestone_closed_at": null,
+  "final_pr_head_sha": "fff2a4046d04e34664b374553070d9384eeec3c6",
+  "release_target_sha": "9395c221ea1fc9a9e869b3db04bd76910b77f5b0",
+  "tag_name": "v0.4.0",
+  "tag_object_sha": "1aa41823030681e17b7da70c27b50463d7d997b1",
+  "remote_tag_target_sha": "9395c221ea1fc9a9e869b3db04bd76910b77f5b0",
+  "pr_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36076238447",
+  "pr_ci_verified_for_final_head": true,
+  "pr_ci_artifacts": {
+    "offline": {
+      "name": "m2-quality-gate-fff2a4046d04e34664b374553070d9384eeec3c6-1",
+      "digest": "sha256:e06b0403b01094ad3b1d37ffb413ee1832a3d46773779d5ff18a67270c7a8737",
+      "gate_json_sha256": "6e13ceea943df3847e0bf531ed0b8b28a61f29a9c0eec685e5d7b55cbbc5dac4"
+    },
+    "storage": {
+      "name": "m3-storage-fff2a4046d04e34664b374553070d9384eeec3c6-1",
+      "digest": "sha256:65fa484d464401dee7306e082ec84bfa44c7d5d60f8c01dd57b2ef6f8bfc2215",
+      "gate_json_sha256": "ffe16b264589dda2583821ca27d647822e3f33fa8b60338d30de3bf0a320b227",
+      "junit_sha256": "6e0002759ffebf8ed41117f58f70443afbfe4029b0121c3e61c11e85a890e41e",
+      "restart_prepare_sha256": "6618a722350a3d104a348d06b5d8cdd390e1607e1bb0e45854b3ffbac587751d",
+      "restart_verify_sha256": "2b2152890f8b6fd9c03f1e574bd7e354bb9b9bd5a16231ff6b5e4d274b23b7fa"
+    }
+  },
+  "ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36076759673",
+  "ci_verified_for_target_sha": true,
+  "master_ci_artifacts": {
+    "offline": {
+      "name": "m2-quality-gate-9395c221ea1fc9a9e869b3db04bd76910b77f5b0-1",
+      "digest": "sha256:73e2d731cb20340153d70067caa000b288a06c20dcdec76c61537d802baee731",
+      "gate_json_sha256": "dce9f81301c6c52ccdc4d3a9bef76cfb11b1f9492973db95e5a0a11985350119"
+    },
+    "storage": {
+      "name": "m3-storage-9395c221ea1fc9a9e869b3db04bd76910b77f5b0-1",
+      "digest": "sha256:0824ea95d6e31d64f8903c3d67fea07717e637652f33c6d5aeb32e3175e409e1",
+      "gate_json_sha256": "eb7eca072dcacfe9e8104d8318df19a307a8c47c13faef7bb3656eab12ab85c3",
+      "junit_sha256": "00dae3bf02150b233f41e6458668d2cfbb456d9a82d05965713ccf4308f0d208",
+      "restart_prepare_sha256": "b2fd1dab18e96900eb8654b8710a9fe5e7d65e7080783399f90f3097441fa5f5",
+      "restart_verify_sha256": "243b3d203ea4906666054aeb4c8780c473d7eee4ce01c67ec0301944807e2304"
+    }
+  },
+  "release_url": "https://github.com/1040942669/legal-rag-agent/releases/tag/v0.4.0",
+  "release_is_draft": false,
+  "release_is_prerelease": false,
+  "release_asset_count": 0,
+  "published_at": "2026-09-25T00:22:49Z",
+  "verified_at": "2026-09-25T00:23:31Z",
+  "verification_method": "GitHub Release API/CLI confirmed the published non-draft and non-prerelease release; GitHub Git Data API confirmed the annotated tag object and peeled target; GitHub Actions confirmed successful exact-head PR and master-push runs whose head SHAs equal the final PR head and release target; downloaded artifacts were hashed locally.",
+  "acceptance_report": "reports/refactor/M3.md",
+  "package_evidence": {
+    "version": "0.4.0",
+    "wheel_size_bytes": 309061,
+    "wheel_sha256": "cafe1b43cf6d30bb146e6aee54492eebebc9794dc29dcd0de715004e2b03a269",
+    "wheel_archive_entries": 66,
+    "sdist_size_bytes": 419532,
+    "sdist_sha256": "7bb7a6b22b405c4ff4f01fad159ba4fd47322ca8a9da643a79bd45796cc0242c",
+    "sdist_archive_entries": 109,
+    "forbidden_paths": 0,
+    "packaged_migrations_verified": 4,
+    "packaged_migrations_total": 4,
+    "isolated_python": "3.12.13",
+    "isolated_install_verified": true,
+    "distribution_module_entrypoint_verified": true
+  },
+  "test_evidence": {
+    "mandatory_checks_passed": 33,
+    "mandatory_checks_total": 33,
+    "m3_acceptance_tests_passed": 8,
+    "m3_acceptance_tests_total": 8,
+    "pytest_passed": 671,
+    "subtests_passed": 157,
+    "junit_tests": 828,
+    "junit_failures": 0,
+    "junit_errors": 0,
+    "junit_skipped": 0,
+    "integration_tests_passed": 61,
+    "live_model_calls": 0
+  },
+  "storage_evidence": {
+    "postgresql_major": 18,
+    "pgvector_version": "0.8.6",
+    "migration_revision": "0004_m3_ann_guards",
+    "service_restart_verified": true,
+    "restart_verification_process": "new_process_after_real_service_restart",
+    "exact_default": true,
+    "ann_status": "explicit_experimental"
+  },
+  "known_limitations": [
+    "M3 proves storage, boundary, migration, restart, exact retrieval and controlled ANN contracts; it does not prove semantic entailment, legal correctness or which law version applies to a specific case.",
+    "No live generation model, remote embedding model, reranker, LLM Judge, complete legal corpus, production database or paid API was used for this milestone.",
+    "The default CLI does not yet provide end-user authentication, multi-tenant authorization or automatic active-snapshot routing into the exact legal catalog.",
+    "HNSW remains an explicit experimental path; recall, build time, index size and P95 were not benchmarked on a separately authorized complete law corpus.",
+    "The declared Python range is >=3.10, while required M3 local and CI evidence is primarily Python 3.12.x.",
+    "GitHub Actions emitted a non-blocking Node 20 deprecation warning for actions/upload-artifact while forcing Node 24; the action version should be upgraded later."
+  ],
+  "receipt_status": "verified_release_receipt_pending_merge",
+  "note": "The software release is published and remotely verified. This independent documentation receipt is pending its own PR and CI; it does not move or replace the v0.4.0 tag target. Issue #12 and Milestone 4 remain open until the receipt merge and master CI are verified."
+}
