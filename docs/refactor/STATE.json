@@ -273,7 +273,11 @@
       "remote_release_verified": true,
       "receipt_path": "docs/refactor/receipts/M3.json",
       "receipt_status": "verified_release_receipt_pending_merge",
-      "receipt_pr_url": null,
+      "receipt_pr_url": "https://github.com/1040942669/legal-rag-agent/pull/14",
+      "receipt_candidate_sha": "b50f9028ecf47e2e94ceef304f59c467f7ad0a4d",
+      "receipt_candidate_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36077892987",
+      "receipt_candidate_ci_quality_artifact_digest": "sha256:21bf9b4e75e45ec153dfe91ec09b2a95288fd104f318bec39b589cbf74b386f1",
+      "receipt_candidate_ci_storage_artifact_digest": "sha256:5b4b1203a174dd4f5a324fee401a3fe1fd6f794b9946442f6646d56903684ea9",
       "tests": {
         "status": "software_released_candidate_and_master_ci_passed_receipt_pending",
         "passed": 671,

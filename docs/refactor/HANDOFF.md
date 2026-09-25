@@ -4,7 +4,7 @@
 
 - M3 软件已按用户授权完成并发布，当前准确状态是 `released_receipt_pending`，还不能标成完整 `released`。软件 [PR #13](https://github.com/1040942669/legal-rag-agent/pull/13) 已普通合并；最终 PR head 为 `fff2a4046d04e34664b374553070d9384eeec3c6`，release target / merge commit 为 `9395c221ea1fc9a9e869b3db04bd76910b77f5b0`。
 - annotated `v0.4.0` Tag 对象为 `1aa41823030681e17b7da70c27b50463d7d997b1`，远端 peeled target 精确等于 `9395c221...`。[GitHub Release](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.4.0) 于 `2026-09-25T00:22:49Z` 发布，非 draft、非 prerelease、附件 0，并已通过 GitHub API/CLI 远端核验。
-- M3 跟踪对象 [Issue #12](https://github.com/1040942669/legal-rag-agent/issues/12) 与 [Milestone 4](https://github.com/1040942669/legal-rag-agent/milestone/4) 仍保持 open。当前分支为 `codex/m3-release-receipt`；机器回执已写入 `docs/refactor/receipts/M3.json`，但回执 PR、回执 exact-head CI、回执 merge 与其 master CI 尚未发生，因此不能提前关闭 Issue/Milestone。
+- M3 跟踪对象 [Issue #12](https://github.com/1040942669/legal-rag-agent/issues/12) 与 [Milestone 4](https://github.com/1040942669/legal-rag-agent/milestone/4) 仍保持 open。当前分支为 `codex/m3-release-receipt`；回执 [PR #14](https://github.com/1040942669/legal-rag-agent/pull/14) 的初始 head `b50f9028ecf47e2e94ceef304f59c467f7ad0a4d` 与 [CI 36077892987](https://github.com/1040942669/legal-rag-agent/actions/runs/36077892987) 已通过，正在回填 PR 自身 artifact 证据；最终 head、merge 与其 master CI 尚未发生，因此不能提前关闭 Issue/Milestone。
 - 模块 A 已建立版本化语料/法条/分块/embedding schema、事务导入、不可变导入回执、Alembic 迁移与数据库 CI。模块 B 已完成 exact pgvector repository、typed retrieval boundary/provenance、全检索路径 fail-closed 约束、不可变语料行迁移和 SearchResult artifact 向后兼容。模块 C 已完成法名 + 条号 + 可选精确版本/生效日的 typed catalog 查询，以及带 revision、activation ID、不可变事件账本和完整 CAS 的 active snapshot 原子激活、替换与回滚。模块 D 已完成显式实验 HNSW、generation-bound build receipt、typed underfill/同边界 exact fallback、`0004` 迁移、真实服务重启、新进程复验和累计 M3 gate。
 - 模块 A 的原始验收历史继续保留：实现 head `68f89ed0cd1393d8acda7570a83bb0714f57a868`、12 项单元测试、9 项 PostgreSQL 集成测试及 [CI 35697224230](https://github.com/1040942669/legal-rag-agent/actions/runs/35697224230) 均已通过；这些历史对象没有被后续模块的累计结果改写。
 - 完整本地证据为 `671 passed, 157 subtests passed`、PostgreSQL 18.1 + pgvector 0.8.1 集成测试 `61 passed`、M0-M3 累计强制检查 `33/33` 和真实服务 stop/start 后新进程复验成功；真实模型与付费调用为 0。
@@ -162,7 +162,7 @@
 
 | 项目 | 当前值 |
 |---|---|
-| 当前里程碑 | M3 / `released_receipt_pending`；软件已发布并远端核验，独立回执尚待 PR/CI/merge |
+| 当前里程碑 | M3 / `released_receipt_pending`；软件已发布并远端核验，receipt PR #14 初始 CI 已通过，最终 head/merge/master CI 待完成 |
 | M3 branch / base | `codex/m3-storage-snapshots` / `6cd07d982ffeecec3632ff47c8473118585a9693` |
 | M3 Issue / Milestone / PR | [#12](https://github.com/1040942669/legal-rag-agent/issues/12) / [Milestone 4](https://github.com/1040942669/legal-rag-agent/milestone/4) / draft [PR #13](https://github.com/1040942669/legal-rag-agent/pull/13) |
 | M3 candidate / release target | `fff2a4046d04e34664b374553070d9384eeec3c6` / `9395c221ea1fc9a9e869b3db04bd76910b77f5b0` |

@@ -6,10 +6,24 @@
   "repository": "1040942669/legal-rag-agent",
   "branch": "master",
   "pr_url": "https://github.com/1040942669/legal-rag-agent/pull/13",
-  "receipt_pr_url": null,
-  "receipt_candidate_sha": null,
-  "receipt_candidate_ci_url": null,
-  "receipt_candidate_ci_artifacts": null,
+  "receipt_pr_url": "https://github.com/1040942669/legal-rag-agent/pull/14",
+  "receipt_candidate_sha": "b50f9028ecf47e2e94ceef304f59c467f7ad0a4d",
+  "receipt_candidate_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36077892987",
+  "receipt_candidate_ci_artifacts": {
+    "offline": {
+      "name": "m2-quality-gate-b50f9028ecf47e2e94ceef304f59c467f7ad0a4d-1",
+      "digest": "sha256:21bf9b4e75e45ec153dfe91ec09b2a95288fd104f318bec39b589cbf74b386f1",
+      "gate_json_sha256": "cd585831a50de9ce6ccee38672890cb56b32deff6100b2056f1a135cf518ca02"
+    },
+    "storage": {
+      "name": "m3-storage-b50f9028ecf47e2e94ceef304f59c467f7ad0a4d-1",
+      "digest": "sha256:5b4b1203a174dd4f5a324fee401a3fe1fd6f794b9946442f6646d56903684ea9",
+      "gate_json_sha256": "f53aadd881311af09d93f983474a1b9aa96bab689a3f841b9ac78aa750ba685a",
+      "junit_sha256": "73f9f82d193063c5b2c02c14ca2051c83b309e80cac1bf8badadad95f0123cb9",
+      "restart_prepare_sha256": "058394d39ad736f70f666740d68286e01091db32442c5644fd837bc07c9ce857",
+      "restart_verify_sha256": "9f71ce7ecb9071360ae9f539d72c8c04dfefc05a7070aef7bf5937a636a1ddca"
+    }
+  },
   "receipt_final_sha": null,
   "receipt_final_ci_url": null,
   "receipt_final_ci_artifacts": null,
