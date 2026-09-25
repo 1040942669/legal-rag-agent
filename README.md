@@ -283,7 +283,7 @@ uv run python -m legal_rag.cli experiment replay `
 
 2026-09-22 的真实无模型执行记录以提交 `f5f6e40c1d1219188069b625f6fa693b78dce588` 为代码身份：source `m2-offline-f5f6e40` 与 replay `m2-offline-f5f6e40-replay` 均完成 2/2 个 case；replay 的实际外部调用为 0，两个 case 的 cache mode 均为 `replay`。聚合键为 `befeb112749971f15329921e84603b4fb48c220469a0136c204d5a30fe4c4c0d`，bundle hash 为 `c848654fecf3ad6333c482ada39befd5e976ceb198cdc0934cbb4f23d64c3432`。原始产物位于本地忽略目录，没有提交到仓库；这些结果只证明生命周期语义，不是法律质量实验。
 
-### M3 版本化存储与精确检索（v0.4.0 已发布，回执待合并）
+### M3 版本化存储与精确检索（v0.4.0 与独立回执均已完成）
 
 [PR #13](https://github.com/1040942669/legal-rag-agent/pull/13) 已普通合并并作为 [v0.4.0](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.4.0) 发布。PostgreSQL/pgvector 路径把 `scope / snapshot / embedding profile / law / version / article / effective date` 固化为 typed boundary，并在排序和 `LIMIT` 前应用 hard filter。exact inner-product 仍是默认且权威的数据库向量检索；BM25、dense、RRF、adaptive、rerank、chat 和 artifact 恢复路径都会复核同一 provenance、正文 hash、向量 hash 和 hydrated payload hash。
 
@@ -323,7 +323,7 @@ uv run python -m legal_rag.storage.import_cli apply `
 
 最终 PR head `fff2a4046d04e34664b374553070d9384eeec3c6` 的 [CI run 36076238447](https://github.com/1040942669/legal-rag-agent/actions/runs/36076238447) 与 release target `9395c221ea1fc9a9e869b3db04bd76910b77f5b0` 的 [master CI 36076759673](https://github.com/1040942669/legal-rag-agent/actions/runs/36076759673) 均为 success。两次 Linux/Python 3.12.13 离线结果均为 `671 passed, 157 subtests passed`、JUnit `828/0/0/0`；PostgreSQL 18 + pgvector 0.8.6 integration 均为 `61 passed`；M0-M3 累计门禁均为 `33/33`；真实服务重启、新进程复核与 wheel migration 资源检查均通过。本地 PostgreSQL 18.1 + pgvector 0.8.1 也通过 61 项集成测试。`0.4.0` 包审计为 wheel/sdist 66/109 个归档条目、禁止路径 0、migration 4/4，Python 3.12.13 隔离 no-index/no-deps 安装、distribution/module/entry point 均通过；真实模型、远程 embedding、reranker、Judge 和付费调用为 0。
 
-annotated `v0.4.0` Tag 对象 `1aa41823030681e17b7da70c27b50463d7d997b1` 精确 peeled 到上述 release target；GitHub Release 已于 `2026-09-25T00:22:49Z` 发布，非 draft、非 prerelease、附件 0。软件发布事实已经成立；当前状态是 `released_receipt_pending`。独立机器回执 [PR #14](https://github.com/1040942669/legal-rag-agent/pull/14) 的初始 head `b50f9028...` 已通过两个 CI job，正在回填该 PR 自身证据；最终 head 与 merge 后 master CI 尚待验证，因此还不能把 M3 标为完整 `released`。
+annotated `v0.4.0` Tag 对象 `1aa41823030681e17b7da70c27b50463d7d997b1` 精确 peeled 到上述 release target；GitHub Release 已于 `2026-09-25T00:22:49Z` 发布，非 draft、非 prerelease、附件 0。M3 当前状态为 `released`。独立机器回执 [PR #14](https://github.com/1040942669/legal-rag-agent/pull/14) 的最终 head `4ec89300c0fbf020baddc18214d0dd7cbd4efedf` 已通过 [CI 36078353461](https://github.com/1040942669/legal-rag-agent/actions/runs/36078353461)，随后普通合并为 `99954c64d53705170024483f2b19d7fbade4ee6d`，该精确 master commit 的 [CI 36078748808](https://github.com/1040942669/legal-rag-agent/actions/runs/36078748808) 两个 job 也均成功。Issue #12 于 `2026-09-25T00:48:06Z` 关闭，Milestone 4 于 `2026-09-25T00:48:09Z` 关闭；本次 documentation-only finalize 不移动 `v0.4.0`，M4 未开始。
 
 ## 测试与复现边界
 
@@ -404,7 +404,7 @@ ARCHITECTURE_DECISION_LOG.md       关键架构决策和反例
 
 截至 2026-09-18，旧 Phase 0-4B 路线实现了可复现 baseline、检索诊断与 trace、受控查询理解、最多一轮补检索、规则 verifier、v3 评测集、reranker adapter、embedding cache v2 和自动实验矩阵。旧 Phase 编号与当前 M0-M7 里程碑不一一对应；旧路线的 reranker/cache A/B 仍是未完成的实验项，不代表当前发布主线的下一步。
 
-当前 M0-M7 主线以 [MASTER_PLAN](docs/refactor/MASTER_PLAN.md)、[STATE](docs/refactor/STATE.json) 和 [HANDOFF](docs/refactor/HANDOFF.md) 为权威来源。M0 已于 2026-09-19 作为 [v0.1.1](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.1.1) 发布并远端核验；M1 已于 2026-09-20 作为 [v0.2.0](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.2.0) 发布并远端核验；M2 软件 [PR #9](https://github.com/1040942669/legal-rag-agent/pull/9) 已正常合并，并于 2026-09-22 作为 [v0.3.0](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.3.0) 发布、远端核验，独立文档回执 [PR #10](https://github.com/1040942669/legal-rag-agent/pull/10) 也已完成。M3 软件 [PR #13](https://github.com/1040942669/legal-rag-agent/pull/13) 已普通合并，并于 2026-09-25 作为 [v0.4.0](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.4.0) 发布、远端核验；当前是 `released_receipt_pending`，独立回执 [PR #14](https://github.com/1040942669/legal-rag-agent/pull/14) 的初始 CI 已成功，Issue #12 与 Milestone 4 在回执合并并通过 master CI 前保持 open。M4-M7 尚未开始。
+当前 M0-M7 主线以 [MASTER_PLAN](docs/refactor/MASTER_PLAN.md)、[STATE](docs/refactor/STATE.json) 和 [HANDOFF](docs/refactor/HANDOFF.md) 为权威来源。M0 已于 2026-09-19 作为 [v0.1.1](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.1.1) 发布并远端核验；M1 已于 2026-09-20 作为 [v0.2.0](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.2.0) 发布并远端核验；M2 软件 [PR #9](https://github.com/1040942669/legal-rag-agent/pull/9) 已正常合并，并于 2026-09-22 作为 [v0.3.0](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.3.0) 发布、远端核验，独立文档回执 [PR #10](https://github.com/1040942669/legal-rag-agent/pull/10) 也已完成。M3 软件 [PR #13](https://github.com/1040942669/legal-rag-agent/pull/13) 已普通合并，并于 2026-09-25 作为 [v0.4.0](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.4.0) 发布、远端核验；独立回执 [PR #14](https://github.com/1040942669/legal-rag-agent/pull/14) 已普通合并，精确 final-head CI 与回执 merge 后 master CI 均成功，Issue #12 与 Milestone 4 已关闭，因此 M3 状态为 `released`。M4-M7 尚未开始。
 
 ## 文档导航
 

@@ -24,17 +24,45 @@
       "restart_verify_sha256": "9f71ce7ecb9071360ae9f539d72c8c04dfefc05a7070aef7bf5937a636a1ddca"
     }
   },
-  "receipt_final_sha": null,
-  "receipt_final_ci_url": null,
-  "receipt_final_ci_artifacts": null,
-  "receipt_merge_sha": null,
-  "receipt_master_ci_url": null,
-  "receipt_master_ci_sha": null,
-  "receipt_master_ci_artifacts": null,
-  "issue_state": "open",
-  "issue_closed_at": null,
-  "milestone_state": "open",
-  "milestone_closed_at": null,
+  "receipt_final_sha": "4ec89300c0fbf020baddc18214d0dd7cbd4efedf",
+  "receipt_final_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36078353461",
+  "receipt_final_ci_artifacts": {
+    "offline": {
+      "name": "m2-quality-gate-4ec89300c0fbf020baddc18214d0dd7cbd4efedf-1",
+      "digest": "sha256:d4f2c9ac5cbce3feba2d8ba4e8eec0da82859a90c1df9e8588bc35a658924fa4",
+      "gate_json_sha256": "335d92d71a918ab8358e9c3ef540df2f991e80cef4338622e2ea59607dd09e17"
+    },
+    "storage": {
+      "name": "m3-storage-4ec89300c0fbf020baddc18214d0dd7cbd4efedf-1",
+      "digest": "sha256:03119d447d0fc1096c06b6b85828de1830fab79676d0cab7fabec1c7a9520d92",
+      "gate_json_sha256": "42c5402ea749b45ead4f4ab0aa4023629fbbdecd4a665a54fd4b43ddd5ec2a8d",
+      "junit_sha256": "bedafccb3e2715897efdcb244e956d73d53c5a6470bc06a5043df9cc17e49238",
+      "restart_prepare_sha256": "309cb4f11a066099eb6b68d72d149c6da803ce376b2bf4adfcf401769651fbe0",
+      "restart_verify_sha256": "bb0a0168374c567f3946404372374327cf64b3cbbbc3c0e3e012c13cc950b062"
+    }
+  },
+  "receipt_merge_sha": "99954c64d53705170024483f2b19d7fbade4ee6d",
+  "receipt_master_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36078748808",
+  "receipt_master_ci_sha": "99954c64d53705170024483f2b19d7fbade4ee6d",
+  "receipt_master_ci_artifacts": {
+    "offline": {
+      "name": "m2-quality-gate-99954c64d53705170024483f2b19d7fbade4ee6d-1",
+      "digest": "sha256:fa26122f24e84f5e02041d713f3fcb62edd8505bdb51a67b28d92e6207b023a3",
+      "gate_json_sha256": "601ad5007d783126430c3b910a8268c17509b1b7de2b0cee6ab899c628e504b7"
+    },
+    "storage": {
+      "name": "m3-storage-99954c64d53705170024483f2b19d7fbade4ee6d-1",
+      "digest": "sha256:ff312dbf7dfefd7479e995fb992fc8f1d8a380c9d0bf875f49087a85aabb1d77",
+      "gate_json_sha256": "7ae166ab7b86de21e6220c2d87be0578a7383d43fdfd9ac9ece46d889f1ad50e",
+      "junit_sha256": "03eb6971d1af064de917678a70d3a8f0d80a3b33b23e54271c2fd2422da26b47",
+      "restart_prepare_sha256": "320fe456da5581a5b584340b6af4c70c6fd8ffd9082ec22fe4b4ba67a6e78a2b",
+      "restart_verify_sha256": "0799ea9a88be3f8ebf1570361119f0a0f8dd464dc18cadaf8615a95d45727cec"
+    }
+  },
+  "issue_state": "closed",
+  "issue_closed_at": "2026-09-25T00:48:06Z",
+  "milestone_state": "closed",
+  "milestone_closed_at": "2026-09-25T00:48:09Z",
   "final_pr_head_sha": "fff2a4046d04e34664b374553070d9384eeec3c6",
   "release_target_sha": "9395c221ea1fc9a9e869b3db04bd76910b77f5b0",
   "tag_name": "v0.4.0",
@@ -128,6 +156,6 @@
     "The declared Python range is >=3.10, while required M3 local and CI evidence is primarily Python 3.12.x.",
     "GitHub Actions emitted a non-blocking Node 20 deprecation warning for actions/upload-artifact while forcing Node 24; the action version should be upgraded later."
   ],
-  "receipt_status": "verified_release_receipt_pending_merge",
-  "note": "The software release is published and remotely verified. This independent documentation receipt is pending its own PR and CI; it does not move or replace the v0.4.0 tag target. Issue #12 and Milestone 4 remain open until the receipt merge and master CI are verified."
+  "receipt_status": "verified",
+  "note": "The software release, independent receipt PR, exact final receipt head CI, receipt merge, receipt master CI, Issue #12 closure and Milestone 4 closure are verified. The documentation-only finalize PR records those external facts; its own merge cannot be recorded without creating an endless receipt chain. The annotated v0.4.0 tag remains fixed at the software release target, and M4 has not started."
 }
