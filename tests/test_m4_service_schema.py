@@ -290,7 +290,7 @@ def test_m4_constraints_enforce_owner_order_idempotency_and_result_binding() -> 
     )
     assert _foreign_keys(schema.run_results) == frozenset(
         {
-            (None, ("run_id",), ("runs.run_id",), "CASCADE"),
+            ("fk_run_results_run", ("run_id",), ("runs.run_id",), "CASCADE"),
             (
                 "fk_run_results_final_message",
                 ("final_message_id", "run_id", "final_message_role"),

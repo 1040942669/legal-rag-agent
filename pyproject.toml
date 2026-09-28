@@ -19,6 +19,7 @@ dependencies = [
 
 [project.scripts]
 legal-rag = "legal_rag.cli:main"
+legal-rag-api = "legal_rag.api.command:main"
 
 [project.optional-dependencies]
 database = [
@@ -26,6 +27,15 @@ database = [
     "pgvector>=0.5,<0.6",
     "psycopg[binary]>=3.2,<4",
     "sqlalchemy>=2.0,<3",
+]
+service = [
+    "alembic>=1.15,<2",
+    "fastapi>=0.115,<1",
+    "pgvector>=0.5,<0.6",
+    "psycopg[binary]>=3.2,<4",
+    "pydantic>=2.10,<3",
+    "sqlalchemy>=2.0,<3",
+    "uvicorn>=0.34,<1",
 ]
 
 [tool.uv]
@@ -37,6 +47,7 @@ cache_dir = ".tmp/pytest-cache"
 
 [dependency-groups]
 dev = [
+    "httpx>=0.28,<1",
     "pytest>=8.0.0",
 ]
 

@@ -274,6 +274,12 @@ def upgrade() -> None:
             name="ck_run_results_final_message_role",
         ),
         sa.ForeignKeyConstraint(
+            ["run_id"],
+            ["runs.run_id"],
+            name="fk_run_results_run",
+            ondelete="CASCADE",
+        ),
+        sa.ForeignKeyConstraint(
             ["final_message_id", "run_id", "final_message_role"],
             ["messages.message_id", "messages.run_id", "messages.role"],
             name="fk_run_results_final_message",

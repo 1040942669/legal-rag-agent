@@ -618,7 +618,6 @@ run_results = Table(
     Column(
         "run_id",
         String(36),
-        ForeignKey("runs.run_id", ondelete="CASCADE"),
         primary_key=True,
     ),
     Column(
@@ -642,6 +641,12 @@ run_results = Table(
     CheckConstraint(
         "final_message_role = 'assistant'",
         name="ck_run_results_final_message_role",
+    ),
+    ForeignKeyConstraint(
+        ["run_id"],
+        ["runs.run_id"],
+        name="fk_run_results_run",
+        ondelete="CASCADE",
     ),
     ForeignKeyConstraint(
         ["final_message_id", "run_id", "final_message_role"],
