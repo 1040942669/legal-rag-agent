@@ -2,6 +2,8 @@
 
 ## 当前真实状态
 
+- M4 已于 2026-09-29 获用户明确授权并开始，工作分支为 `codex/m4-api-sessions`，基线为已核验的 `origin/master` `61f1065fc6d5678d0d57114e2e361294d04906b4`。跟踪对象为 [Issue #16](https://github.com/1040942669/legal-rag-agent/issues/16) 与 [Milestone 5](https://github.com/1040942669/legal-rag-agent/milestone/5)。当前仅为 `in_progress`，没有 M4 PR、Tag 或 Release，不得标记为 released。
+- M4 第一可测试子任务正在建立 PostgreSQL 持久会话、任务、幂等键、安全结果和有序事件 schema；服务、真实 HTTP/SSE、进程重启、M4-T01 至 M4-T08 和累计 41/41 门禁尚未完成。默认继续禁止 live/付费模型调用。
 - M3 软件与独立发布回执都已按用户授权完成，当前准确状态为 `released`。软件 [PR #13](https://github.com/1040942669/legal-rag-agent/pull/13) 已普通合并；最终 PR head 为 `fff2a4046d04e34664b374553070d9384eeec3c6`，release target / merge commit 为 `9395c221ea1fc9a9e869b3db04bd76910b77f5b0`。
 - annotated `v0.4.0` Tag 对象为 `1aa41823030681e17b7da70c27b50463d7d997b1`，远端 peeled target 精确等于 `9395c221...`。[GitHub Release](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.4.0) 于 `2026-09-25T00:22:49Z` 发布，非 draft、非 prerelease、附件 0，并已通过 GitHub API/CLI 远端核验。
 - 独立回执 [PR #14](https://github.com/1040942669/legal-rag-agent/pull/14) 的最终 head `4ec89300c0fbf020baddc18214d0dd7cbd4efedf` 已通过 [CI 36078353461](https://github.com/1040942669/legal-rag-agent/actions/runs/36078353461)，随后普通合并为 `99954c64d53705170024483f2b19d7fbade4ee6d`；该精确 master commit 的 [CI 36078748808](https://github.com/1040942669/legal-rag-agent/actions/runs/36078748808) 两个 job 均成功。[Issue #12](https://github.com/1040942669/legal-rag-agent/issues/12) 于 `2026-09-25T00:48:06Z` 关闭，[Milestone 4](https://github.com/1040942669/legal-rag-agent/milestone/4) 于 `2026-09-25T00:48:09Z` 关闭。
@@ -19,7 +21,14 @@
 - Tag / Release：`v0.2.0` / [GitHub Release](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.2.0)，发布时间 `2026-09-19T18:59:07Z`；非 draft、非 prerelease、无附件。
 - M1 回执分支为 `codex/m1-release-receipt`，从已发布的 `origin/master` 创建；软件 Tag 不包含也不需要包含后续回执提交。
 - M1 终态为 `released`；机器可读回执 [PR #6](https://github.com/1040942669/legal-rag-agent/pull/6) 已于 `2026-09-19T19:16:26Z` 普通合并，merge `fee92b4457dc68edc413608fb3a0d263af740922` 的 [master CI 35463832520](https://github.com/1040942669/legal-rag-agent/actions/runs/35463832520) 成功。Issue #4 和 Milestone 2 均已关闭。
-- M2 独立回执 [PR #10](https://github.com/1040942669/legal-rag-agent/pull/10) 已普通合并：最终 head `4ba8282a7ed6eba61a31f2cf2fcd88c7a5811dfc`，merge `6decc0f2e675300f1a175f7ab49c85852d35b38d`；最终 PR CI 与 merge 后 [master CI 35689024928](https://github.com/1040942669/legal-rag-agent/actions/runs/35689024928) 均成功。M3 已启动，M4-M7 尚未开始。
+- M2 独立回执 [PR #10](https://github.com/1040942669/legal-rag-agent/pull/10) 已普通合并：最终 head `4ba8282a7ed6eba61a31f2cf2fcd88c7a5811dfc`，merge `6decc0f2e675300f1a175f7ab49c85852d35b38d`；最终 PR CI 与 merge 后 [master CI 35689024928](https://github.com/1040942669/legal-rag-agent/actions/runs/35689024928) 均成功。M3 已发布，M4 正在执行，M5-M7 尚未开始。
+
+## M4 启动边界
+
+- 计划版本为 `v0.5.0`，只实现 FastAPI 协议层、RunService 事务边界、PostgreSQL 会话/任务/事件持久化、Bearer 身份隔离、幂等并发、SSE 续读、单进程 supervisor 和 M4-T01 至 M4-T08。
+- M4 只承诺持久记录和陈旧 `running -> interrupted`；不实现或声称 M5 的 LangGraph checkpoint、跨进程精确恢复或外部 provider exactly-once。`interrupted` 在 M4 仍占 active 槽位，只能取消；`resume` 对拥有者明确返回 unsupported，对非拥有者仍先隐藏资源存在性。
+- FastAPI 只做协议、鉴权、验证和依赖注入；模型/检索期间不持有数据库事务。SSE 只发布安全阶段摘要，未通过 verifier 的草稿不得进入事件、消息、结果或日志，`answer.final` 与最终持久化在同一事务完成。
+- 原 `legal-rag` CLI 必须在没有 API server、数据库配置或 service optional extra 时继续可用。M4 默认 `ALLOW_LIVE_MODEL_CALLS=false`，不读取或上传本地密钥、私密资料、完整语料、Embedding cache 或大型产物。
 
 ## M3 启动边界
 

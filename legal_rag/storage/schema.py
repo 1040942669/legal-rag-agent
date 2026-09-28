@@ -468,6 +468,246 @@ active_snapshot_pointers = Table(
 )
 
 
+# M4 durable API/session state.  These rows deliberately live beside the M3
+# corpus catalog while remaining independent from process-local chat memory.
+# Application code generates opaque identifiers; the database enforces the
+# ownership, ordering, idempotency, and one-active-run invariants.
+sessions = Table(
+    "sessions",
+    metadata,
+    Column("session_id", String(36), primary_key=True),
+    Column("user_id", String(128), nullable=False),
+    Column("title", Text, nullable=True),
+    Column("status", String(32), nullable=False, server_default="active"),
+    Column(
+        "created_at", DateTime(timezone=True), nullable=False, server_default=func.now()
+    ),
+    Column(
+        "updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()
+    ),
+    CheckConstraint(
+        "status IN ('active', 'archived')",
+        name="ck_sessions_status",
+    ),
+    UniqueConstraint("session_id", "user_id", name="uq_sessions_identity_owner"),
+)
+
+Index("ix_sessions_user_created", sessions.c.user_id, sessions.c.created_at)
+
+
+runs = Table(
+    "runs",
+    metadata,
+    Column("run_id", String(36), primary_key=True),
+    Column("session_id", String(36), nullable=False),
+    Column("user_id", String(128), nullable=False),
+    Column("status", String(32), nullable=False, server_default="queued"),
+    Column("request_hash", String(64), nullable=False),
+    Column("request_payload", JSONB, nullable=False),
+    Column("scope_id", String(255), nullable=False),
+    Column("snapshot_id", String(255), nullable=False),
+    Column("snapshot_revision", BigInteger, nullable=False),
+    Column("activation_id", String(64), nullable=False),
+    Column("profile_id", String(64), nullable=False),
+    Column("boundary_fingerprint", String(64), nullable=False),
+    Column("retrieval_config_hash", String(64), nullable=False),
+    Column("graph_version", String(64), nullable=False),
+    Column(
+        "created_at", DateTime(timezone=True), nullable=False, server_default=func.now()
+    ),
+    Column(
+        "queued_at", DateTime(timezone=True), nullable=False, server_default=func.now()
+    ),
+    Column("started_at", DateTime(timezone=True), nullable=True),
+    Column("finished_at", DateTime(timezone=True), nullable=True),
+    Column(
+        "updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()
+    ),
+    Column("error_code", String(64), nullable=True),
+    Column("revision", BigInteger, nullable=False, server_default="0"),
+    Column("event_sequence", BigInteger, nullable=False, server_default="0"),
+    Column("lease_owner", String(128), nullable=True),
+    Column("lease_expires_at", DateTime(timezone=True), nullable=True),
+    CheckConstraint(
+        "status IN ('queued', 'running', 'interrupted', 'succeeded', 'failed', 'cancelled')",
+        name="ck_runs_status",
+    ),
+    CheckConstraint("revision >= 0", name="ck_runs_revision"),
+    CheckConstraint("event_sequence >= 0", name="ck_runs_event_sequence"),
+    CheckConstraint(
+        "((status IN ('succeeded', 'failed', 'cancelled') AND finished_at IS NOT NULL) "
+        "OR (status IN ('queued', 'running', 'interrupted') AND finished_at IS NULL))",
+        name="ck_runs_finished_at",
+    ),
+    ForeignKeyConstraint(
+        ["session_id", "user_id"],
+        ["sessions.session_id", "sessions.user_id"],
+        name="fk_runs_session_owner",
+        ondelete="CASCADE",
+    ),
+    ForeignKeyConstraint(
+        ["scope_id", "snapshot_revision", "activation_id", "snapshot_id"],
+        [
+            "snapshot_activation_events.scope_id",
+            "snapshot_activation_events.revision",
+            "snapshot_activation_events.activation_id",
+            "snapshot_activation_events.target_snapshot_id",
+        ],
+        name="fk_runs_snapshot_activation",
+    ),
+    ForeignKeyConstraint(
+        ["profile_id"],
+        ["embedding_profiles.profile_id"],
+        name="fk_runs_embedding_profile",
+    ),
+    UniqueConstraint(
+        "run_id", "session_id", "user_id", name="uq_runs_identity_session_owner"
+    ),
+)
+
+Index("ix_runs_user_created", runs.c.user_id, runs.c.created_at)
+Index("ix_runs_status_queued", runs.c.status, runs.c.queued_at)
+Index(
+    "uq_runs_one_active_per_session",
+    runs.c.session_id,
+    unique=True,
+    postgresql_where=runs.c.status.in_(("queued", "running", "interrupted")),
+)
+
+
+messages = Table(
+    "messages",
+    metadata,
+    Column("message_id", String(36), primary_key=True),
+    Column("session_id", String(36), nullable=False),
+    Column("user_id", String(128), nullable=False),
+    Column("role", String(16), nullable=False),
+    Column("content", Text, nullable=False),
+    Column("run_id", String(36), nullable=False),
+    Column("ordinal", BigInteger, nullable=False),
+    Column(
+        "created_at", DateTime(timezone=True), nullable=False, server_default=func.now()
+    ),
+    CheckConstraint("role IN ('user', 'assistant')", name="ck_messages_role"),
+    CheckConstraint("ordinal > 0", name="ck_messages_ordinal"),
+    ForeignKeyConstraint(
+        ["session_id", "user_id"],
+        ["sessions.session_id", "sessions.user_id"],
+        name="fk_messages_session_owner",
+        ondelete="CASCADE",
+    ),
+    ForeignKeyConstraint(
+        ["run_id", "session_id", "user_id"],
+        ["runs.run_id", "runs.session_id", "runs.user_id"],
+        name="fk_messages_run_session_owner",
+        ondelete="CASCADE",
+    ),
+    UniqueConstraint("session_id", "ordinal", name="uq_messages_session_ordinal"),
+    UniqueConstraint("run_id", "role", name="uq_messages_run_role"),
+    UniqueConstraint(
+        "message_id", "run_id", "role", name="uq_messages_identity_run_role"
+    ),
+)
+
+Index("ix_messages_session_order", messages.c.session_id, messages.c.ordinal)
+
+
+run_results = Table(
+    "run_results",
+    metadata,
+    Column(
+        "run_id",
+        String(36),
+        ForeignKey("runs.run_id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "final_message_id",
+        String(36),
+        nullable=False,
+        unique=True,
+    ),
+    Column(
+        "final_message_role",
+        String(16),
+        nullable=False,
+        server_default="assistant",
+    ),
+    Column("answer_payload", JSONB, nullable=False),
+    Column("evidence_payload", JSONB, nullable=False),
+    Column("verification_payload", JSONB, nullable=False),
+    Column(
+        "created_at", DateTime(timezone=True), nullable=False, server_default=func.now()
+    ),
+    CheckConstraint(
+        "final_message_role = 'assistant'",
+        name="ck_run_results_final_message_role",
+    ),
+    ForeignKeyConstraint(
+        ["final_message_id", "run_id", "final_message_role"],
+        ["messages.message_id", "messages.run_id", "messages.role"],
+        name="fk_run_results_final_message",
+        ondelete="CASCADE",
+    ),
+)
+
+
+idempotency_keys = Table(
+    "idempotency_keys",
+    metadata,
+    Column("user_id", String(128), primary_key=True),
+    Column("session_id", String(36), primary_key=True),
+    Column("idempotency_key", String(255), primary_key=True),
+    Column("request_hash", String(64), nullable=False),
+    Column("run_id", String(36), nullable=False),
+    Column(
+        "created_at", DateTime(timezone=True), nullable=False, server_default=func.now()
+    ),
+    Column("expires_at", DateTime(timezone=True), nullable=False),
+    ForeignKeyConstraint(
+        ["session_id", "user_id"],
+        ["sessions.session_id", "sessions.user_id"],
+        name="fk_idempotency_keys_session_owner",
+        ondelete="CASCADE",
+    ),
+    ForeignKeyConstraint(
+        ["run_id", "session_id", "user_id"],
+        ["runs.run_id", "runs.session_id", "runs.user_id"],
+        name="fk_idempotency_keys_run_session_owner",
+        ondelete="CASCADE",
+    ),
+)
+
+Index("ix_idempotency_keys_expires", idempotency_keys.c.expires_at)
+
+
+run_events = Table(
+    "run_events",
+    metadata,
+    Column(
+        "run_id",
+        String(36),
+        ForeignKey("runs.run_id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("sequence", BigInteger, primary_key=True),
+    Column("event_type", String(64), nullable=False),
+    Column("safe_payload", JSONB, nullable=False),
+    Column(
+        "created_at", DateTime(timezone=True), nullable=False, server_default=func.now()
+    ),
+    CheckConstraint("sequence > 0", name="ck_run_events_sequence"),
+    CheckConstraint(
+        "event_type IN ('run.queued', 'run.started', 'retrieval.completed', "
+        "'generation.started', 'verification.completed', 'answer.final', "
+        "'run.failed', 'run.cancelled', 'run.interrupted')",
+        name="ck_run_events_type",
+    ),
+)
+
+Index("ix_run_events_created", run_events.c.run_id, run_events.c.created_at)
+
+
 EMBEDDING_DIMENSION_TRIGGER_SQL = """
 CREATE OR REPLACE FUNCTION legal_rag_enforce_embedding_profile_dimension()
 RETURNS trigger
