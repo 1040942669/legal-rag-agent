@@ -1,13 +1,14 @@
 # ADR-003: M5 durable harness, budget ledger, and explicit recovery
 
-- Status: Accepted for the M5 release candidate; not yet shipped or released
+- Status: Accepted and shipped in `v0.6.0`; independent release receipt pending
 - Date: 2026-09-29
 - Affected milestone and planned version: M5 / `v0.6.0`
 - Base: `061ffcbd75a5305d1bbf61b02dd4a1eef6d37bac`
-- Current pushed software head: `979c12fab74ec0911bfa93fd9de07f7437c1eb5d`
-- Tracking: [Issue #21](https://github.com/1040942669/legal-rag-agent/issues/21), [Milestone 6](https://github.com/1040942669/legal-rag-agent/milestone/6), draft [PR #22](https://github.com/1040942669/legal-rag-agent/pull/22)
+- Final software head: `aa737e8d1f77214277c0544ce069d36c2b2161ff`
+- Release target: `832acaafaf5633e76daed7a62a73755187fca51e`
+- Tracking: [Issue #21](https://github.com/1040942669/legal-rag-agent/issues/21), [Milestone 6](https://github.com/1040942669/legal-rag-agent/milestone/6), merged [PR #22](https://github.com/1040942669/legal-rag-agent/pull/22)
 
-This ADR accepts the implemented architecture as an M5 release candidate. It does not record a release decision. PR #22 is not merged, the final candidate checks have not all run, and no `v0.6.0` Tag, GitHub Release, or final M5 receipt exists.
+This ADR records the architecture shipped by PR #22 and the published `v0.6.0` software release. Exact PR-head and release-target master CI, the annotated Tag, and the non-draft GitHub Release are verified. The independent receipt PR and Issue/Milestone governance closure remain pending, so the milestone state is `released_receipt_pending`, not fully `released`.
 
 ## Context
 
@@ -173,28 +174,20 @@ The default M5 service executor remains provider-free with `generate=False`. Rel
 
 ## Validation and evidence
 
-Validation is currently candidate-stage evidence, not a release record.
+Release validation is recorded in `reports/refactor/M5.md` and `docs/refactor/receipts/M5.json`:
 
-Exact evidence already available for `7ba6ae831ba6f3cf0fa5739f87033fffe59bc763`:
+- local exact candidate: 921 passed and 157 subtests passed;
+- final software head `aa737e8...`: exact-head CI run 36497021956, all three jobs successful;
+- release target `832acaaf...`: master CI run 36498443123, all three jobs successful;
+- M5 suite: 81 tests, 0 failures, 0 errors, 0 skipped on both release paths;
+- M0-M5 cumulative gate: 51/51;
+- M5-T01 through M5-T10: all passed with a closed exact-SHA fault receipt;
+- real PostgreSQL 18, pgvector 0.8.6, persistent PostgreSQL checkpointer, service restart, and migration head `0006_m5_harness_recovery`;
+- one-command recovery demo and isolated M5 wheel probe: passed;
+- annotated `v0.6.0` Tag object `c0ef0721...` peeled to the verified release target;
+- live or paid model, remote embedding, reranker, and judge calls: 0.
 
-- M5 suite: 81 passed, 0 failed, 0 errors, 0 skipped in 45.663 seconds.
-- Closed fault receipt schema: 0 validation errors.
-- M5-T01 through M5-T10: all recorded as passed.
-- Real PostgreSQL and persistent PostgreSQL checkpointer; migration head `0006_m5_harness_recovery`.
-- Cross-process PID evidence for retrieval recovery, unknown outcomes, final reconciliation, concurrent resume, and in-memory rejection.
-- Live or paid model, remote embedding, reranker, and judge calls: 0.
-
-Frozen implementation-tree preflight also recorded:
-
-- full suite: 921 passed and 157 subtests passed;
-- seven-file M5 PostgreSQL fault/follow-up suite: 15 passed;
-- focused API/M5/gate/release probes: 208 passed;
-- one-command recovery demo and isolated wheel probe: passed in the preflight tree;
-- changed Python formatting, lint, YAML parsing, lock, and diff checks: passed.
-
-The current pushed head additionally includes the M4 process restart fixture readiness repair, with its target test passing 1/1.
-
-None of these facts replaces final-candidate verification. The final documentation head does not yet exist, the M0-M5 51/51 cumulative gate has not run in the M5 candidate STATE, and the demo and wheel probe have not been repeated on the final exact HEAD. The release decision requires new exact-head artifacts and CI.
+An earlier run on `7ba6ae8...` exposed and preserved a legacy M4 fixture readiness regression. The repair pinned that legacy fixture to `m4-linear-v1` without weakening M5 fail-closed production readiness. The final PR-head and release-target runs passed the repaired M4 path.
 
 ## Consequences and known limits
 
@@ -229,17 +222,14 @@ Costs and limits:
 
 ## Release boundary
 
-This ADR is accepted for the candidate architecture only. As of its date:
+The software release boundary is complete:
 
-- PR #22 is a draft and has not been merged;
-- final exact-head unit, M5 fault, demo, database restart, wheel, and 51/51 cumulative evidence is incomplete;
-- no release-target master commit has been validated;
-- annotated `v0.6.0` does not exist;
-- a non-draft, non-prerelease GitHub Release does not exist;
-- `docs/refactor/receipts/M5.json` does not exist;
-- Issue #21 and Milestone 6 must remain open.
+- PR #22 was normally merged without admin, auto, squash, rebase, or force behavior;
+- final exact-head and release-target master CI both passed all three jobs;
+- annotated `v0.6.0` and a non-draft, non-prerelease GitHub Release exist and are remotely verified;
+- `docs/refactor/receipts/M5.json` records the software release facts and immutable artifact hashes.
 
-If the final exact-head checks, repository review rules, ordinary merge, release-target master CI, Tag, Release, independent receipt, and governance closure all succeed, this ADR may be updated to record the shipped decision. Until then, it must not be cited as evidence that M5 has been released.
+The governance boundary is not complete. The independent receipt PR, its exact-head and merge-target master CI, Issue #21 closure, Milestone 6 closure, and non-recursive finalization must still occur in order. Until then, this ADR may be cited as evidence that the `v0.6.0` software was released, but not that the full M5 receipt and governance chain is closed.
 
 ## Sources
 

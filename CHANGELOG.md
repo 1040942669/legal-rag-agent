@@ -4,11 +4,11 @@
 
 ## [Unreleased]
 
-M5 `v0.6.0` 候选正在草稿 PR #22 中验证。以下条目尚未发布；最终 exact-head suite、M0-M5 `51/51` 累计门禁、恢复 demo、数据库重启、wheel probe、required review、合并和 release-target CI 均完成前，不创建发布结论。
+M5 `v0.6.0` 软件已发布，独立发布回执与治理关闭正在收口。M6 未开始，本节没有新增产品功能。
 
-## [0.6.0] - Unreleased
+## [0.6.0] - 2026-09-29
 
-> 候选状态，尚未发布：当前已推送软件 head 为 `979c12fab74ec0911bfa93fd9de07f7437c1eb5d`。较早 exact commit `7ba6ae8` 的 M5 专项 suite 为 `81/81` 且 fault receipt schema 为 0 errors；冻结实现树全套预检为 `921 passed, 157 subtests passed`。one-command demo 和 wheel probe 只在冻结 dirty/audit tree 预检通过，最终文档 HEAD 的精确复验和 `51/51` gate 尚未运行。PR #22 未合并，`v0.6.0` Tag、GitHub Release 和最终 M5 receipt 均不存在。
+> 软件已发布，独立回执待收口：[PR #22](https://github.com/1040942669/legal-rag-agent/pull/22) final head `aa737e8d1f77214277c0544ce069d36c2b2161ff` 的三路 CI 与 merge/release target `832acaafaf5633e76daed7a62a73755187fca51e` 的三路 master CI 均成功；M5 专项 JUnit 为 81/0/0/0，M0-M5 累计门禁 51/51，恢复 demo、真实 PostgreSQL service restart 与隔离 wheel probe 通过。annotated `v0.6.0` Tag object `c0ef0721ab49da0d7840b76e741a52e35b8941d2` 精确 peeled 到 release target，GitHub Release 非 draft、非 prerelease。独立 receipt PR、Issue #21 与 Milestone 6 治理关闭仍待完成，因此状态为 `released_receipt_pending`。
 
 ### Added
 
@@ -24,7 +24,7 @@ M5 `v0.6.0` 候选正在草稿 PR #22 中验证。以下条目尚未发布；最
 
 ### Changed
 
-- 候选包版本升级到 `0.6.0`；`langgraph` 与 `langgraph-checkpoint-postgres` 保持在可选 `service` extra，旧 `legal-rag` CLI 和非 M5 `LegalChatRunExecutor` 路径继续可用。
+- 包版本升级到 `0.6.0`；`langgraph` 与 `langgraph-checkpoint-postgres` 保持在可选 `service` extra，旧 `legal-rag` CLI 和非 M5 `LegalChatRunExecutor` 路径继续可用。
 - `/api/v1/runs/{id}/resume` 只对兼容 graph version 的 owned `interrupted` run 启用；M4 run 保持明确 unsupported，不静默迁移。
 - 外部操作在 dispatch 前先事务性预留预算。429 和 timeout 只做有界重试，400/401 不盲重试；resume 不重置预算或绝对 deadline。
 - `legal-rag-api --migrate` 在 Alembic 后初始化 PostgreSQL saver schema；普通启动只验证 checkpointer readiness，不隐式迁移或回退内存存储。
@@ -34,16 +34,17 @@ M5 `v0.6.0` 候选正在草稿 PR #22 中验证。以下条目尚未发布；最
 - prompt injection 内容不能注册额外工具、覆盖 authenticated/frozen retrieval boundary、提交 SQL/DSN，或把 prompt、secret、credential 和未验证 draft 写入 checkpoint、event、result 或普通日志。
 - checkpoint serializer 禁止 pickle fallback；业务恢复只信任应用 checkpoint pointer，不把 stale lease 留下的 framework checkpoint 当成当前状态。
 - checkpoint、event、attempt reconciliation 和 terminal publication 同时受 lease owner、lease epoch、database wall clock、revision 和 event sequence 约束。
-- 候选预检禁用 dotenv 和 live provider；真实/付费 generation model、remote embedding、reranker 与 LLM Judge 调用均为 0，也未上传私密语料、凭证或本地数据库内容。
+- 发布验证禁用 dotenv 和 live provider；真实/付费 generation model、remote embedding、reranker 与 LLM Judge 调用均为 0，也未上传私密语料、凭证或本地数据库内容。
 
 ### Known limitations
 
-- 本条目是候选说明，不是发布回执。最终 exact-head 测试、CI、Tag、Release 和治理闭环尚未完成。
+- 软件 exact-head 测试、merge-target CI、Tag 与 Release 已完成；独立 receipt PR、receipt merge 后 master CI 与治理闭环尚未完成。
 - LangGraph checkpoint 与应用事务不是跨表全局原子提交；M5 通过可信业务 pointer 和保守 outcome reconciliation 缩小风险，但不承诺任意 provider exactly-once、远端撤销或零重复计费。
 - unknown external outcome 默认不静默重试，run 可能以 `completed_with_limits` 结束并给出 stop reason。
 - supervisor 仍不是通用分布式队列；批量评测、导入任务、worker 运营与完整可观测性属于后续 M6。
 - `0006` downgrade 对 M5-only 终态/事件会先拒绝；即使可以执行，也会删除 M5 应用表/列，不能视为 valued data 的无损回滚。
 - 本阶段证明恢复、预算、fencing 和安全工具边界，不证明法律正确性、完整现行法覆盖、live-model 质量或生产容量。
+- 不同 CI job 构建的 wheel 大小和内容合同相同但字节 SHA 不同，当前构建尚未 byte-for-byte reproducible。
 
 ## [0.5.0] - 2026-09-29
 
