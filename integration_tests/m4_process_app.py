@@ -16,7 +16,6 @@ from legal_rag.services.run_service import RunService
 from legal_rag.services.supervisor import RunSupervisor
 from legal_rag.storage.database import create_database_engine
 
-
 BLOCKING_QUESTION = "M4_PROCESS_RESTART_BLOCKING_SENTINEL"
 
 
