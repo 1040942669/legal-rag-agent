@@ -63,7 +63,7 @@ jobs:
         run: uv sync --frozen --all-groups --extra service
 
       - name: Verify the environment in uv offline mode
-        run: uv sync --check --offline --frozen
+        run: uv sync --check --offline --frozen --all-groups --extra service
 
       - name: Run the M2 cumulative offline quality gate
         run: >-
