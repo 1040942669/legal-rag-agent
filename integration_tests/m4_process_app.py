@@ -4,6 +4,7 @@ import argparse
 import os
 import socket
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import uvicorn
@@ -33,6 +34,10 @@ class _ProcessFixtureExecutor:
 
 def create_test_app():
     database, authenticator, settings = load_environment_configuration()
+    # This executable is the cumulative M4 restart fixture. Keep its legacy
+    # deterministic executor on the M4 graph identity so M5 production
+    # readiness remains fail-closed when a PostgreSQL checkpointer is absent.
+    settings = replace(settings, graph_version="m4-linear-v1")
     engine = create_database_engine(database)
     service = RunService(engine)
     executor = _ProcessFixtureExecutor(
