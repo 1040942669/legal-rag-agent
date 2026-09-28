@@ -10,11 +10,31 @@
   "software_candidate_sha": "e49eb949639ab48afba32c021121d30485f08b8a",
   "software_merge_sha": "e78984f548dc0885e3bdf26d62565f39dd61af01",
   "stabilization_pr_url": "https://github.com/1040942669/legal-rag-agent/pull/18",
-  "candidate_sha": "0d7de0c101af62c832927b2b78bd03e400debf81",
-  "receipt_pr_url": null,
-  "receipt_candidate_sha": null,
-  "receipt_candidate_ci_url": null,
-  "receipt_candidate_ci_artifacts": null,
+  "candidate_sha": "e49eb949639ab48afba32c021121d30485f08b8a",
+  "candidate_sha_role": "software_pr_head",
+  "release_candidate_sha": "0d7de0c101af62c832927b2b78bd03e400debf81",
+  "receipt_pr_url": "https://github.com/1040942669/legal-rag-agent/pull/19",
+  "receipt_candidate_sha": "4245372cc24fc8a19c9ad87d23d95d26c48ad778",
+  "receipt_candidate_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36478018148",
+  "receipt_candidate_ci_artifacts": {
+    "offline": {
+      "name": "m2-quality-gate-4245372cc24fc8a19c9ad87d23d95d26c48ad778-1",
+      "digest": "sha256:324f6da551e12b74f6b5153608be43c86d7bbc2fda12fcd8a4f9b1fcc725e14e",
+      "gate_json_sha256": "4414caad515f49c481288e497c89ccdd410d3d20f1a7226b9ab120ccb3f0a98c"
+    },
+    "service": {
+      "name": "m4-service-4245372cc24fc8a19c9ad87d23d95d26c48ad778-1",
+      "digest": "sha256:fac6d57e1c17f96ebb1ad8b454807867cf46d41dffbaae072183f17c1c1dfd20",
+      "gate_json_sha256": "57f23a5dd98a8500d34415bbd3064eb97b141a3db0f1a1d7754278137e0decc6",
+      "junit_sha256": "ed8193cfc97452e51bb39f110aaafdb064cfdef63bd5437db9e23858534cd05b",
+      "restart_prepare_sha256": "884f306749c1db63251d2144f72eb2bab1097e1dd9f47901d88bee86c94d9ca5",
+      "restart_verify_sha256": "239984f4a2ee57d267c301f52cad512421c51d9a28204deaf753f5cda045a68b",
+      "process_restart_receipt_sha256": "65ce4a357ee4a65775895141203a5a8ca018ade78b8d9bfc42b5cee84ab4cd21",
+      "wheel_probe_receipt_sha256": "c930904da7a3d0fc873f724622d1fa64cc8d2dd04722091979480365c2dd0968",
+      "wheel_sha256": "2dc86bb0bf46fd74bd733e46339a8339f171676ca80c139ecae0ec3fdde51fe8",
+      "wheel_size_bytes": 352679
+    }
+  },
   "receipt_final_sha": null,
   "receipt_final_ci_url": null,
   "receipt_final_ci_artifacts": null,
@@ -28,7 +48,7 @@
   "milestone_url": "https://github.com/1040942669/legal-rag-agent/milestone/5",
   "milestone_state": "open",
   "milestone_closed_at": null,
-  "final_pr_head_sha": "0d7de0c101af62c832927b2b78bd03e400debf81",
+  "final_pr_head_sha": "e49eb949639ab48afba32c021121d30485f08b8a",
   "initial_merge_sha": "e78984f548dc0885e3bdf26d62565f39dd61af01",
   "stabilization_pr_head_sha": "0d7de0c101af62c832927b2b78bd03e400debf81",
   "release_target_sha": "670e005a081cffa36a75af2b202e50eb2b859c3d",
@@ -177,8 +197,12 @@
     "Provider-free acceptance proves service wiring and safety invariants, not live-model quality, legal correctness, complete current-law coverage or production latency.",
     "The package declares Python >=3.10, while the authoritative release CI environment is Python 3.12.13; a wider interpreter matrix remains desirable.",
     "GitHub Actions emitted a non-blocking Node 20 deprecation warning for actions/upload-artifact while forcing Node 24; the pinned action should be upgraded later.",
-    "The repository-wide Ruff format baseline contains legacy differences, and full Ruff lint still has a pre-existing F841 in legal_rag/indexing.py; M4 used targeted lint and did not mass-format unrelated files."
+    "The repository-wide Ruff format baseline contains legacy differences, and full Ruff lint still has a pre-existing F841 in legal_rag/indexing.py; M4 used targeted lint and did not mass-format unrelated files.",
+    "If shutdown leaves a quarantined execution thread alive, the service conservatively retains its engine and pool until that thread drains; repeated in-process hot reload can therefore retain old pools temporarily.",
+    "The default HTTP path rebuilds the frozen corpus and BM25 retriever for each run; full-corpus cache behavior, memory consumption and P95/P99 latency have not received release-grade benchmarking.",
+    "Readiness performs bounded serving-boundary checks rather than a full row-by-row corpus audit, and the default HTTP route does not yet expose exact dense, catalog or experimental HNSW retrieval.",
+    "Alembic 0005 downgrade deletes all M4 session, run, message, result, idempotency and event history and therefore requires an explicitly approved backup and rollback procedure."
   ],
   "receipt_status": "verified_release_receipt_pending_merge",
-  "note": "The software PR, stabilization PR, exact release-target CI, annotated tag and GitHub Release are verified. The independent receipt PR, its merge and master CI, Issue #16 closure, Milestone 5 closure and documentation-only final state remain pending. The v0.5.0 tag is fixed at the software release target and must not be moved."
+  "note": "The software PR, stabilization PR, exact release-target CI, annotated tag and GitHub Release are verified. Receipt PR #19 exists and its first candidate 4245372 passed both exact-head CI jobs; the corrected final receipt head, its merge and master CI, Issue #16 closure, Milestone 5 closure and documentation-only final state remain pending. The v0.5.0 tag is fixed at the software release target and must not be moved."
 }

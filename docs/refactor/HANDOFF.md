@@ -8,7 +8,7 @@
 - 起始基线：`origin/master` `61f1065fc6d5678d0d57114e2e361294d04906b4`。
 - 软件实现 [PR #17](https://github.com/1040942669/legal-rag-agent/pull/17) 与测试稳定性 [PR #18](https://github.com/1040942669/legal-rag-agent/pull/18) 均已正常合并；未使用 admin、force、squash 或 rebase 绕过。
 - annotated `v0.5.0` Tag 对象 `36d6883cc1bc29f09f7be5625db458739bce4335` 精确 peeled 到 `670e005a...`；[GitHub Release](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.5.0) 于 `2026-09-28T19:59:42Z` 发布，非 draft、非 prerelease、附件 0。
-- `docs/refactor/receipts/M4.json` 已开始记录发布事实，但其独立 receipt PR 尚未创建。按既有里程碑惯例，在 receipt merge/master CI 与治理关闭前，`last_verified_release` 仍保留 M3。
+- 独立回执 [PR #19](https://github.com/1040942669/legal-rag-agent/pull/19) 已创建为 draft；首个候选 `4245372cc24fc8a19c9ad87d23d95d26c48ad778` 的 [run 36478018148](https://github.com/1040942669/legal-rag-agent/actions/runs/36478018148) 两个 job 均成功。对抗审查发现 PR/head 字段和已经发生的 PR/CI 尚未回填，因此正在形成修正后的 final head；旧候选绿灯不会外推到新 head。按既有里程碑惯例，在 receipt merge/master CI 与治理关闭前，`last_verified_release` 仍保留 M3。
 - [Issue #16](https://github.com/1040942669/legal-rag-agent/issues/16) 与 [Milestone 5](https://github.com/1040942669/legal-rag-agent/milestone/5) 当前仍 open；这是有意的 fail-closed 状态，必须等待回执 merge 后 master CI 成功才关闭。
 
 ## 已推送实现提交
@@ -19,6 +19,7 @@
 4. `2c4c2a024f226d4f7f91442a543246ba3962029d`：`ci(m4): verify the installed service environment`
 5. `e49eb949639ab48afba32c021121d30485f08b8a`：`docs(m4): prepare release candidate`，PR #17 最终 head
 6. `0d7de0c101af62c832927b2b78bd03e400debf81`：`test(m4): stabilize timeout isolation evidence`，PR #18 最终 head
+7. `4245372cc24fc8a19c9ad87d23d95d26c48ad778`：`docs(m4): record verified v0.5.0 release receipt`，PR #19 首个候选
 
 不得 amend 已共享提交，不得强推。候选文档、最终包证据和远端事实使用后续普通提交追加。
 
@@ -169,8 +170,8 @@ Authorization: Bearer token
 
 ## 软件发布后仍需完成
 
-1. 提交并推送当前独立 `codex/m4-release-receipt`，创建 receipt PR，并回填 PR URL 与首个 receipt candidate SHA。
-2. 要求 receipt PR 的精确最终 head 同时通过 offline 与 M4 service 两个 job；正常合并，不使用 admin、force、squash 或 rebase。
+1. 提交并推送当前 `codex/m4-release-receipt` 的审查修正，回填既有 PR #19、首个 candidate SHA 与其成功 CI。
+2. 要求 PR #19 修正后的精确最终 head 同时通过 offline 与 M4 service 两个 job；正常合并，不使用 admin、force、squash 或 rebase。
 3. 要求 receipt merge commit 的 master push 两个 job 都成功。只有此后才关闭 Issue #16；确认 Milestone 5 的 open issue 数为 0 后再关闭 milestone。
 4. 从最新 master 创建小型 documentation-only finalize PR，回填 receipt PR 最终 head、merge SHA、master CI、Issue/Milestone 关闭时间，并把 M4 状态改为 `released`。该 finalize PR 自身不制造无限自引用回执链。
 5. 整个过程不移动或覆盖 `v0.5.0`，不开始 M5，不调用 live/paid model。

@@ -1,13 +1,13 @@
 # ADR-002: M4 durable API runtime and fenced single-process supervisor
 
-- Status: Accepted for the M4 release candidate; milestone state is `ready_for_release`, not `released`
+- Status: Accepted and shipped in `v0.5.0`; milestone governance state is `released_receipt_pending` until the independent receipt and closure sequence completes
 - Date: 2026-09-29
 - Affected milestone and planned version: M4 / `v0.5.0`
 - Base: `61f1065fc6d5678d0d57114e2e361294d04906b4`
 - Verified implementation head: `43e6a506bd62bb0d02395cc3397801815a01bd16`
-- Tracking: [Issue #16](https://github.com/1040942669/legal-rag-agent/issues/16), [Milestone 5](https://github.com/1040942669/legal-rag-agent/milestone/5), draft [PR #17](https://github.com/1040942669/legal-rag-agent/pull/17)
+- Tracking: [Issue #16](https://github.com/1040942669/legal-rag-agent/issues/16), [Milestone 5](https://github.com/1040942669/legal-rag-agent/milestone/5), merged [PR #17](https://github.com/1040942669/legal-rag-agent/pull/17), stabilization [PR #18](https://github.com/1040942669/legal-rag-agent/pull/18), receipt [PR #19](https://github.com/1040942669/legal-rag-agent/pull/19)
 
-This ADR accepts the implemented M4 architecture as a release candidate. It does not state that PR #17 has been merged, and it does not state that an annotated `v0.5.0` tag, GitHub Release, or verified release receipt exists. Those objects must be recorded only after the normal merge and release sequence completes.
+This ADR originally accepted the implemented M4 architecture as a release candidate. The release outcome recorded below preserves that decision history: PR #17 and the test-only stabilization PR #18 were normally merged, exact release-target CI passed, and annotated `v0.5.0` plus its GitHub Release were published. The independent receipt/governance sequence remains deliberately separate and must complete before the milestone is marked fully `released`.
 
 ## Context
 
@@ -186,12 +186,12 @@ Costs and limits:
 
 ## Release boundary
 
-- M4 implementation and its cumulative gates are accepted as a `v0.5.0` release candidate.
-- PR #17 remains draft and has not been merged.
-- The release target SHA does not yet exist.
-- Annotated tag `v0.5.0`, GitHub Release, and `docs/refactor/receipts/M4.json` do not yet exist.
-- Exact final PR-head CI, normal merge, release-target master CI, annotated tag verification, GitHub Release publication, and the independent documentation receipt must still occur in that order.
-- Until those facts exist and are remotely verified, M4 must not be marked `released`.
+- The architecture decision was accepted at candidate time and shipped without changing the production semantics described in this ADR.
+- PR #17 was normally merged as `e78984f548dc0885e3bdf26d62565f39dd61af01`. Its first master run exposed a runner-sensitive 150ms test budget and correctly blocked release.
+- PR #18 changed only that test budget, passed exact-head CI, and was normally merged as release target `670e005a081cffa36a75af2b202e50eb2b859c3d`; the exact target then passed both release jobs.
+- Annotated tag `v0.5.0` peels to `670e005a...`; the non-draft, non-prerelease GitHub Release and `docs/refactor/receipts/M4.json` exist and have been remotely verified.
+- Receipt PR #19 exists and its first candidate passed both exact-head jobs. Its corrected final head, normal merge, merge-target master CI, Issue #16 closure, Milestone 5 closure and documentation-only finalization remain pending.
+- Until the independent governance facts are remotely verified, M4 remains `released_receipt_pending`, not fully `released`; the software tag is immutable and is not moved to include receipt documents.
 
 ## Sources
 
