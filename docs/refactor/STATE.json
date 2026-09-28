@@ -1,19 +1,19 @@
 {
   "document_schema_version": 1,
   "document_plan_version": "1.0",
-  "prepared_date": "2026-09-25",
+  "prepared_date": "2026-09-29",
   "repository": {
     "full_name": "1040942669/legal-rag-agent",
     "observed_default_branch": "master",
-    "observed_baseline_commit": "6cd07d982ffeecec3632ff47c8473118585a9693",
-    "observed_on": "2026-09-25",
-    "workspace_head": "61f1065fc6d5678d0d57114e2e361294d04906b4",
-    "workspace_head_note": "M4 work branch was created from the verified origin/master head after M3 finalization. This is the M4 start base, not a release candidate SHA.",
+    "observed_baseline_commit": "61f1065fc6d5678d0d57114e2e361294d04906b4",
+    "observed_on": "2026-09-29",
+    "workspace_head": "2c4c2a024f226d4f7f91442a543246ba3962029d",
+    "workspace_head_note": "Latest pushed M4 implementation and CI-contract head before candidate documentation. The final PR head will advance when these candidate documents are committed and must receive its own exact-head CI.",
     "workspace_branch": "codex/m4-api-sessions",
-    "workspace_dirty": false,
+    "workspace_dirty": true,
     "remote_tags_checked": true
   },
-  "execution_status": "in_progress",
+  "execution_status": "ready_for_release",
   "active_milestone": "M4",
   "last_verified_release": {
     "milestone_id": "M3",
@@ -444,23 +444,87 @@
       "name": "API与会话",
       "planned_version": "v0.5.0",
       "required": true,
-      "status": "in_progress",
+      "status": "ready_for_release",
       "branch": "codex/m4-api-sessions",
       "issue_url": "https://github.com/1040942669/legal-rag-agent/issues/16",
       "milestone_url": "https://github.com/1040942669/legal-rag-agent/milestone/5",
-      "pr_url": null,
+      "pr_url": "https://github.com/1040942669/legal-rag-agent/pull/17",
       "candidate_sha": null,
+      "latest_pushed_pre_documentation_sha": "2c4c2a024f226d4f7f91442a543246ba3962029d",
+      "implementation_commits": [
+        "862b7d0919a1e5c5a1aa684388bf4556da28e72b",
+        "081acacfc2ddf0d1ba05782a5092b5cc48820e90",
+        "43e6a506bd62bb0d02395cc3397801815a01bd16",
+        "2c4c2a024f226d4f7f91442a543246ba3962029d"
+      ],
       "release_target_sha": null,
       "tag": null,
       "release_url": null,
       "remote_release_verified": false,
       "tests": {
-        "status": "not_run",
-        "passed": null,
-        "failed": null,
-        "skipped": null,
-        "report_path": null
+        "status": "passed",
+        "implementation_gate_sha": "43e6a506bd62bb0d02395cc3397801815a01bd16",
+        "passed": 801,
+        "failed": 0,
+        "skipped": 0,
+        "subtests_passed": 157,
+        "junit_tests": 958,
+        "junit_failures": 0,
+        "junit_errors": 0,
+        "junit_skipped": 0,
+        "local_integration_passed": 79,
+        "local_postgresql_major": 18,
+        "local_pgvector_version": "0.8.1",
+        "mandatory_tests_passed": 8,
+        "mandatory_tests_total": 8,
+        "cumulative_mandatory_checks_passed": 41,
+        "cumulative_mandatory_checks_total": 41,
+        "quality_gate_json_sha256": "216d3d8a2f26cb9e721843ec681ddfa3b01d4ac6b4e6b2c734637f79e862c5fb",
+        "documentation_candidate_quality_gate_status": "passed_41_of_41_after_fail_closed_missing_guard_preflight",
+        "documentation_candidate_quality_gate_started_at": "2026-09-28T19:15:57Z",
+        "documentation_candidate_quality_gate_finished_at": "2026-09-28T19:19:05Z",
+        "documentation_candidate_quality_gate_duration_ms": 187538,
+        "documentation_candidate_quality_gate_json_sha256": "598e37db8d05c6fd62e68bec190fbf3b26ebf1e2bb9c799c5554fd3657613958",
+        "postgresql_restart_receipt_sha256": "d1754488ebfc9fc4bdd8ba7f4198cfe0ab04b87cf6603c97ce4fa6ac762e82ad",
+        "application_process_restart_receipt_sha256": "ee9c9ad1f65cea066c79cfdb4c8cf95d491577b160944fe70c3720f84bd3d105",
+        "local_candidate_wheel_name": "legal_rag_assistant-0.5.0-py3-none-any.whl",
+        "local_candidate_wheel_size_bytes": 354228,
+        "local_candidate_wheel_entry_count": 78,
+        "local_candidate_wheel_sha256": "df96b07a844e3a888ac12fb350890e49945d6ba70009f8ba477eef66ac19e583",
+        "local_candidate_wheel_isolated_smoke": "passed_offline_no_deps_both_cli_entrypoints",
+        "postgresql_service_restart_verified": true,
+        "independent_application_process_restart_verified": true,
+        "live_model_calls": 0,
+        "lock_sync_ruff_yaml_diff_checks": "passed",
+        "report_path": "reports/refactor/M4.md",
+        "scope": "Local provider-free release-candidate evidence, including the documentation-input wheel and isolated install smoke. Exact final PR-head CI, release-target master CI, authoritative CI package artifacts, Tag, Release and independent release receipt remain required."
       },
+      "interim_progress": {
+        "completed_subtasks": [
+          "A: durable M4 session, message, run, result, idempotency and event schema with Alembic 0005",
+          "B: transactional RunService, ownership isolation, idempotency and frozen execution boundary",
+          "C: FastAPI contract, authenticated SSE replay, provider-free production wiring and timeout-bounded supervisor",
+          "D: real PostgreSQL/TCP/process-restart integration suite, wheel probe and cumulative 41-check gate",
+          "E: candidate documentation and documentation-input package rebuild"
+        ],
+        "first_cumulative_gate_status": "failed_and_preserved_in_acceptance_report",
+        "final_local_cumulative_gate_status": "passed_41_of_41",
+        "pre_documentation_ci_sha": "2c4c2a024f226d4f7f91442a543246ba3962029d",
+        "pre_documentation_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36469045549",
+        "pre_documentation_ci_status": "passed_but_not_final_release_evidence",
+        "pre_documentation_ci_completed_at": "2026-09-28T19:05:51Z",
+        "pre_documentation_ci_offline_artifact_digest": "sha256:c3da41c02dc55afb0fd6ee9b7e280c4c05f9762e3fa436f8b98948ab8b2b07c8",
+        "pre_documentation_ci_service_artifact_digest": "sha256:8429b014c64a6731cdc63e90f5dfc329273a016385c83360508edb7869f4da4b",
+        "final_candidate_ci_url": null,
+        "final_candidate_ci_status": null
+      },
+      "release_requirements_remaining": [
+        "Push the final candidate and require both exact PR-head CI jobs to succeed.",
+        "Mark PR #17 ready and merge normally without admin or force after the exact-head gate.",
+        "Require both master CI jobs on the exact release target before creating annotated v0.5.0.",
+        "Publish and verify the non-draft, non-prerelease GitHub Release.",
+        "Complete the independent release receipt PR and documentation-only final state closure."
+      ],
       "blockers": []
     },
     {
@@ -536,5 +600,5 @@
       "blockers": []
     }
   ],
-  "next_action": "Stop. M3 has no remaining release step; the documentation-only finalize PR's own merge is intentionally reported out of band instead of creating a recursive receipt chain. M4 remains not_started and requires new explicit authorization."
+  "next_action": "Commit and push the documentation-inclusive M4 candidate, update PR #17, and require both exact final PR-head CI jobs before a normal merge. Then verify exact release-target master CI, create annotated v0.5.0 and the GitHub Release, complete the independent receipt chain, close Issue #16 and Milestone 5, record the final released state, and stop without starting M5."
 }
