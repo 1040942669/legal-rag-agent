@@ -6,9 +6,47 @@
 
 尚无未发布变更。
 
+## [0.5.0] - 2026-09-29
+
+> 发布候选：M4 本地实现与累计验收已通过，软件仍在 draft PR #17。精确最终 PR-head CI、普通合并、master target CI、annotated `v0.5.0`、GitHub Release 与独立发布回执尚未完成；本条目不构成已发布声明。
+
+### Added
+
+- 可选 FastAPI v1 服务与 `legal-rag-api` 入口，提供 liveness/readiness、持久 session/message/run、evidence、cancel、明确 unsupported resume 和经鉴权的 SSE 事件续读。
+- Alembic `0005_m4_api_sessions`，新增 session、message、run、result、idempotency key 与有序 event 表；数据库 partial unique index 保证同一 session 只有一个 active run。
+- 服务端 Bearer token registry，将 opaque token 映射为不可由客户端覆盖的 `user_id / scope_id / profile_id`，并对跨用户 session/run/events/evidence/cancel/resume 使用非枚举式 404。
+- 短事务 `RunService`：run 创建时冻结 snapshot revision、activation、profile、retrieval config 与 graph version；run、用户消息、幂等绑定和首事件原子写入。
+- 单进程 `RunSupervisor`，使用 `FOR UPDATE SKIP LOCKED`、有限 lease、revision/event sequence CAS、数据库 wall clock 与 stale `running -> interrupted` 恢复；执行超时线程被隔离且晚到写入被 fence。
+- PostgreSQL 持久 SSE 事件日志与 `Last-Event-ID` 补读。只发布安全阶段摘要；result、最终 assistant message、run 终态与 `answer.final` 同事务提交。
+- 真实 loopback HTTP/SSE、并发幂等、两个独立应用 PID 重启、数据库故障、模型超时、输入上限、草稿隔离和 production wiring 集成测试，以及 M0-M4 `41/41` 累计门禁。
+- 候选 wheel 审计脚本，检查 0.5.0 metadata、`0001` 至 `0005` migration、service runtime 模块、optional extra、禁止路径，以及仓库外 `legal-rag` / `legal-rag-api` 双入口 smoke。
+
+### Changed
+
+- 包版本升级到 `0.5.0`。FastAPI、SQLAlchemy、psycopg、pgvector 和 Uvicorn 保持在 `service` optional extra；原 `legal-rag` CLI 仍可在没有服务依赖、数据库配置或 API 进程时运行。
+- 默认 HTTP service 使用冻结 PostgreSQL 语料上的 bound BM25 与 `LegalChatRunExecutor(generate=False)`，保持 provider-free；M3 exact pgvector、catalog 和实验 HNSW 没有被误写成默认 API 路由。
+- PostgreSQL 客户端新增有界 connect、pool、statement 与 lock timeout；HTTP 数据库异常只返回脱敏且可归因的 503。
+
+### Security
+
+- 身份凭证只接受 Authorization Bearer header；常见 URL credential 参数在进入路由前被拒绝，任意 `X-User-ID` 不能覆盖 principal。
+- Stage/failure event 使用关闭字段集合和递归敏感字段拒绝；被 verifier 拒绝的草稿、raw provider output、prompt、hidden reasoning 与凭证字段不能进入 SSE、result 或 message。
+- lease 检查使用 PostgreSQL `clock_timestamp()`，避免事务开始时间在 row-lock 等待后错误放行过期 worker；run/result/message 使用单条一致快照读取，避免 READ COMMITTED 撕裂。
+- 取消、超时或进程退出都不伪称已撤回外部 provider 请求；旧线程只能继续消耗其自身资源，不能提交最终结果。
+- M4 候选验证禁用 dotenv 和 live provider，没有调用真实/付费生成模型、远程 embedding、reranker 或 Judge，也没有上传私密语料、凭证或本地数据库数据。
+
+### Known limitations
+
+- M4 是单进程、串行 supervisor，不是分布式任务平台；精确 checkpoint/resume、节点复用、预算恢复与外部调用 outcome reconciliation 属于 M5。
+- Python 无法强制终止已阻塞在 SDK 中的线程；quarantine 和 fencing 保护数据正确性，但不保证停止提供商计算或计费。
+- shutdown 中若仍有隔离线程存活会保守地保留 engine；同一 Python 进程反复热重载时可能暂时保留旧连接池，未来可增加 deferred disposer。
+- 开发用静态 token registry 不是生产 IdP；本版没有 OIDC、TLS、rate limit、secret manager、完整审计/观测或生产部署。
+- 默认 API 每个 run 仍从 PostgreSQL 重新装配 bound corpus/BM25；完整语料下的缓存、内存和 P95 尚未做发布级优化。
+- 本版证明服务、持久化、并发与安全事件合同，不重新证明语义蕴含、法律正确性、完整当前法律覆盖或真实模型质量。
+
 ## [0.4.0] - 2026-09-25
 
-> 发布候选：M3 实现 head 已通过候选验收，但包含本 changelog、README、版本元数据和最终验收文档的候选提交尚待 CI。PR #13 仍为 draft/open，`v0.4.0` Tag、GitHub Release 与发布回执尚不存在。
+> 已发布：M3 软件 PR #13、release-target master CI、annotated `v0.4.0`、GitHub Release、独立回执 PR #14、回执 merge 后 master CI、Issue #12 与 Milestone 4 均已完成并远端核验。
 
 ### Added
 
@@ -36,7 +74,7 @@
 
 ### Known limitations
 
-- 本节描述的是 `v0.4.0` 候选内容，不是已发布事实；最终候选提交、PR 合并、Tag、GitHub Release 和发布回执仍须按仓库规则依次完成。
+- M3 已发布并完成独立回执；后续文档与 M4 工作不会移动或复用 `v0.4.0`。
 - HNSW 是显式实验能力，pgvector HNSW 维度上限为 2000；不支持的维度仍可使用 exact。ANN recall 和性能没有在真实完整法律语料上做发布级基准，本版不把它设为默认。
 - 日期过滤只证明版本元数据覆盖 `[valid_from, valid_to)`，不判断具体案件应适用哪一版法律；本里程碑也不证明法律内容、模型回答或引用语义正确。
 - 当前 CLI 尚未实现终端用户认证、多租户授权或默认 active snapshot 注入；typed scope 是可信上层必须提供的边界，不应被误解为完整生产权限系统。

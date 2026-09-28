@@ -563,3 +563,43 @@ chunk x retriever x embedding x adaptive x reranker
 ```text
 我没有继续优化一个含义混杂的 verifier pass，而是把可程序化的结构边界、用户可见行为和未知语义状态拆开。这样引用 ID 存在、正确拒答和证据真正支持 claim 不会再被同一个数字混为一谈；失败草稿也不会冒充最终交付。
 ```
+
+## 18. M4 以 PostgreSQL 为服务事实源，用租约围栏交付而不伪造恢复
+
+### 问题 / 触发点
+
+M3 已经提供版本化语料、active snapshot 和强制检索边界，但 HTTP 服务还要面对并发重试、用户隔离、进程退出、SSE 断线、模型超时和快照切换。若只使用 FastAPI 内存状态或后台任务，进程重启会丢失已经接受的工作；若直接推送生成 token，verifier 之后拒绝也无法撤回已经泄露的草稿。
+
+### 最终决策
+
+- PostgreSQL 持久化 session、run、message、result、idempotency key 和有序 event；进程内 wake event 只减少轮询延迟，不是事实源。
+- Run 创建在短事务中锁定所属 session，先检查幂等，再冻结 snapshot、activation revision/ID、profile、boundary、retrieval config 和 graph version，并原子写入 run、用户消息、幂等键和首事件。
+- `(user_id, session_id, idempotency_key)` 绑定规范请求 hash；相同请求复用同一 run，不同请求冲突。数据库 partial unique index 保证每个 session 最多一个 `queued/running/interrupted` run。
+- 检索、生成和验证不占用长事务。worker 每次写事件或结果都重新核对 lease owner、expiry、revision 和 event sequence。
+- 租约使用 PostgreSQL `clock_timestamp()` 判断真实墙钟时间，避免事务级 `now()` 在等待行锁后仍把过期 worker 当成有效。
+- SSE 只回放 closed-schema safe events；未通过 verifier 的草稿不进入 event、result、message、HTTP 响应或普通诊断。终态与事件轮询竞争时，stream 先补齐 durable terminal event 再关闭。
+- 超时执行采用 callback fence 和 bounded quarantine，不尝试危险地杀死 Python thread。quarantine 达到上限时 readiness 失败关闭并停止领取更多工作。
+- shutdown 只有在 supervisor 和所有执行线程确认停止后才 dispose engine；未完成时保留依赖，避免 still-running thread 的 use-after-dispose。
+- M4 进程重启只把租约过期的 `running` 标为 `interrupted`。它不恢复 provider 调用，不启用 resume；checkpoint 和精确节点恢复属于 M5。
+- FastAPI 和数据库栈保持 optional service extra，旧 `legal-rag` CLI 不需要服务依赖、API 配置或运行中的数据库。
+
+### 被否决的方案
+
+1. FastAPI `BackgroundTasks` 加内存 session/run 表：无法持久化接受事实，也不能跨进程证明幂等。
+2. 在 provider 调用期间保持数据库事务：会把外部延迟变成锁和连接池占用。
+3. 只用应用层 active-run 检查：并发请求仍可同时越过检查，必须由 partial unique index 兜底。
+4. 使用事务级 `now()` 判断 lease：等待行锁会让过期 worker 获得陈旧时间判断。
+5. 先流式输出 raw draft，再在 verifier 失败后撤回：已经跨边界的内容无法撤回。
+6. 服务启动时自动继续所有 running：M4 没有 checkpoint，也无法保证外部调用 exactly-once。
+7. 无限保留超时线程并继续领取任务：provider hang 会形成无界资源增长。
+8. 在 M4 提前引入 Redis/Celery 或分布式调度：扩大范围，却仍不能替代数据库身份、幂等和发布围栏。
+
+### 验证与边界
+
+精确实现 head `43e6a506bd62bb0d02395cc3397801815a01bd16` 已通过：默认测试 `801 passed, 157 subtests passed`、真实 PostgreSQL/pgvector integration `79 passed`、M0-M4 累计门禁 `41/41`、真实 PostgreSQL service restart 和独立应用进程 restart。真实或付费模型、远程 embedding、reranker 与 Judge 调用均为 0。
+
+这些证据接受的是 M4 服务与状态机候选，不是生产部署或法律质量结论。单进程 supervisor、不强制撤销阻塞 provider、静态 Bearer token registry、无 checkpoint resume 都是明确限制。
+
+PR #17 当前仍是 draft，尚未合并；`v0.5.0` Tag、GitHub Release 和 M4 release receipt 尚不存在。因此当前只能写 `candidate / ready_for_release`，不能写 `released`。
+
+完整决策、回滚条件和 M5 边界见 [ADR-002](docs/refactor/decisions/ADR-002-m4-durable-api-runtime.md)。

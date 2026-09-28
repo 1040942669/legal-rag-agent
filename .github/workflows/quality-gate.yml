@@ -60,10 +60,10 @@ jobs:
         run: uv lock --check
 
       - name: Install locked dependencies
-        run: uv sync --frozen --all-groups
+        run: uv sync --frozen --all-groups --extra service
 
       - name: Verify the environment in uv offline mode
-        run: uv sync --check --offline --frozen
+        run: uv sync --check --offline --frozen --all-groups --extra service
 
       - name: Run the M2 cumulative offline quality gate
         run: >-
@@ -81,10 +81,10 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  m3-storage-integration:
-    name: m3 storage / PostgreSQL 18 + pgvector 0.8.6
+  m4-service-integration:
+    name: m4 service / PostgreSQL 18 + pgvector 0.8.6
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 40
     env:
       ALLOW_LIVE_MODEL_CALLS: "false"
       LEGAL_RAG_DATABASE_URL: "postgresql+psycopg://m3_test@127.0.0.1:5432/legal_rag_m3_test"
@@ -137,14 +137,16 @@ jobs:
       - name: Verify the lock file
         run: uv lock --check
 
-      - name: Install locked database dependencies
-        run: uv sync --frozen --group dev --extra database
+      - name: Install locked service dependencies
+        run: uv sync --frozen --group dev --extra service
 
-      - name: Run storage integration tests against a fresh database
+      - name: Run service integration tests against a fresh database
+        env:
+          LEGAL_RAG_M4_PROCESS_RECEIPT: ${{ runner.temp }}/m4-process-restart-receipt.json
         run: >-
           uv run --frozen --no-sync pytest -q
           integration_tests
-          --junitxml="${RUNNER_TEMP}/m3-storage-junit.xml"
+          --junitxml="${RUNNER_TEMP}/m4-service-junit.xml"
 
       - name: Prepare persistent state for the PostgreSQL service restart
         run: >-
@@ -172,28 +174,86 @@ jobs:
           --receipt "${RUNNER_TEMP}/m3-restart-receipt.json"
           > "${RUNNER_TEMP}/m3-restart-verification.json"
 
-      - name: Run the M3 cumulative integration quality gate
+      - name: Build the M4 candidate wheel
+        run: uv build --wheel --out-dir "${RUNNER_TEMP}/m4-wheel"
+
+      - name: Verify M4 wheel resources and console entry points
+        run: |
+          uv run --frozen --no-sync python - <<'PY'
+          import configparser
+          import os
+          from pathlib import Path
+          import zipfile
+
+          wheels = sorted((Path(os.environ["RUNNER_TEMP"]) / "m4-wheel").glob("*.whl"))
+          assert len(wheels) == 1, wheels
+          required = {
+              "legal_rag/storage/alembic/env.py",
+              "legal_rag/storage/alembic/script.py.mako",
+              "legal_rag/storage/alembic/versions/0001_m3_storage_baseline.py",
+              "legal_rag/storage/alembic/versions/0002_m3_immutable_corpus_rows.py",
+              "legal_rag/storage/alembic/versions/0003_m3_snapshot_activation.py",
+              "legal_rag/storage/alembic/versions/0004_m3_ann_build_guards.py",
+              "legal_rag/storage/alembic/versions/0005_m4_api_sessions.py",
+              "legal_rag/api/__init__.py",
+              "legal_rag/api/app.py",
+              "legal_rag/api/auth.py",
+              "legal_rag/api/command.py",
+              "legal_rag/api/schemas.py",
+              "legal_rag/api/settings.py",
+              "legal_rag/services/__init__.py",
+              "legal_rag/services/run_service.py",
+              "legal_rag/services/run_executor.py",
+              "legal_rag/services/service_retrieval.py",
+              "legal_rag/services/supervisor.py",
+          }
+          with zipfile.ZipFile(wheels[0]) as archive:
+              names = set(archive.namelist())
+              missing = required - names
+              assert not missing, sorted(missing)
+              entry_point_files = [
+                  name for name in names if name.endswith(".dist-info/entry_points.txt")
+              ]
+              assert len(entry_point_files) == 1, entry_point_files
+              parser = configparser.ConfigParser()
+              parser.read_string(archive.read(entry_point_files[0]).decode("utf-8"))
+          scripts = parser["console_scripts"]
+          assert scripts.get("legal-rag") == "legal_rag.cli:main"
+          assert scripts.get("legal-rag-api") == "legal_rag.api.command:main"
+          PY
+
+      - name: Run the isolated M4 wheel installation probe
+        run: |
+          set -euo pipefail
+          mapfile -t candidate_wheels < <(find "${RUNNER_TEMP}/m4-wheel" -maxdepth 1 -type f -name '*.whl' -print)
+          test "${#candidate_wheels[@]}" -eq 1
+          uv run --frozen --no-sync python scripts/m4_wheel_probe.py "${candidate_wheels[0]}" \
+            --expected-version 0.5.0 \
+            --smoke \
+            --timeout-seconds 120 \
+            --temp-root "${RUNNER_TEMP}" \
+            > "${RUNNER_TEMP}/m4-wheel-probe-receipt.json"
+
+      - name: Run the M4 cumulative integration quality gate
         run: >-
           uv run --offline --frozen --no-sync python scripts/quality_gate.py
-          --milestone M3
+          --milestone M4
           --mode integration
           --restart-receipt "${RUNNER_TEMP}/m3-restart-receipt.json"
-          --output "${RUNNER_TEMP}/m3-quality-gate.json"
+          --output "${RUNNER_TEMP}/m4-quality-gate.json"
 
-      - name: Build the wheel and verify packaged migration resources
-        run: |
-          uv build --wheel --out-dir "${RUNNER_TEMP}/m3-wheel"
-          uv run --frozen --no-sync python -c "import glob,zipfile; p=glob.glob('${RUNNER_TEMP}/m3-wheel/*.whl')[0]; names=zipfile.ZipFile(p).namelist(); required={'legal_rag/storage/alembic/env.py','legal_rag/storage/alembic/script.py.mako','legal_rag/storage/alembic/versions/0001_m3_storage_baseline.py','legal_rag/storage/alembic/versions/0002_m3_immutable_corpus_rows.py','legal_rag/storage/alembic/versions/0003_m3_snapshot_activation.py','legal_rag/storage/alembic/versions/0004_m3_ann_build_guards.py'}; missing=required-set(names); assert not missing, missing"
-
-      - name: Upload the M3 storage integration report
+      - name: Upload the M4 service integration report
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: m3-storage-${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
+          name: m4-service-${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
           path: |
-            ${{ runner.temp }}/m3-storage-junit.xml
+            ${{ runner.temp }}/m4-service-junit.xml
             ${{ runner.temp }}/m3-restart-receipt.json
             ${{ runner.temp }}/m3-restart-verification.json
-            ${{ runner.temp }}/m3-quality-gate.json
+            ${{ runner.temp }}/m4-process-restart-receipt.json
+            ${{ runner.temp }}/m4-wheel-probe-receipt.json
+            ${{ runner.temp }}/m4-quality-gate.json
+            ${{ runner.temp }}/m4-wheel/*.whl
           if-no-files-found: error
           retention-days: 14

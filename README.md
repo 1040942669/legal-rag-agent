@@ -2,7 +2,7 @@
 
 一个面向指定中国法律文本快照的可复现 RAG 工程项目。它不是把大模型接到向量库后的演示，而是围绕法律场景中的三个核心问题展开：**如何稳定召回正确法条、如何证明一次优化真的有效、如何在证据不足时安全停止生成**。
 
-仓库已经实现旧 Phase 路线中的规则型工程链路，包括数据画像、分块实验、混合检索、受控查询理解、证据覆盖启发式、引用编号检查、缓存契约和自动实验矩阵。默认链路保持保守：清晰问题直接检索，复杂问题才进入有边界的 adaptive lane；reranker 默认关闭，任何检索或生成增强都必须通过固定评测集、trace、质量与成本指标证明价值。M1 已把结构检查、行为检查和未知语义状态拆开；M2 进一步把 fresh/cache/replay、逐 case artifact、恢复、聚合和外部调用账本固化为显式实验生命周期。M3 的 PostgreSQL/pgvector 版本化语料、精确检索、原子快照切换、可复现导入和受控实验性 HNSW 已通过精确候选与 master 双重 CI，并作为 [v0.4.0](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.4.0) 发布、远端核验；当前只剩独立发布回执的合并与最终文档收口，M4 尚未开始。
+仓库已经实现旧 Phase 路线中的规则型工程链路，包括数据画像、分块实验、混合检索、受控查询理解、证据覆盖启发式、引用编号检查、缓存契约和自动实验矩阵。默认链路保持保守：清晰问题直接检索，复杂问题才进入有边界的 adaptive lane；reranker 默认关闭，任何检索或生成增强都必须通过固定评测集、trace、质量与成本指标证明价值。M1 已把结构检查、行为检查和未知语义状态拆开；M2 进一步把 fresh/cache/replay、逐 case artifact、恢复、聚合和外部调用账本固化为显式实验生命周期。M3 的 PostgreSQL/pgvector 版本化语料、精确检索、原子快照切换、可复现导入和受控实验性 HNSW 已作为 [v0.4.0](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.4.0) 发布并完成独立回执。M4 正在 [PR #17](https://github.com/1040942669/legal-rag-agent/pull/17) 中增加持久会话、Bearer 身份隔离、幂等 run、SSE 续读和单进程 supervisor；本地候选已通过累计门禁，但在精确最终 PR-head CI、合并、Tag、Release 与独立回执完成前仍不算发布。
 
 > 本项目仅用于检索与工程研究，不提供个案法律意见。仓库不随附完整法律语料，历史快照的内容截止日期为 2025-01-01；因此本文不声称覆盖全部当前有效法律。数据来源及复现边界见下文。
 
@@ -15,7 +15,7 @@
 | 受控 Agent 能力 | 规则 Query Analyzer、严格 JSON normalizer、有限 multi-query planner、证据合并、最多一轮补检索 |
 | 生成边界 | 高风险请求预拒答、证据充分性检查、结构化回答兼容层、引用/范围/行为检查、资料不足或澄清模板、最终交付前复核 |
 | 评测体系 | 120 条分层评测集、30 条固定生成子集、bootstrap 95% CI、显式行为分母、answer/retrieval/Judge N/A、自动五维实验矩阵 |
-| 工程质量 | M2 `v0.3.0` 为 548 个离线测试、157 个子测试与 25 项累计门禁；M3 `v0.4.0` 的候选和 release target 在 Linux/Python 3.12.13 上均通过 671 个离线测试、157 个子测试、61 项 PostgreSQL integration 与 33/33 累计门禁；精确 cache/replay、原子 case artifact、断点续评、版本化存储和真实服务重启验证均有机器证据 |
+| 工程质量 | M2 `v0.3.0` 为 548 个离线测试、157 个子测试与 25 项累计门禁；M3 `v0.4.0` 的候选和 release target 在 Linux/Python 3.12.13 上均通过 671 个离线测试、157 个子测试、61 项 PostgreSQL integration 与 33/33 累计门禁；M4 本地候选为 801 个离线测试、157 个子测试、79 项 PostgreSQL integration 与 41/41 累计门禁，并验证真实数据库服务重启、两个独立应用进程重启和候选 wheel 隔离入口；M4 远端候选证据仍以最终 PR-head CI 为准 |
 
 历史实验中，`Qwen3-Embedding-4B` dense 的 Hit@5 达到 **0.981 [0.954, 1.000]**，无外部 API 的自研 BM25 baseline 为 **0.704 [0.611, 0.787]**。这些数字来自 2026-06 的固定本地语料快照和当时模型版本，不是跨语料、跨时间的效果承诺。完整实验条件见 [结果摘要](reports/RESULTS_SUMMARY.md)。
 
@@ -56,7 +56,7 @@ flowchart LR
     M -- 其余失败 --> P[记录状态并执行既有处理]
 ```
 
-这是在线问答调用链的简化图。M1 `v0.2.0` 将生成结果适配为结构化回答，分开检查 schema、引用 ID、可见证据范围、回答模式、免责声明和语义状态。M2 不改变这条业务链的安全含义，而是在其外层增加可恢复实验执行器：按阶段记录输入身份、缓存来源、checkpoint、计时和调用账本，再从不可变 case artifact 聚合报告。词面启发式最多给出 `uncertain` 或 `not_checked`，仍不证明引用语义支持或法律结论正确。
+这是在线问答调用链的简化图。M1 `v0.2.0` 将生成结果适配为结构化回答，分开检查 schema、引用 ID、可见证据范围、回答模式、免责声明和语义状态。M2 不改变这条业务链的安全含义，而是在其外层增加可恢复实验执行器：按阶段记录输入身份、缓存来源、checkpoint、计时和调用账本，再从不可变 case artifact 聚合报告。M3 把 scope、snapshot、profile 与来源关系固化为数据库边界；M4 再把一次调用包装成可鉴权、可幂等、可追踪和可在断线后续读的持久 run。词面启发式最多给出 `uncertain` 或 `not_checked`，仍不证明引用语义支持或法律结论正确。
 
 ### 1. 数据驱动的分块
 
@@ -323,7 +323,84 @@ uv run python -m legal_rag.storage.import_cli apply `
 
 最终 PR head `fff2a4046d04e34664b374553070d9384eeec3c6` 的 [CI run 36076238447](https://github.com/1040942669/legal-rag-agent/actions/runs/36076238447) 与 release target `9395c221ea1fc9a9e869b3db04bd76910b77f5b0` 的 [master CI 36076759673](https://github.com/1040942669/legal-rag-agent/actions/runs/36076759673) 均为 success。两次 Linux/Python 3.12.13 离线结果均为 `671 passed, 157 subtests passed`、JUnit `828/0/0/0`；PostgreSQL 18 + pgvector 0.8.6 integration 均为 `61 passed`；M0-M3 累计门禁均为 `33/33`；真实服务重启、新进程复核与 wheel migration 资源检查均通过。本地 PostgreSQL 18.1 + pgvector 0.8.1 也通过 61 项集成测试。`0.4.0` 包审计为 wheel/sdist 66/109 个归档条目、禁止路径 0、migration 4/4，Python 3.12.13 隔离 no-index/no-deps 安装、distribution/module/entry point 均通过；真实模型、远程 embedding、reranker、Judge 和付费调用为 0。
 
-annotated `v0.4.0` Tag 对象 `1aa41823030681e17b7da70c27b50463d7d997b1` 精确 peeled 到上述 release target；GitHub Release 已于 `2026-09-25T00:22:49Z` 发布，非 draft、非 prerelease、附件 0。M3 当前状态为 `released`。独立机器回执 [PR #14](https://github.com/1040942669/legal-rag-agent/pull/14) 的最终 head `4ec89300c0fbf020baddc18214d0dd7cbd4efedf` 已通过 [CI 36078353461](https://github.com/1040942669/legal-rag-agent/actions/runs/36078353461)，随后普通合并为 `99954c64d53705170024483f2b19d7fbade4ee6d`，该精确 master commit 的 [CI 36078748808](https://github.com/1040942669/legal-rag-agent/actions/runs/36078748808) 两个 job 也均成功。Issue #12 于 `2026-09-25T00:48:06Z` 关闭，Milestone 4 于 `2026-09-25T00:48:09Z` 关闭；本次 documentation-only finalize 不移动 `v0.4.0`，M4 未开始。
+annotated `v0.4.0` Tag 对象 `1aa41823030681e17b7da70c27b50463d7d997b1` 精确 peeled 到上述 release target；GitHub Release 已于 `2026-09-25T00:22:49Z` 发布，非 draft、非 prerelease、附件 0。M3 当前状态为 `released`。独立机器回执 [PR #14](https://github.com/1040942669/legal-rag-agent/pull/14) 的最终 head `4ec89300c0fbf020baddc18214d0dd7cbd4efedf` 已通过 [CI 36078353461](https://github.com/1040942669/legal-rag-agent/actions/runs/36078353461)，随后普通合并为 `99954c64d53705170024483f2b19d7fbade4ee6d`，该精确 master commit 的 [CI 36078748808](https://github.com/1040942669/legal-rag-agent/actions/runs/36078748808) 两个 job 也均成功。Issue #12 于 `2026-09-25T00:48:06Z` 关闭，Milestone 4 于 `2026-09-25T00:48:09Z` 关闭；后续 M4 工作不移动 `v0.4.0`。
+
+### M4 持久 API、会话与事件流（v0.5.0 候选）
+
+M4 在 M3 数据边界之外增加一层可选 FastAPI 服务。PostgreSQL 是 session、message、run、result、idempotency key 和 event 的事实来源；HTTP handler 只负责协议与依赖注入，外部检索/生成期间不保持长数据库事务。默认入口使用 `LegalChatRunExecutor(generate=False)` 和冻结 PostgreSQL 语料上的 bound BM25，因此候选验证没有调用真实生成模型或付费服务，也不把 provider-free 结果描述为法律质量提升。
+
+安装服务依赖不会改变原 `legal-rag` CLI 的使用方式：
+
+```powershell
+uv sync --frozen --extra service
+```
+
+服务直接读取进程环境。下面仅展示配置形状；token 必须换成随机的 32-512 字符 opaque value，`scope_id` 和 64 位小写十六进制 `profile_id` 必须对应已导入并激活的快照。不要把 token 放进 URL、仓库或日志。
+
+```powershell
+$env:ALLOW_LIVE_MODEL_CALLS = "false"
+$env:LEGAL_RAG_DATABASE_URL = "postgresql+psycopg://USER@127.0.0.1:5432/DB"
+$env:LEGAL_RAG_AUTH_TOKENS_JSON = '{"replace-with-random-opaque-token-00000001":{"user_id":"local-user","scope_id":"local-scope","profile_id":"0000000000000000000000000000000000000000000000000000000000000000"}}'
+
+# --migrate 是显式数据库变更；不传时只按当前 schema 启动。
+uv run legal-rag-api --migrate --host 127.0.0.1 --port 8000
+```
+
+主要接口：
+
+| 方法与路径 | 行为边界 |
+| --- | --- |
+| `GET /health/live` / `GET /health/ready` | 区分进程存活与数据库、migration、active snapshot、supervisor 就绪 |
+| `POST /api/v1/sessions` | 以服务端 Bearer principal 创建持久会话 |
+| `GET /api/v1/sessions/{id}/messages` | 只返回所属用户的有序会话记录 |
+| `POST /api/v1/sessions/{id}/runs` | 需要 `Idempotency-Key`；原子写 run、用户消息、幂等绑定与首事件 |
+| `GET /api/v1/runs/{id}` / `GET /api/v1/runs/{id}/evidence` | 返回所有者可见的状态、安全结果和证据 |
+| `GET /api/v1/runs/{id}/events` | SSE 按持久 sequence 输出安全阶段事件；支持 `Last-Event-ID` 续读 |
+| `POST /api/v1/runs/{id}/cancel` | 幂等取消；明确返回外部 provider 不保证已撤回 |
+| `POST /api/v1/runs/{id}/resume` | M4 对所有者返回明确的 501；精确恢复留给 M5 |
+
+最小调用链如下。示例只使用占位 token，不要把真实 credential 写进脚本、URL 或版本库：
+
+```powershell
+$baseUrl = "http://127.0.0.1:8000"
+$token = "replace-with-random-opaque-token-00000001"
+$auth = @{ Authorization = "Bearer $token" }
+
+$session = Invoke-RestMethod -Method Post `
+  -Uri "$baseUrl/api/v1/sessions" `
+  -Headers $auth `
+  -ContentType "application/json" `
+  -Body (@{ title = "合同审查" } | ConvertTo-Json)
+
+$runHeaders = @{
+  Authorization = "Bearer $token"
+  "Idempotency-Key" = "example-run-0001"
+}
+$run = Invoke-RestMethod -Method Post `
+  -Uri "$baseUrl/api/v1/sessions/$($session.session_id)/runs" `
+  -Headers $runHeaders `
+  -ContentType "application/json" `
+  -Body (@{
+    question = "合成法律问题"
+    retrieval = @{ top_k = 3 }
+  } | ConvertTo-Json -Depth 3)
+
+Invoke-RestMethod -Method Get `
+  -Uri "$baseUrl/api/v1/runs/$($run.run_id)" `
+  -Headers $auth
+
+# SSE 断线后可带 Last-Event-ID 重新连接，只补读持久事件后缀。
+curl.exe --no-buffer `
+  -H "Authorization: Bearer $token" `
+  -H "Last-Event-ID: 0" `
+  "$baseUrl/api/v1/runs/$($run.run_id)/events"
+```
+
+两用户隔离由 `integration_tests/test_m4_http_api.py::test_m4_t01_real_http_owner_isolation_is_non_enumerating` 使用两个不同 Bearer principal、真实 loopback TCP 和真实 PostgreSQL 验证：另一用户访问 messages、run、evidence、events、cancel 或 resume 时，与资源不存在一样返回非枚举式 `404 resource_not_found`。任务恢复边界也保持显式：已完成记录跨应用进程存在，过期 `running` 只转为 `interrupted`；M4 不自动重试、不伪造 resume，所有者需先 cancel，节点级恢复属于 M5。
+
+一次 run 在创建事务内冻结 `scope / snapshot / snapshot revision / activation / profile / retrieval config / graph version`。同一 user/session/key 加相同规范化 body 永远回到同一个 run；同 key 不同 body 返回 409。数据库 partial unique index 保证一个 session 只有一个 `queued / running / interrupted` run，不依赖进程内 Lock。supervisor 以 `FOR UPDATE SKIP LOCKED`、有限 lease、revision/event sequence CAS 和数据库 wall clock 领取任务；旧 worker、超时线程或取消后的晚到结果不能跨过 fence 写最终答案。
+
+SSE 只发送 `run.started`、检索/生成/验证阶段摘要和终态，不逐 token 发送未验证草稿。`answer.final` 与安全 result、assistant message、run 终态在同一事务中提交。断开 SSE 不会取消或重建 run。服务进程退出后，完成历史继续存在；lease 过期的 `running` 只会变成 `interrupted`，在 M4 仍占 active 槽位，必须取消后才能新建。M4 不声称 checkpoint resume、provider exactly-once、生产 IdP、TLS、rate limit 或分布式 worker。
 
 ## 测试与复现边界
 
@@ -354,9 +431,39 @@ uv run --offline --frozen --no-sync python scripts/quality_gate.py `
 
 门禁要求 `ALLOW_LIVE_MODEL_CALLS=false`、禁用 dotenv，并把数据库限制在显式测试环境。M3-T01 至 M3-T08 覆盖确定性导入、exact 等价、精确法条、全路径过滤、ANN underfill/fallback、维度与 profile 防护、原子激活/回滚、迁移和真实服务重启；它证明工程与存储合同，不证明法律内容、时效性或模型回答正确。
 
+M4 候选在同一真实 restart receipt 上累积 M0-M3，再运行 M4-T01 至 M4-T08，共 41 个唯一 mandatory ID。普通集成套件会为每次 pytest invocation 创建并销毁独立 loopback 测试数据库；其中还包含真实 Uvicorn TCP、SSE 主动断线续读、两个不同应用 PID 的进程重启、数据库不可用和执行超时归因。候选 wheel 需要在仓库外临时环境中验证 `legal-rag` 与 `legal-rag-api` 两个入口。
+
+```powershell
+$env:LEGAL_RAG_INTEGRATION_TEST = "1"
+$env:LEGAL_RAG_DATABASE_URL = "postgresql+psycopg://TEST_USER@127.0.0.1:5432/legal_rag_m3_test"
+$env:LEGAL_RAG_EXPECTED_PGVECTOR_VERSION = "0.8.1"
+$env:LEGAL_RAG_DISABLE_DOTENV = "1"
+$env:ALLOW_LIVE_MODEL_CALLS = "false"
+
+uv run --offline --frozen --no-sync pytest -q integration_tests
+
+# prepare 和 verify 之间必须真实重启 PostgreSQL service。
+uv run --offline --frozen --no-sync python scripts/m3_restart_probe.py prepare `
+  --receipt artifacts/m3-m4-restart-receipt.json
+uv run --offline --frozen --no-sync python scripts/m3_restart_probe.py verify `
+  --receipt artifacts/m3-m4-restart-receipt.json
+
+uv run --offline --frozen --no-sync python scripts/quality_gate.py `
+  --milestone M4 `
+  --mode integration `
+  --restart-receipt artifacts/m3-m4-restart-receipt.json `
+  --output artifacts/m4-quality-gate.json
+
+uv build --offline --wheel --out-dir artifacts/m4-wheel
+uv run --offline --frozen --no-sync python scripts/m4_wheel_probe.py `
+  --smoke artifacts/m4-wheel/legal_rag_assistant-0.5.0-py3-none-any.whl
+```
+
+本地候选当前结果为离线 `801 passed`、`157 subtests passed`、JUnit `958/0/0/0`，PostgreSQL 18 + pgvector 0.8.1 integration `79 passed`，累计门禁 `41/41`。这些是候选工作区证据；最终发布判断仍要求包含文档和包输入的精确 PR head、普通合并后的 master target 两套 GitHub Actions 都成功。
+
 需要明确区分三类可复现性：
 
-1. 代码与离线逻辑：M0 发布时由 89 个测试提供基线；M1 `v0.2.0` 由 186 个测试、148 个子测试与 17 项累计门禁提供证据；M2 `v0.3.0` 由 548 个测试、157 个子测试和 25 项累计门禁覆盖；M3 `v0.4.0` 的候选与 release target 均由 671 个离线测试、157 个子测试、61 项数据库集成测试和 33 项累计门禁覆盖。这不等于法律正确性保证。
+1. 代码与离线逻辑：M0 发布时由 89 个测试提供基线；M1 `v0.2.0` 由 186 个测试、148 个子测试与 17 项累计门禁提供证据；M2 `v0.3.0` 由 548 个测试、157 个子测试和 25 项累计门禁覆盖；M3 `v0.4.0` 的候选与 release target 均由 671 个离线测试、157 个子测试、61 项数据库集成测试和 33 项累计门禁覆盖；M4 本地候选为 801 个离线测试、157 个子测试、79 项数据库集成测试和 41 项累计门禁，最终远端数字以精确发布候选 CI 为准。这不等于法律正确性保证。
 2. 历史检索数字：依赖 2026-06 的 203 部法律快照及对应 embedding cache。
 3. API 生成分数：还依赖外部模型版本、服务状态和 judge 偏差，不能视为永久固定值。
 
@@ -382,7 +489,9 @@ legal_rag/                         核心实现
 │   ├── retrieval.py               filter-before-limit 的 exact pgvector 检索
 │   ├── catalog.py                 精确法名/条号/版本目录与原子快照切换
 │   ├── ann.py                     显式实验 HNSW、typed underfill 与 exact fallback
-│   └── alembic/versions/           0001-0004 可打包数据库迁移
+│   └── alembic/versions/           0001-0005 可打包数据库迁移
+├── services/                       M4 RunService、执行器、检索装配与 supervisor
+├── api/                            M4 FastAPI、Bearer 鉴权、schema、配置与入口
 ├── evidence.py                    证据充分性检查
 ├── verifier.py                    引用与回答校验
 ├── judge.py                       严格 LLM-as-judge 适配器
@@ -390,9 +499,10 @@ legal_rag/                         核心实现
 configs/default.yaml               可审计的默认参数
 eval_cases/                        固定评测集
 tests/                             离线回归测试
-integration_tests/                 真实 PostgreSQL/pgvector 隔离集成测试
+integration_tests/                 真实 PostgreSQL/pgvector、HTTP/SSE 与进程重启测试
 scripts/m3_restart_probe.py        数据库服务重启前后跨进程验证
-scripts/quality_gate.py            M0-M3 机器可读累计门禁
+scripts/m4_wheel_probe.py          候选 wheel 内容、optional extra 与双入口隔离验证
+scripts/quality_gate.py            M0-M4 机器可读累计门禁
 reports/RESULTS_SUMMARY.md         历史实验总表
 docs/                              评测方法与开发计划
 ARCHITECTURE_DECISION_LOG.md       关键架构决策和反例
@@ -404,7 +514,7 @@ ARCHITECTURE_DECISION_LOG.md       关键架构决策和反例
 
 截至 2026-09-18，旧 Phase 0-4B 路线实现了可复现 baseline、检索诊断与 trace、受控查询理解、最多一轮补检索、规则 verifier、v3 评测集、reranker adapter、embedding cache v2 和自动实验矩阵。旧 Phase 编号与当前 M0-M7 里程碑不一一对应；旧路线的 reranker/cache A/B 仍是未完成的实验项，不代表当前发布主线的下一步。
 
-当前 M0-M7 主线以 [MASTER_PLAN](docs/refactor/MASTER_PLAN.md)、[STATE](docs/refactor/STATE.json) 和 [HANDOFF](docs/refactor/HANDOFF.md) 为权威来源。M0 已于 2026-09-19 作为 [v0.1.1](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.1.1) 发布并远端核验；M1 已于 2026-09-20 作为 [v0.2.0](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.2.0) 发布并远端核验；M2 软件 [PR #9](https://github.com/1040942669/legal-rag-agent/pull/9) 已正常合并，并于 2026-09-22 作为 [v0.3.0](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.3.0) 发布、远端核验，独立文档回执 [PR #10](https://github.com/1040942669/legal-rag-agent/pull/10) 也已完成。M3 软件 [PR #13](https://github.com/1040942669/legal-rag-agent/pull/13) 已普通合并，并于 2026-09-25 作为 [v0.4.0](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.4.0) 发布、远端核验；独立回执 [PR #14](https://github.com/1040942669/legal-rag-agent/pull/14) 已普通合并，精确 final-head CI 与回执 merge 后 master CI 均成功，Issue #12 与 Milestone 4 已关闭，因此 M3 状态为 `released`。M4-M7 尚未开始。
+当前 M0-M7 主线以 [MASTER_PLAN](docs/refactor/MASTER_PLAN.md)、[STATE](docs/refactor/STATE.json) 和 [HANDOFF](docs/refactor/HANDOFF.md) 为权威来源。M0 已于 2026-09-19 作为 [v0.1.1](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.1.1) 发布并远端核验；M1 已于 2026-09-20 作为 [v0.2.0](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.2.0) 发布并远端核验；M2 软件 [PR #9](https://github.com/1040942669/legal-rag-agent/pull/9) 已正常合并，并于 2026-09-22 作为 [v0.3.0](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.3.0) 发布、远端核验，独立文档回执 [PR #10](https://github.com/1040942669/legal-rag-agent/pull/10) 也已完成。M3 软件 [PR #13](https://github.com/1040942669/legal-rag-agent/pull/13) 已普通合并，并于 2026-09-25 作为 [v0.4.0](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.4.0) 发布、远端核验；独立回执 [PR #14](https://github.com/1040942669/legal-rag-agent/pull/14) 已普通合并，精确 final-head CI 与回执 merge 后 master CI 均成功，Issue #12 与 Milestone 4 已关闭，因此 M3 状态为 `released`。M4 已获授权并处于 `v0.5.0` 发布候选阶段；M5-M7 尚未开始。
 
 ## 文档导航
 

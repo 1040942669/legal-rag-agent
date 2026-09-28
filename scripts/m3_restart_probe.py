@@ -46,7 +46,7 @@ from legal_rag.storage.schema import (
 
 
 RECEIPT_SCHEMA_VERSION = 1
-EXPECTED_MIGRATION_REVISION = "0004_m3_ann_guards"
+EXPECTED_MIGRATION_REVISION = "0005_m4_api_sessions"
 FIXTURE_PREFIX = "m3-restart"
 FIXTURE_SCOPE_ID = "scope-m3-service-restart"
 FIXTURE_SNAPSHOT_ID = "snapshot-m3-service-restart-v1"

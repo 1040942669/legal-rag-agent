@@ -1,195 +1,202 @@
-# 改造交接记录
+# M4 执行交接
 
-## 当前真实状态
+## 当前结论
 
-- M3 软件与独立发布回执都已按用户授权完成，当前准确状态为 `released`。软件 [PR #13](https://github.com/1040942669/legal-rag-agent/pull/13) 已普通合并；最终 PR head 为 `fff2a4046d04e34664b374553070d9384eeec3c6`，release target / merge commit 为 `9395c221ea1fc9a9e869b3db04bd76910b77f5b0`。
-- annotated `v0.4.0` Tag 对象为 `1aa41823030681e17b7da70c27b50463d7d997b1`，远端 peeled target 精确等于 `9395c221...`。[GitHub Release](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.4.0) 于 `2026-09-25T00:22:49Z` 发布，非 draft、非 prerelease、附件 0，并已通过 GitHub API/CLI 远端核验。
-- 独立回执 [PR #14](https://github.com/1040942669/legal-rag-agent/pull/14) 的最终 head `4ec89300c0fbf020baddc18214d0dd7cbd4efedf` 已通过 [CI 36078353461](https://github.com/1040942669/legal-rag-agent/actions/runs/36078353461)，随后普通合并为 `99954c64d53705170024483f2b19d7fbade4ee6d`；该精确 master commit 的 [CI 36078748808](https://github.com/1040942669/legal-rag-agent/actions/runs/36078748808) 两个 job 均成功。[Issue #12](https://github.com/1040942669/legal-rag-agent/issues/12) 于 `2026-09-25T00:48:06Z` 关闭，[Milestone 4](https://github.com/1040942669/legal-rag-agent/milestone/4) 于 `2026-09-25T00:48:09Z` 关闭。
-- 模块 A 已建立版本化语料/法条/分块/embedding schema、事务导入、不可变导入回执、Alembic 迁移与数据库 CI。模块 B 已完成 exact pgvector repository、typed retrieval boundary/provenance、全检索路径 fail-closed 约束、不可变语料行迁移和 SearchResult artifact 向后兼容。模块 C 已完成法名 + 条号 + 可选精确版本/生效日的 typed catalog 查询，以及带 revision、activation ID、不可变事件账本和完整 CAS 的 active snapshot 原子激活、替换与回滚。模块 D 已完成显式实验 HNSW、generation-bound build receipt、typed underfill/同边界 exact fallback、`0004` 迁移、真实服务重启、新进程复验和累计 M3 gate。
-- 模块 A 的原始验收历史继续保留：实现 head `68f89ed0cd1393d8acda7570a83bb0714f57a868`、12 项单元测试、9 项 PostgreSQL 集成测试及 [CI 35697224230](https://github.com/1040942669/legal-rag-agent/actions/runs/35697224230) 均已通过；这些历史对象没有被后续模块的累计结果改写。
-- 完整本地证据为 `671 passed, 157 subtests passed`、PostgreSQL 18.1 + pgvector 0.8.1 集成测试 `61 passed`、M0-M3 累计强制检查 `33/33` 和真实服务 stop/start 后新进程复验成功；真实模型与付费调用为 0。
-- 最终 PR head 的 [CI 36076238447](https://github.com/1040942669/legal-rag-agent/actions/runs/36076238447) 与 release target 的 [master CI 36076759673](https://github.com/1040942669/legal-rag-agent/actions/runs/36076759673) 均成功：offline `671 passed + 157 subtests`、JUnit 828/0/0/0、PostgreSQL 18 + pgvector 0.8.6 integration `61 passed`、累计门禁 `33/33`、真实 service restart/new-process verify 和 wheel migration 检查全部通过。两套 artifact digest 与内部文件 SHA-256 已记录在 M3 回执。
-- M2 软件与文档状态均为 `released`。最终 PR head 为 `170da868831e2730ea15d56ed88ad24b1159e67b`；[PR #9](https://github.com/1040942669/legal-rag-agent/pull/9) 于 `2026-09-22T04:32:15Z` 普通合并，release target 为 `da7023a659672121fd772364e475870a0167e1be`。
-- M2 的 [Issue #8](https://github.com/1040942669/legal-rag-agent/issues/8) 于 `2026-09-22T05:04:04Z` 关闭，[Milestone 3](https://github.com/1040942669/legal-rag-agent/milestone/3) 于 `2026-09-22T05:04:05Z` 关闭。annotated `v0.3.0` 已发布并远端核验：[GitHub Release](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.3.0)，发布时间 `2026-09-22T04:36:35Z`，非 draft、非 prerelease、附件 0。
-- tag object `191bbf7dd26bf4010731309aa7d8bdfc40d9a50b` peeled 到 `da7023a659672121fd772364e475870a0167e1be`，与远端 `master` 和 Release target 一致。软件 Tag 不会为后续回执移动。
-- M0 软件版本已经发布并远端核验；终态为 `released`。发布回执 [PR #3](https://github.com/1040942669/legal-rag-agent/pull/3) 已于 `2026-09-19T07:13:37Z` 合并，`master` merge commit `52714d5f84634f008a5860f6bf4f5aa199ae3261` 的 [CI 35428743968](https://github.com/1040942669/legal-rag-agent/actions/runs/35428743968) 成功，Milestone 1 已关闭。
-- 目标仓库：`1040942669/legal-rag-agent`；远端默认分支为 `master`。M1 工作基线为 `52714d5f84634f008a5860f6bf4f5aa199ae3261`。
-- M1 软件 [PR #5](https://github.com/1040942669/legal-rag-agent/pull/5) 已于 `2026-09-19T18:56:38Z` 普通合并；最终 PR head 为 `d2fa34776cd188197954eff9a0092c207f309b97`，release target / merge commit 为 `d51ed481f986dde807163f4b5583b07bc9ef6750`。
-- release target 的 [master CI 35462786212](https://github.com/1040942669/legal-rag-agent/actions/runs/35462786212) 成功。远端 annotated tag object `546b0207eaf7dd46f1303baec9b279c14e41592c` peeled 到同一 target。
-- Tag / Release：`v0.2.0` / [GitHub Release](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.2.0)，发布时间 `2026-09-19T18:59:07Z`；非 draft、非 prerelease、无附件。
-- M1 回执分支为 `codex/m1-release-receipt`，从已发布的 `origin/master` 创建；软件 Tag 不包含也不需要包含后续回执提交。
-- M1 终态为 `released`；机器可读回执 [PR #6](https://github.com/1040942669/legal-rag-agent/pull/6) 已于 `2026-09-19T19:16:26Z` 普通合并，merge `fee92b4457dc68edc413608fb3a0d263af740922` 的 [master CI 35463832520](https://github.com/1040942669/legal-rag-agent/actions/runs/35463832520) 成功。Issue #4 和 Milestone 2 均已关闭。
-- M2 独立回执 [PR #10](https://github.com/1040942669/legal-rag-agent/pull/10) 已普通合并：最终 head `4ba8282a7ed6eba61a31f2cf2fcd88c7a5811dfc`，merge `6decc0f2e675300f1a175f7ab49c85852d35b38d`；最终 PR CI 与 merge 后 [master CI 35689024928](https://github.com/1040942669/legal-rag-agent/actions/runs/35689024928) 均成功。M3 已启动，M4-M7 尚未开始。
+- 当前里程碑：M4，计划版本 `v0.5.0`。
+- 当前状态：本地发布候选已通过，远端精确最终 PR-head CI 尚待候选文档提交后复验；不是已发布状态。
+- 分支：`codex/m4-api-sessions`。
+- 起始基线：`origin/master` `61f1065fc6d5678d0d57114e2e361294d04906b4`。
+- 最新已推送的文档前 head：`2c4c2a024f226d4f7f91442a543246ba3962029d`。候选文档提交后 HEAD 会继续前进，最终发布只能采用新的精确 PR head。
+- 跟踪：[Issue #16](https://github.com/1040942669/legal-rag-agent/issues/16)、[Milestone 5](https://github.com/1040942669/legal-rag-agent/milestone/5)、draft [PR #17](https://github.com/1040942669/legal-rag-agent/pull/17)。
+- `v0.5.0` Tag、GitHub Release 与 `docs/refactor/receipts/M4.json` 当前都不存在，这是正确状态。
+- M0-M3 已发布且回执完整，最后已核验版本仍是 [v0.4.0](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.4.0)。M4 不移动任何旧 Tag。
 
-## M3 启动边界
+## 已推送实现提交
 
-- 计划版本：`v0.4.0`；只实现 PostgreSQL/pgvector 持久化、版本化语料快照、精确检索等价、全路径范围过滤、法条版本查询、原子激活/回滚、受控 ANN 和 M3-T01 至 M3-T08。
-- 原离线 CLI 路径继续可用；只有显式选择数据库 profile 才要求数据库。正确性顺序是：先导入同一批已缓存 float32 向量，再证明 exact 等价和过滤闭包，最后才把 ANN 作为可关闭优化。
-- 模块 A-D 提供 schema、四个迁移、可复现导入、exact retrieval、全路径边界、精确法条目录查询、active snapshot 原子状态机和受控实验 ANN。实现完成不能被解释为生产数据库部署、真实法律质量提升或 `v0.4.0` 已发布。
-- 默认仍禁止真实模型和付费调用；测试使用合成数据与已有缓存向量契约，不读取或上传私密 `.env`、完整私人语料或本地产物。
+1. `862b7d0919a1e5c5a1aa684388bf4556da28e72b`：`feat(m4): add durable service state schema`
+2. `081acacfc2ddf0d1ba05782a5092b5cc48820e90`：`feat(m4): add transactional API run service`
+3. `43e6a506bd62bb0d02395cc3397801815a01bd16`：`test(m4): verify service release boundary`
+4. `2c4c2a024f226d4f7f91442a543246ba3962029d`：`ci(m4): verify the installed service environment`
 
-## M3 完成状态与后续边界
+不得 amend 已共享提交，不得强推。候选文档、最终包证据和远端事实使用后续普通提交追加。
 
-- 数据模型覆盖 corpus snapshot、law/version/article、chunk 与多对多 article 映射、embedding profile、chunk embedding、导入回执、index build 和按 scope 的 active snapshot pointer；跨表约束确保 active pointer 不能指向错误租户/集合范围。
-- 导入 bundle 先做 canonical 校验：ID、顺序闭包、维度、float32、有限数、关系引用、content hash、profile-sensitive bundle hash 均显式验证。重复导入必须完全匹配才幂等；冲突数据拒绝覆盖。
-- importer 在单一事务和 PostgreSQL advisory lock 内运行；任一后段写入失败会整体回滚。集成测试覆盖首次导入、重复导入、并发导入、实际向量回读、维度 trigger、冲突和失败回滚。
-- exact pgvector repository 使用规范化 float32/query 合同，显式把 pgvector `<#>` negative-inner-product distance 转回越大越好的 inner-product score，并稳定处理同分排序；它与现有 dense 基线做等价验证，边界由 scope、snapshot、embedding profile、法律/版本/法条 selector 和生效日期共同定义。
-- typed `RetrievalBoundary` 与 `RetrievalProvenance` 绑定完整 chunk payload hash 和 article provenance；exact retrieval、RRF、rerank、adaptive、chat 与 evaluation/artifact 恢复路径均重新校验，任何边界丢失、降级、混合或篡改均 fail closed。旧五字段、真正 unbound 的 SearchResult artifact 仍可读取；携带 M3 强边界标记却缺 provenance 的旧产物会拒绝恢复。
-- 第三个迁移加入 revisioned activation ledger、pointer/event 复合外键、deferred consistency trigger 和反向 article/chunk 索引；升级先锁住 legacy pointer/snapshot 写入，再校验并 bootstrap。独立临时 PostgreSQL 数据库已真实覆盖健康 0002 双 active pointer 到 0003 的带数据升级，包括旧分隔符拼接会碰撞的 ID 组合。
-- catalog 查询只做精确法名、规范化条号和显式版本/生效日选择，返回 `found`、`not_found` 或 `needs_disambiguation` 及受约束 reason；没有 fuzzy/semantic fallback，也不会用其他版本编造命中。active snapshot 更换在同 scope advisory transaction lock、pointer/snapshot row lock 和完整 `(snapshot_id, revision, activation_id)` CAS 下单事务提交；失败保持旧 active 不变。
-- 可复现 import CLI 将 `plan/dry-run`、`validate` 和 `apply` 分开：前两步只校验 source-root 内本地产物，apply 在连接数据库前重新验证，并在单事务导入、回读、写 receipt；导入绝不隐式激活快照。
-- exact 继续是默认。HNSW 只有显式实验策略才启用，按 snapshot/profile/dimension/参数/embedding generation 隔离；查询前核验唯一物理实例与 `EXPLAIN`。过滤 underfill 使用 typed outcome，可在完全相同边界内做有时限 exact fallback，不能为凑满 top-k 移除过滤。
-- `0004_m3_ann_build_guards`、不一致 legacy fail-closed、安全 downgrade/re-upgrade、embedding generation 变化和真实 PostgreSQL 服务 restart 已进入自动回归；重启后由新进程复核 migration、持久化数据、activation、exact、catalog 和 ANN receipt。
-- M3 的候选和 release target 均为 `671 passed, 157 subtests passed`、数据库 `61 passed`、累计 `33/33`；四个 migration 资源、真实 restart、lock、目标 Ruff、workflow YAML 和 diff check 均通过。候选 package version 与 master package version 都是 `0.4.0`。
-- M3 软件、Tag、Release、独立回执、回执 merge 后 master CI、Issue 与 Milestone 均已完成。本次 `codex/m3-release-finalize` 只记录已经发生的外部事实；该 finalize PR 自身不再触发第三层回执链。正常合并并验证其 master CI 后停止，不移动 `v0.4.0`，不开始 M4。
+## M4 实际完成范围
 
-## M2 启动边界
+### 持久业务状态
 
-- 只实现实验分层、精确复用、回放、逐 case 原子结果、断点续评、并发 fake 隔离、分层计时与 `M2-T01` 至 `M2-T08`。
-- 复用 v3 120 条评测集与固定 30 条生成子集；它们标记为 `legacy_regression`，不冒充新的盲测集。
-- 默认离线、并发 1、真实模型调用关闭；dense query embedding 或 adaptive normalizer 是否产生外部调用必须由 manifest 与调用账本显式记录，不能笼统写成 retrieval-only 永远零调用。
-- M2 阶段本身没有引入 PostgreSQL/pgvector、FastAPI、LangGraph、Redis/Celery、UI 或生产部署；PostgreSQL/pgvector 基础现已在后续 M3-A 引入，其他能力仍属于后续里程碑。
-- 发布前必须累计通过 M0、M1 和 M2 门禁；发布 `v0.3.0` 后另以文档回执记录真实远端状态，不移动软件 Tag。
+Alembic `0005_m4_api_sessions` 和 `legal_rag/storage/schema.py` 新增：
 
-## M2 当前进展与唯一下一步
+- `sessions`
+- `messages`
+- `runs`
+- `run_results`
+- `idempotency_keys`
+- `run_events`
 
-- 子任务 A 已在 `ee972a1` 完成：严格 canonical JSON、实验 manifest 身份、分阶段精确 cache key，以及 fresh/cache/replay 的 fail-closed 契约。
-- 子任务 B 已在 `7bb06bf` 完成：不可变逐 case attempt/complete artifact、原子 no-clobber 发布、校验和、损坏清单、兼容 resume、retry budget 和 pending commit 恢复。
-- 子任务 C 已在 `efd5f53` 完成：单 case/session work unit、group 内顺序与 group 间并发、真实 attempt 历史校验、checkpoint hash chain、进程内单 owner、provider semaphore、分层 timing/call ledger 和 replay 防绕过基础。
-- 子任务 D 已分模块完成：真实 evaluation/chat adapter 与 `ConversationMemory` 恢复、精确 stage observation、纯评分、provider timeout/error 分类、冻结 dataset registry、四种 evaluation mode、artifact-only 聚合和内容寻址发布。
-- 生命周期 CLI 已在 `f5f6e40` 完成：`plan / run / resume / aggregate / replay` 不加载 `.env`；offline source/replay 各 2/2 case 成功，replay actual calls 为 0，真实执行 hash 记录在 `reports/refactor/M2.md`。
-- 累计 M2 gate 已在 `1fe3ddd` 完成：本地 25/25，完整 `548 passed, 157 subtests passed`，JUnit 705/0 failures/0 errors/0 skipped；同一 head 的 [CI 35685720818](https://github.com/1040942669/legal-rag-agent/actions/runs/35685720818) 成功并上传报告。
-- `0.3.0` wheel/sdist 已离线构建，45/81 个归档条目，禁止路径 0；全新 Python 3.12.13 venv 从仓库外以 `-I` 验证 distribution/module/entry point 均正确。具体 size/hash 见 M2 报告与 STATE。
-- 候选文件定向 Ruff、compileall、diff check 和门禁高置信凭证扫描通过。额外的全仓 Ruff 仍有本分支未修改的 `legal_rag/indexing.py` F841；它不是 M2 门禁或本次改动引入的问题，不在候选冻结中扩大为无关重构。
-- 已知边界仍包括：跨进程/分布式唯一所有权未提供；生命周期命令依赖 Git 源码工作区；直接执行只覆盖 provider-free BM25；真实 provider、完整法律语料和法律质量未运行。
-- 最终 PR head 的 [CI 35686885130](https://github.com/1040942669/legal-rag-agent/actions/runs/35686885130) 与 release target 的 [master CI 35687258856](https://github.com/1040942669/legal-rag-agent/actions/runs/35687258856) 均为 25/25、`548 passed, 157 subtests passed`、JUnit 705/0/0/0。两份 artifact digest 与 JSON hash 已写入 STATE、M2 报告和机器可读回执。
-- M2 已完全收口，不得修改 `v0.3.0`。当前执行焦点已经转到获授权的 M3；M2 的历史证据不随 M3 分支移动。
+数据库约束保证消息顺序、每个 run 的 user/assistant 消息唯一、result 唯一、事件 sequence 单调，以及每个 session 只有一个 `queued / running / interrupted` active run。
 
-## M1 启动边界
+### HTTP 与身份
 
-- 计划版本：`v0.2.0`；范围只包含验证边界、结构化回答兼容层、指标语义与 M1 累积门禁。
-- 必须覆盖 `M1-T01` 至 `M1-T10`，包括免责声明/拒答分离、伪造引用、真引用但无语义支持、资料不足模式、顺序隔离、retrieval-only N/A、judge 错误、过度拒答和跨快照/权限证据。
-- 默认只运行离线 fixture/fake 测试；未授权任何付费模型调用，不引入数据库、FastAPI、LangGraph、Redis/Celery 或生产部署。
-- 每个可测试模块完成后 commit/push 工作分支；M1 全部通过后才冻结候选并发布。
+`legal-rag-api` 提供：
 
-## 已完成并核实
+- `GET /health/live`
+- `GET /health/ready`
+- `POST /api/v1/sessions`
+- `GET /api/v1/sessions/{id}/messages`
+- `POST /api/v1/sessions/{id}/runs`
+- `GET /api/v1/runs/{id}`
+- `GET /api/v1/runs/{id}/evidence`
+- `GET /api/v1/runs/{id}/events`
+- `POST /api/v1/runs/{id}/cancel`
+- `POST /api/v1/runs/{id}/resume`
 
-1. 审计真实工作区、origin、默认分支、HEAD、未提交内容、远端版本和仓库规则，保留用户原有提交、未跟踪文档与被忽略本地资料。
-2. 新增完全虚构且明确不是法律文本的合成 fixture；BM25 smoke 在该测试中硬阻断 Python socket。
-3. 新增 `scripts/quality_gate.py`：M0/offline 统一执行全量 pytest、合成 smoke、版本、CLI、Markdown、STATE/manifest JSON 和候选凭证风险检查；未知 stage/mode 以 2 退出。
-4. 新增 PR / `master` push CI：只读权限，不使用 `pull_request_target`，不注入模型密钥，Action 固定完整 SHA，Python 固定 3.12.13，uv 固定 0.10.10。
-5. 版本统一为 `0.1.1`，`pyproject.toml` 为权威来源；lock 只更新本包元数据。CLI `--help` 不再预先读取 `.env`。
-6. README、评测方案、历史执行计划、结果报告和 ADR 已区分旧 Phase 与当前 M0-M7，并明确 verifier、citation 与 refusal 指标限制。
-7. PR #2 最终 head `e426424b892bedd3bc1c5c13a34e94e7f1496c2f` 通过 [CI 35428009054](https://github.com/1040942669/legal-rag-agent/actions/runs/35428009054)。
-8. 实际 merge commit `cb7e01982ca6fb95cebde1e5d707527fd36a250c` 通过 [master CI 35428226839](https://github.com/1040942669/legal-rag-agent/actions/runs/35428226839)。
-9. 远端 annotated tag object 为 `9072726ee99c3d13903069f78b747f02a85c8093`，peeled target 为上述 merge commit；Release API/CLI 确认非 draft、非 prerelease、无附件。
-10. M1 结构化回答已区分 `evidence_answer / insufficient_evidence / needs_clarification / out_of_scope`，并保留旧纯文本适配器但降低其可验证性。
-11. M1 verifier 已拆分 schema、证据目录、引用 ID/对齐、可选快照/权限范围、免责声明、回答模式与语义状态；词面启发式不产生 `supported`。
-12. 只有可信调用方显式注入 `VerificationContext` 时，越界证据才会在进入生成提示和返回 sources 前被过滤并再次核验。当前 CLI 没有认证身份、租户隔离或默认 active snapshot；这些能力不能提前算作完成。伪造引用或无效模式的草稿不会作为最终回答交付，安全终态会再次验证。
-13. M1 评测 schema v2 已实现显式行为分母、retrieval-only N/A、Judge 成功/失败/未执行三态、历史输出防覆盖，以及生成尝试/最终交付分离的 Trace。
-14. 两组完全虚构、非法律的改前/改后 fixture 已覆盖免责声明误判拒答和真实 ID 不等于语义支持；它们只证明规则边界，不是法律质量 benchmark。
-15. M1 累积门禁已覆盖 7 个 M0 必需检查和 `M1-T01` 至 `M1-T10`，共 17 个唯一检查；mandatory pytest 遇到零测试、skip、xfail、JUnit 缺失或解析失败都会失败关闭。
-16. GitHub Actions 已改为运行 M1 累积门禁并始终上传机器可读 JSON；产物名含 commit SHA 与 run attempt，Action 固定完整 SHA，权限仍为只读。
-17. 离线门禁子进程同时设置 `ALLOW_LIVE_MODEL_CALLS=false` 与 `LEGAL_RAG_DISABLE_DOTENV=1`；Ollama、SiliconFlow、SentenceTransformer 和远程 embedding 入口会在初始化或调用前失败关闭。本次未读取或暂存被忽略的本地 `.env`。
-18. 以 `647c0238674abe603fdf33e80191c19eb6de3dd9` 软件代码和定稿发布 README 构建的 `0.2.0` sdist/wheel 已通过核验；全新 Python 3.12.13 venv 离线 no-deps 安装后，distribution/module/console entry point 和模块来源均核对正确，wheel/sdist 共 88 个归档条目，禁止路径为 0。
-19. PR #5 的 [Actions run 35461753394](https://github.com/1040942669/legal-rag-agent/actions/runs/35461753394) 显式检出同一 head `647c023...` 并成功；下载 JSON 确认 17/17、186 passed、148 subtests、JUnit 334/0/0/0。产物名为 `m1-quality-gate-647c0238674abe603fdf33e80191c19eb6de3dd9-1`。
-20. Normalizer、结构化回答和 Judge 的模型 JSON 入口已统一拒绝重复 key、非标准非有限数值、孤立 surrogate、超限或资源异常输入；引用/拒答检查覆盖 Unicode 括号与不可见格式字符并保守失败关闭。
-21. 被拒绝草稿正文和内容型 verifier 诊断不进入普通 Trace；安全 serializer 使用显式 allowlist，生成的 schema、引用片段和 source ID 列表只保留计数。Trace 仍记录用户 query、派生查询和检索 metadata，评测记录仍保存最终回答与成功 Judge comment，不能宣称全链路脱敏。
-22. 最终文档 head `d2fa34776cd188197954eff9a0092c207f309b97` 在干净工作区本地再次通过 17/17 门禁，并由精确 PR-head [CI 35462691374](https://github.com/1040942669/legal-rag-agent/actions/runs/35462691374) 复验。
-23. PR #5 普通合并为 `d51ed481f986dde807163f4b5583b07bc9ef6750`；对应 master push CI 复验 17/17、186 passed、148 subtests、JUnit 334/0/0/0。
-24. annotated `v0.2.0` 的远端 tag object / peeled target 已交叉核对；GitHub Release API/CLI 确认发布对象非 draft、非 prerelease且无附件。
-25. 机器可读发布回执为 `docs/refactor/receipts/M1.json`；它在软件 Release 之后由独立文档 PR 落库，不移动 `v0.2.0`。
-26. 回执 PR #6 最终 head `11b2165396d2dc8c55c5537e33307c15a67376e2` 的 [CI 35463637086](https://github.com/1040942669/legal-rag-agent/actions/runs/35463637086) 成功；diff 只有 6 个文档文件。
-27. 回执 merge `fee92b4457dc68edc413608fb3a0d263af740922` 的 master CI 再次通过 17/17、186 passed、148 subtests、JUnit 334/0/0/0；远端 Tag 仍 peeled 到软件 release target `d51ed481...`，Milestone 2 已关闭。
+开发期 opaque Bearer token 由服务端静态 registry 映射为 `user_id / scope_id / profile_id`。客户端不能用 query、body 或 `X-User-ID` 覆盖身份。跨用户访问 session、run、events、evidence、cancel 和 resume 统一返回不泄露对象存在性的 404。URL 中常见 credential 参数会在路由前被拒绝。
 
-## 真实验证结果
+### RunService 事务边界
 
-- M3-A-D 实现 head `cf2c7a82195b63786d77bfb0d5cea9799b18013b`：本地累计离线回归 `671 passed, 157 subtests passed`；PostgreSQL 18.1 + pgvector 0.8.1 integration `61 passed`；M0-M3 mandatory `33/33`；真实服务重启后新进程 verify 通过；真实模型与付费调用 0。
-- 精确实现 head [CI 36073478416](https://github.com/1040942669/legal-rag-agent/actions/runs/36073478416) 的 offline 与 PostgreSQL 18 + pgvector 0.8.6 storage 两个 job 均成功；离线 JUnit 828/0/0/0，integration 61，累计 33/33。offline/storage artifact digest 分别为 `sha256:24b2c6ae741859bea2b472c5a9b59f9fb0f406bddaaa729dd57c1102bf050de4` 和 `sha256:8d3c65df1f09044df2c34fa8668915d6249e99af6695b42a4f96bc0c4e97d2dd`。
-- M3-A-D 的 wheel 内容、lock、改动目标文件 Ruff、workflow YAML 和 diff check 均通过，包含 4/4 Alembic migrations。最终包输入快照已独立离线构建 `0.4.0`：wheel 309,061 bytes / 66 entries / SHA-256 `cafe1b43cf6d30bb146e6aee54492eebebc9794dc29dcd0de715004e2b03a269`；sdist 419,532 bytes / 109 entries / SHA-256 `7bb7a6b22b405c4ff4f01fad159ba4fd47322ca8a9da643a79bd45796cc0242c`；禁止路径 0、migration 4/4、Python 3.12.13 隔离 no-index/no-deps 安装与 entry point 通过。包含版本/文档的精确候选 head 仍须重新跑 CI；实现 head 的 `0.3.0` wheel 不能冒充最终包。额外全仓 Ruff 仍报告既存 `legal_rag/indexing.py:83` F841。
-- 修改前基线：`70 passed in 0.43s`。
-- M0 候选本地统一门禁：7/7 必需检查通过；全量 89 passed；合成 smoke 1 passed。
-- 最终 PR CI：89 passed，24 个 Markdown、2 个 JSON、79 个 Git candidate 文本凭证形状扫描均通过。
-- lock / 环境：`uv lock --check`、`uv sync --check --offline --frozen` 均以 0 退出。
-- 发布包：`uv build --offline` 成功产生 `0.1.1` sdist/wheel；wheel 在全新临时 Python 3.12.13 venv 离线安装并导入，版本核对为 `0.1.1`。
-- 验收报告：`reports/refactor/M0.md`；机器可读回执：`docs/refactor/receipts/M0.json`。
-- M1 累积门禁：最终 PR head `d2fa347...` 与 release target `d51ed48...` 的精确 CI 均为 17/17 通过，全量 `186 passed, 148 subtests passed`，JUnit 汇总 `334 tests, 0 failures, 0 errors, 0 skipped`；合成 smoke 与 `M1-T01` 至 `M1-T10` 均独立通过。
-- M1 环境与工作流：workflow YAML 可解析，`uv lock --check` 与 `uv sync --check --offline --frozen` 均通过；未知 milestone/mode 生成配置错误报告并返回逻辑退出码 2。
-- M1 最终发布内容候选包：wheel `legal_rag_assistant-0.2.0-py3-none-any.whl`，101,188 bytes，SHA-256 `c5fa5e291e17d2dc5218577af23a1880e0c27ea93abfbd2e097be19c9df4a6f7`；sdist `legal_rag_assistant-0.2.0.tar.gz`，138,515 bytes，SHA-256 `b9172b8a18a983c30dcd9893df4ec808ad31d003e6fa33bcbd943b9896708078`。
-- M1 验收报告：`reports/refactor/M1.md`；机器可读发布回执：`docs/refactor/receipts/M1.json`。
-- M1 最终 PR CI 产物：`m1-quality-gate-d2fa34776cd188197954eff9a0092c207f309b97-1`，GitHub digest `sha256:92611875339d1d779978ba2d94596629ea0425e4cf001e728e64dd3e6c188c71`；本地解包 JSON SHA-256 `da6e64182a64c6190c7a3f110dc11e2e6abe04d035e6d54578c9e45664ec66b5`。
-- M1 master CI 产物：`m1-quality-gate-d51ed481f986dde807163f4b5583b07bc9ef6750-1`，GitHub digest `sha256:145aa5e10e5ab03d013bdbfe425af245eb565ffc2306fa09af8a2294f44b4a7f`；本地解包 JSON SHA-256 `6c3f0097aceecefcec58a1a8e95a399b512995555f94b5af1929bf9c9b3044b9`。
+创建 run 使用一个短事务完成：
 
-## 没有做的事情
+1. 锁定并校验所属 session。
+2. 优先检查 `user_id + session_id + Idempotency-Key` 绑定。
+3. 对规范化请求体计算 SHA-256。
+4. 冻结 active snapshot、snapshot revision、activation ID、profile、retrieval config 和 graph version。
+5. 校验 snapshot/profile import 可服务。
+6. 原子写入 run、用户消息、幂等记录和 `run.queued`。
 
-- 没有运行在线或本地生成模型、Embedding、reranker、LLM judge、真实法律语料实验或付费调用。
-- 没有读取/上传 `.env` 值、完整语料、Embedding cache、私人课程/简历/面试材料或大型产物。
-- 已在 M3 工作分支引入可选 PostgreSQL/pgvector 基础，但没有生产部署、完整语料迁移、FastAPI、LangGraph、Redis/Celery 或 M4 以后的能力。
-- M1、M2 软件、发布回执和 Milestone 收尾均已完成；没有重复发版或移动既有 Tag。M3 模块 A-D 已通过实现候选验收，但尚未合并或发布，也没有 M3 发布回执。
-- 本地门禁 JSON、下载的 CI JSON 与包构建物只保存在被忽略的本地 `.tmp`；它们没有进入 Git 或 Release 附件。GitHub Actions 产物按平台保留策略远端保存。
-- 没有把历史 203 部法律或模型质量数字冒充 M0 新实测。
+同 key、同 body 返回原 `run_id`，包括原任务已经成功的情况；同 key、不同 body 返回 409。不同 key 也不能越过数据库 active-run 约束。外部检索和执行不持有数据库事务。
 
-## 已知限制
+### Supervisor、lease 与恢复
 
-- M0 证明离线工程基线，不证明真实法律问答质量或生产就绪。
-- 当前 verifier 已能严格检查结构、引用目录/对齐和可选范围，但默认语义层仍只有 `uncertain/not_checked`；它不证明 claim-source 语义支持或法律正确性。
-- 旧 `Refusal correctness` 仅在兼容输出中保留；新 schema 使用拒答召回与过度拒答的独立分母，不能与旧总均值直接比较。
-- 项目声明 Python `>=3.10`，M0 必需门禁只固定验证 Python 3.12 系列。
-- 凭证形状扫描不是绝对无泄漏保证，候选另经人工文件清单与完整 diff 审查。
-- GitHub CI 安装锁定依赖时可以联网；门禁子进程使用离线依赖模式、禁用 dotenv 并在项目 provider 边界拒绝真实模型调用，合成 smoke 另在 Python 进程内阻断 socket，但仍不是 runner 的 OS 级 air-gap。
-- 非阻塞 P2：snapshot 在 repository preflight 之后、encoder 调用之前被 archive 时，可再增加一次 encoder 前 preflight 以更早停止无效编码。当前数据读取仍由数据库边界 fail closed，且 bound online 路径只允许本地可验证的 SentenceTransformer 编码器，因此这不是越权读取缺口，也不阻塞模块 B 验收。
-- 非阻塞 P2：并发 activation 集成测试已使用两个真实线程并证明同一 stale CAS 只有一胜一冲突，但入口 Barrier 没有单独证明两个事务在 advisory-lock 关键区重叠；后续可用 SQLAlchemy event 加第二个 Barrier 强化证据。
-- 非阻塞 P2：deferred activation consistency trigger 当前按受影响行扫描全库 active/pointer/event 历史，逻辑正确，但规模增长后应限制到受影响 scope 以降低提交成本。
-- 非阻塞 P2：自动迁移测试已覆盖空库、健康 0002 双 pointer、矛盾 legacy fail-closed、downgrade/re-upgrade 和 0004 generation guard；法条 catalog API 仍未接入默认 CLI/chat 产品入口。
-- 非阻塞 P2：实验 HNSW 尚未在完整真实法律语料上基准 recall、build time、index size 与 P95；exact 因而继续是默认，不声称 ANN 带来已量化性能或质量提升。
-- 非阻塞 P2：多父 snapshot 的数据库 trigger 在未来可对父行锁查询使用稳定 `ORDER BY`，进一步降低并发事务以相反顺序取锁时的死锁概率。现有不可变约束、正确性测试和集成测试均已通过，该项属于后续并发稳健性加固。
+单进程 `RunSupervisor` 使用 `FOR UPDATE SKIP LOCKED` 领取 queued run，并写有限 `lease_owner / lease_expires_at`。状态迁移使用 revision 与 event sequence CAS。lease 判定使用 PostgreSQL `clock_timestamp()`，避免事务在 row lock 上等待后仍用事务开始时间错误接受过期 worker。
 
-## 回滚
+执行器在 daemon thread 内运行。超时线程进入 bounded quarantine，callback active flag 和数据库 lease/revision 双重 fence 阻止晚到写入。达到 4 个仍在 draining 的线程时 readiness 失败关闭，不继续领取并错误超时更多任务。
 
-- 代码：M3 尚未合并；发布后如需撤销，使用新的 revert/fix PR，不强推、不重写历史，也不移动已发布 Tag。
-- 数据：优先通过 revisioned activation rollback 切回仍为 validated 且具备所需 profile 的历史 snapshot；代码 `git revert` 不能替代数据库恢复。Schema downgrade 只在兼容检查允许时执行，不删除数据库卷来伪造回滚。
-- ANN：HNSW 是可重建派生索引；停止选择实验 build 并回到 exact，不删除 corpus、不篡改 generation/build receipt。
-- 任务/服务：本版没有队列、后台任务或生产部署，无运行中生产任务需要恢复。
-- 版本：已发布 `v0.1.1`、`v0.2.0`、`v0.3.0` 与 `v0.4.0` 均不移动、不复用；M3 后续回执提交不会改变 `v0.4.0` 的 peeled target。
+启动和周期恢复会分批扫描 stale run，直到最后一批不足 100；只有全部恢复后才 ready。M4 的恢复语义只有：
 
-## M0 回执收尾核对
+```text
+running + expired lease -> interrupted
+```
 
-1. 回执 PR #3 已正常合并，最终 head 为 `be34c68b2bd9f5bcc1405ec1437b30d0444fe420`。
-2. 回执 merge SHA 的 `master` CI 已成功，Milestone 1 已关闭。
-3. M0 不再有远端收尾动作，不得重复发版或移动 `v0.1.1`。
+`interrupted` 仍占 active 槽位。所有者可以取消，`resume` 明确返回 501；M4 不伪造 M5 checkpoint resume。
 
-## 执行事实表
+### 安全事件与最终发布
 
-| 项目 | 当前值 |
-|---|---|
-| 当前里程碑 | M3 / `released`；软件、Release、独立 receipt PR、receipt master CI、Issue 与 Milestone 均已完成并核验 |
-| M3 branch / base | `codex/m3-storage-snapshots` / `6cd07d982ffeecec3632ff47c8473118585a9693` |
-| M3 Issue / Milestone / PR | closed [#12](https://github.com/1040942669/legal-rag-agent/issues/12) / closed [Milestone 4](https://github.com/1040942669/legal-rag-agent/milestone/4) / merged [PR #13](https://github.com/1040942669/legal-rag-agent/pull/13) |
-| M3 candidate / release target | `fff2a4046d04e34664b374553070d9384eeec3c6` / `9395c221ea1fc9a9e869b3db04bd76910b77f5b0` |
-| M3 软件测试 | PR [run 36076238447](https://github.com/1040942669/legal-rag-agent/actions/runs/36076238447) 与 master [run 36076759673](https://github.com/1040942669/legal-rag-agent/actions/runs/36076759673) 均为 671 +157、JUnit 828/0/0/0、integration 61、33/33、真实 restart passed |
-| M3 CI artifacts | 最终软件 PR：offline `sha256:e06b0403...`、storage `sha256:65fa484d...`；release target：offline `sha256:73e2d731...`、storage `sha256:0824ea95...`；完整 digest 与内部文件 SHA-256 见机器回执 |
-| M3 Tag / Release | annotated `v0.4.0` object `1aa41823030681e17b7da70c27b50463d7d997b1` peeled 到 `9395c221...` / [published](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.4.0) |
-| M3 receipt | merged [PR #14](https://github.com/1040942669/legal-rag-agent/pull/14)；final `4ec89300...` / merge `99954c64...` / [final CI 36078353461](https://github.com/1040942669/legal-rag-agent/actions/runs/36078353461) 与 [master CI 36078748808](https://github.com/1040942669/legal-rag-agent/actions/runs/36078748808) success |
-| M2 branch / base | `codex/m2-experiment-lifecycle` / `00ec3ad5b193a7442e427486e8bfade2dbabd482` |
-| M2 Issue / Milestone | [#8](https://github.com/1040942669/legal-rag-agent/issues/8) / [Milestone 3](https://github.com/1040942669/legal-rag-agent/milestone/3) |
-| M2 PR / Tag / Release | [PR #9](https://github.com/1040942669/legal-rag-agent/pull/9) merged / `v0.3.0` / [published](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.3.0) |
-| M2 最终 PR head / release target | `170da868831e2730ea15d56ed88ad24b1159e67b` / `da7023a659672121fd772364e475870a0167e1be` |
-| M2 PR / master CI | [run 35686885130](https://github.com/1040942669/legal-rag-agent/actions/runs/35686885130) / [run 35687258856](https://github.com/1040942669/legal-rag-agent/actions/runs/35687258856) / success |
-| M2 子任务测试 | A/B/C/D/G 均已推送或进入本候选；M2-T01 至 T08 共 19 passed；整仓 548 passed + 157 subtests；25/25 累计门禁 |
-| M2 package | `0.3.0` wheel 217,926 bytes / `cada4f6c...`；sdist 309,954 bytes / `3d6a0579...`；隔离安装通过 |
-| 软件分支 / 回执分支 | `codex/m1-verification` / `codex/m1-release-receipt` |
-| 最终 PR head / release target | `d2fa34776cd188197954eff9a0092c207f309b97` / `d51ed481f986dde807163f4b5583b07bc9ef6750` |
-| M1 PR / Tag / Release | [PR #5](https://github.com/1040942669/legal-rag-agent/pull/5) / `v0.2.0` / [published](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.2.0) |
-| M1 回执 PR | [PR #6](https://github.com/1040942669/legal-rag-agent/pull/6) / merged；final head `11b2165...` / merge `fee92b4...` / PR 与 master CI success |
-| M1 精确候选测试 | final PR head 与 release target 均为 186 passed，148 subtests passed；JUnit 334/0 failures/0 errors/0 skipped；无真实模型或语料调用 |
-| M1 累积门禁 | PR/master 均 17/17 passed（含 M0 7 项 + M1 10 项） |
-| M1 package | `0.2.0` verified build + Python 3.12.13 isolated install/import passed；hash 见上文 |
-| M1 PR / master CI | [run 35462691374](https://github.com/1040942669/legal-rag-agent/actions/runs/35462691374) / [run 35462786212](https://github.com/1040942669/legal-rag-agent/actions/runs/35462786212) / success |
-| M1 Issue / Milestone | [#4](https://github.com/1040942669/legal-rag-agent/issues/4) / [Milestone 2](https://github.com/1040942669/legal-rag-agent/milestone/2) |
-| M2 receipt | [PR #10](https://github.com/1040942669/legal-rag-agent/pull/10) merged；final `4ba8282...` / merge `6decc0f...` / final PR 与 master CI success |
-| 阻塞 | 无 |
-| 下一条可执行动作 | 停止；documentation-only finalize PR 自身的 merge/master CI 由最终对话回执核验，不再创建递归回执；M4 必须等待新的明确授权 |
+SSE 事件持久化在 PostgreSQL，以 `(run_id, sequence)` 唯一标识。客户端可用 `Last-Event-ID` 或受约束的 `after` 续读。断线不取消 run，也不创建新 run。
 
-## 完成说明
+事件 payload 使用关闭字段集合，只包含状态、计数、布尔值、受限 stage/reason 等事实摘要。未验证草稿、raw provider response、prompt、hidden reasoning 或 credential 字段不能进入 event、result、message 或 HTTP 响应。
 
-`v0.4.0` 的 `release_target_sha` 固定为 `9395c221ea1fc9a9e869b3db04bd76910b77f5b0`；receipt/finalize 提交只让 `master` 前进，不移动 annotated Tag。M3 软件、精确 PR CI、release-target master CI、Tag、Release、独立 receipt PR、receipt master CI、Issue #12 与 Milestone 4 均已完成并远端核验。finalize PR 只固化这些事实，其自身 merge 不再创建新的回执 PR；合并后停止。M4 未获授权且没有开始。
+安全 result、最终 assistant message、run 终态和 `answer.final` 在同一事务中提交。SSE 终态检查会比较当前 cursor 与持久 `event_sequence`；如果终态事件刚提交但尚未被当前连接读到，会继续补读，不会漏掉 `answer.final`。
+
+### 生产装配边界
+
+当前服务入口真实连接：
+
+```text
+RunService
+  -> RunSupervisor
+  -> LegalChatRunExecutor(generate=False)
+  -> PostgresAssistantFactory
+  -> frozen PostgreSQL corpus
+  -> boundary-bound BM25
+  -> provider-free safe result
+```
+
+M3 的 exact pgvector、精确法条 catalog 和实验 HNSW 仍存在，但没有被冒充为 M4 默认 API 路由。当前默认不调用生成模型。`verification.passed=true` 在 retrieval-only 路径只表示该受控结果允许发布，不表示语义蕴含或法律结论正确。
+
+## 完整在线链路
+
+```text
+Authorization: Bearer token
+  -> 服务端 principal
+  -> 创建 session
+  -> 幂等创建 run 并冻结数据边界
+  -> 202 + run/status/events URL
+  -> supervisor 领取并加 lease
+  -> 读取当前 session 中仅来自 succeeded run 的有界历史
+  -> 从冻结 snapshot/profile 装配检索器
+  -> 检索、证据检查、provider-free 执行
+  -> safe verification/result
+  -> assistant message + result + succeeded + answer.final 原子提交
+  -> GET status/evidence/messages 或 SSE sequence 续读
+```
+
+历史上下文只读取同一 user/session、当前 user message 之前、已成功且拥有完整 user/assistant 对及 result 的记录。默认最多 16 条消息、12,000 字符；queued、failed、cancelled 和 interrupted 不是可送入执行器的完成历史。
+
+## 当前真实验证
+
+本地环境：Windows、Python 3.12.12、PostgreSQL 18、pgvector 0.8.1。CI canonical 环境为 Linux/Python 3.12.13、PostgreSQL 18、pgvector 0.8.6；最终数字只能来自文档提交后的精确最终 PR head。
+
+- 完整离线套件：`801 passed, 1 warning, 157 subtests passed`。
+- 累计门禁内 JUnit：`958 tests, 0 failures, 0 errors, 0 skipped`。
+- 完整 PostgreSQL integration：`79 passed`。
+- M4-T01 至 M4-T08：`8/8`。
+- M0-M4 累计 mandatory checks：`41/41`。
+- 实现验收 quality gate JSON SHA-256：`216d3d8a2f26cb9e721843ec681ddfa3b01d4ac6b4e6b2c734637f79e862c5fb`。
+- 文档与 API 示例冻结后的本地复验仍为 `41/41`，JSON SHA-256：`598e37db8d05c6fd62e68bec190fbf3b26ebf1e2bb9c799c5554fd3657613958`。
+- 真实 PostgreSQL service restart receipt SHA-256：`d1754488ebfc9fc4bdd8ba7f4198cfe0ab04b87cf6603c97ce4fa6ac762e82ad`。
+- 独立应用进程 restart receipt SHA-256：`ee9c9ad1f65cea066c79cfdb4c8cf95d491577b160944fe70c3720f84bd3d105`。
+- 文档输入冻结后的 0.5.0 wheel：`354228` bytes、`78` entries、SHA-256 `df96b07a844e3a888ac12fb350890e49945d6ba70009f8ba477eef66ac19e583`；仓库外 offline/no-deps 隔离安装、`legal-rag --help` 与 `legal-rag-api --help` 均通过。
+- pre-documentation head `2c4c2a0...` 的 GitHub Actions run `36469045549`：两个 job 均 success；offline artifact digest 为 `sha256:c3da41c02dc55afb0fd6ee9b7e280c4c05f9762e3fa436f8b98948ab8b2b07c8`，service artifact digest 为 `sha256:8429b014c64a6731cdc63e90f5dfc329273a016385c83360508edb7869f4da4b`。该 run 不替代候选文档提交后的精确 final-head CI。
+- `uv lock --check`、一致 dependency selection 的 offline `uv sync --check`、targeted Ruff、workflow YAML 和 `git diff --check`：通过。
+- Starlette TestClient/httpx compatibility layer 有一个非阻塞 deprecation warning；真实 M4 HTTP 验收使用 loopback Uvicorn TCP。
+- 真实或付费生成模型、远程 embedding、reranker 和 Judge 调用：0。
+
+首轮累计 gate 曾失败，不能从历史中删除：supervisor stale recovery 把真实 `batch_limit` 参数错写为测试替身接受的 `limit`，导致真实服务无法 ready/claim；释放 quarantine 线程后 `stop()` 也只做一次瞬时 reaping。修复真实和 fake 接口、增加短有界 drain grace 后，独立进程、模型超时、全量单元、全量 integration 和 41/41 gate 均重新通过。
+
+文档收口阶段还有一次独立的安全预检拒绝：重跑命令最初漏设 `LEGAL_RAG_INTEGRATION_TEST=1`，因此 M3/M4 数据库 selectors 没有执行，门禁按 fail-closed 返回失败。补齐 integration guard、显式测试 DSN、pgvector 版本、禁用 dotenv 与 live call 后，最终复验 41/41 通过。这是调用环境缺项，不是代码测试失败，也没有被隐藏。
+
+## M4-T01 至 M4-T08
+
+| ID | 通过的真实边界 |
+| --- | --- |
+| M4-T01 | 两个 Bearer principal 经真实 TCP/DB 验证非枚举 owner isolation，覆盖 messages/run/evidence/events/cancel/resume |
+| M4-T02 | 并发相同 key 只有一个 run、用户消息、幂等记录和最终回答，成功后 replay 仍复用 |
+| M4-T03 | 同 key 不同 body 稳定 409；不同 key 并发也只有一个 active run，无 orphan |
+| M4-T04 | 两个不同应用 PID 共用数据库；完成历史保留，stale running 变 interrupted，取消后可新建 |
+| M4-T05 | 真实 SSE 主动断开后按 sequence 补读，不取消、不重复 run，最终事件与结果原子可见 |
+| M4-T06 | verifier 拒绝的唯一草稿标记不出现在 SSE、status、evidence、messages 或数据库 payload |
+| M4-T07 | 数据库不可用、执行超时、输入过长可归因且脱敏；旧线程晚写和跨 lease row-lock 写入均被 fence |
+| M4-T08 | 原 CLI import/help 与 optional service 隔离；production provider-free wiring 和候选 wheel 双入口可验证 |
+
+## 发布前仍需完成
+
+1. 提交并推送文档候选；更新 PR #17 body。
+2. 等待精确最终 PR head 的 offline 与 M4 service 两个 job 都 success，并核对同 SHA artifacts。
+3. 将 PR 从 draft 转 ready，使用普通 merge commit 合并，不使用 admin、force、squash 或 rebase。
+4. 等待精确 release-target master push 的两个 job 都 success。
+5. 仅此后创建 annotated `v0.5.0` 并普通 push；验证 tag object peeled target 精确等于 release target。
+6. 创建并核验非 draft、非 prerelease GitHub Release，不上传私密或本地产物。
+7. 从最新 master 创建独立 `codex/m4-release-receipt`，记录 PR/master CI artifacts、wheel、restart、Tag 和 Release 事实。回执 PR 与其 merge 后 master CI 都成功后，关闭 Issue #16，再确认并关闭 Milestone 5。
+8. 用小型 documentation-only finalize PR 回填回执 merge/master CI 与关闭时间，把 M4 改为 `released`。不移动 `v0.5.0`，不开始 M5。
+
+## 已知限制与提升优先级
+
+### M5 优先
+
+- 持久 LangGraph checkpointer 与节点级 JSON 状态。
+- budget reservation、绝对 deadline、heartbeat 与恢复不重置预算。
+- graph/schema/version compatibility 和两进程 resume fencing。
+- 外部请求结果不明时显式 `outcome_unknown`，不声称 provider exactly-once。
+
+### M4 后续运维优化
+
+- Python thread 不能强制终止阻塞 SDK；优先支持 provider cooperative cancel，必要时迁移到可终止子进程或独立 worker。
+- shutdown incomplete 时保守保留 engine；未来增加 deferred reaper/disposer，改善同进程热重载。
+- readiness 当前验证数据库、migration、active pointer 和 validated import，不做全语料逐行审计；可增加低成本只读 smoke，但不能让每次 health probe 全表扫描。
+- provider-free run 当前会重新装配 bound corpus/BM25；应按 immutable `(scope, snapshot, profile)` 缓存，并避免 lexical path 传输无用高维向量。
+- SSE 当前基于 PostgreSQL polling；规模增大后可用 LISTEN/NOTIFY 或 fanout 降低轮询，不改变 durable event log。
+- 静态 token registry 只适合本地/受控环境。生产前需要 OIDC/OAuth2、tenant、TLS、rate limit、secret manager、审计与保留/删除策略。
+- 精确法条 catalog、exact dense 和 HNSW 尚未接入默认 HTTP 路由。
+- 真实完整法律语料上的服务 P95、ANN recall、模型质量、成本与人工法律评审尚未获预算执行。
+
+## 回滚边界
+
+- 优先关闭可选 HTTP service 并继续使用原 `legal-rag` CLI；不要删除 PostgreSQL 卷来伪造回滚。
+- 代码问题通过新的 revert/fix PR 处理，不重写历史、不强推、不移动已经发布的 Tag。
+- `0005` downgrade 会删除 M4 session/run/message/result/idempotency/event 表。有任何 M4 数据时不得盲目 downgrade；应先备份、导出并获得明确迁移批准，优先前向修复。
+- `interrupted` 在 M4 不能精确 resume，只能由 owner 取消后创建新的 run。
+- 软件 Tag 发布后固定在软件 merge commit；receipt/finalize 提交只记录事实，不移动 Tag。
+
+## 停止条件
+
+M4 只有在软件 PR、release-target master CI、annotated Tag、GitHub Release、独立 receipt PR、receipt merge 后 master CI、Issue #16 与 Milestone 5 收口、最终文档状态全部远端核验后才标记 `released`。完成后停止。M5 必须等待新的明确授权。

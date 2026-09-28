@@ -31,6 +31,7 @@ SUPPORTED_REQUESTS: dict[str, frozenset[str]] = {
     "M1": frozenset({"offline"}),
     "M2": frozenset({"offline"}),
     "M3": frozenset({"integration"}),
+    "M4": frozenset({"integration"}),
 }
 SUPPORTED_MILESTONES = frozenset(SUPPORTED_REQUESTS)
 SUPPORTED_MODES = frozenset(
@@ -42,6 +43,7 @@ MILESTONE_PREREQUISITES: dict[str, tuple[str, ...]] = {
     "M1": ("M0",),
     "M2": ("M0", "M1"),
     "M3": ("M0", "M1", "M2"),
+    "M4": ("M0", "M1", "M2", "M3"),
 }
 
 MANDATORY_M0_CHECK_IDS = frozenset(
@@ -191,6 +193,54 @@ MANDATORY_M3_CHECK_IDS = frozenset(
     {
         *MANDATORY_M2_CHECK_IDS,
         *M3_TEST_SELECTORS,
+    }
+)
+
+M4_TEST_SELECTORS: dict[str, tuple[str, ...]] = {
+    "M4-T01": (
+        "integration_tests/test_m4_http_api.py::test_m4_t01_real_http_owner_isolation_is_non_enumerating",
+        "integration_tests/test_m4_run_service_db.py::test_m4_t01_owner_isolation_precedes_cancel_and_resume_behavior",
+    ),
+    "M4-T02": (
+        "integration_tests/test_m4_http_api.py::test_m4_t02_concurrent_http_same_key_creates_one_run_message_and_answer",
+        "integration_tests/test_m4_run_service_db.py::test_m4_t02_concurrent_same_key_creates_one_run_and_replays",
+    ),
+    "M4-T03": (
+        "integration_tests/test_m4_http_api.py::test_m4_t03_same_key_different_body_is_409_without_orphans",
+        "integration_tests/test_m4_http_api.py::test_m4_t03_concurrent_different_keys_preserve_single_active_run",
+        "integration_tests/test_m4_run_service_db.py::test_m4_t03_conflicts_leave_no_orphans_and_active_index_holds",
+    ),
+    "M4-T04": (
+        "integration_tests/test_m4_process_restart.py::test_m4_t04_independent_process_restart_preserves_history_and_interrupts_stale_run",
+        "integration_tests/test_m4_run_service_db.py::test_m4_t04_stale_running_becomes_interrupted_and_persists",
+    ),
+    "M4-T05": (
+        "integration_tests/test_m4_http_api.py::test_m4_t05_sse_disconnect_reconnect_replays_ordered_suffix_without_new_run",
+        "integration_tests/test_m4_run_service_db.py::test_m4_t05_events_are_ordered_replayable_and_final_is_atomic",
+    ),
+    "M4-T06": (
+        "integration_tests/test_m4_http_api.py::test_m4_t06_rejected_draft_never_crosses_http_sse_or_persistence",
+        "integration_tests/test_m4_run_service_db.py::test_m4_t06_publish_rejects_private_draft_fields",
+        "tests/test_m4_run_executor.py::test_rejected_pre_fallback_draft_never_reaches_result_or_events",
+    ),
+    "M4-T07": (
+        "integration_tests/test_m4_http_api.py::test_m4_t07_database_unavailable_is_redacted_and_attributable",
+        "integration_tests/test_m4_http_api.py::test_m4_t07_model_timeout_is_attributable_and_does_not_poison_next_run",
+        "integration_tests/test_m4_http_api.py::test_m4_t07_input_too_long_is_422_without_persistence",
+        "integration_tests/test_m4_run_service_db.py::test_m4_t07_expired_worker_cannot_publish_after_waiting_on_a_row_lock",
+        "tests/test_m4_supervisor.py::test_timed_out_execution_does_not_poison_the_next_run",
+        "tests/test_m4_supervisor.py::test_callback_from_a_timed_out_execution_is_fenced",
+    ),
+    "M4-T08": (
+        "integration_tests/test_m4_service_wiring.py::test_m4_t08_provider_free_service_wiring_uses_frozen_postgres_corpus",
+        "tests/test_m4_api_contracts.py::test_legacy_cli_import_and_help_are_isolated_from_optional_service",
+    ),
+}
+
+MANDATORY_M4_CHECK_IDS = frozenset(
+    {
+        *MANDATORY_M3_CHECK_IDS,
+        *M4_TEST_SELECTORS,
     }
 )
 
@@ -1424,6 +1474,26 @@ def _m3_preflight_failure_records(errors: Sequence[str]) -> list[dict[str, Any]]
     return records
 
 
+def _m4_preflight_failure_records(errors: Sequence[str]) -> list[dict[str, Any]]:
+    summary = "integration preflight failed; commands were not executed:\n" + "\n".join(
+        f"- {error}" for error in errors
+    )
+    records: list[dict[str, Any]] = []
+    for test_id, selectors in M4_TEST_SELECTORS.items():
+        records.append(
+            result_record(
+                test_id=test_id,
+                command=uv_run_command("pytest", "-q", *selectors),
+                exit_code=1,
+                status="failed",
+                output_summary=summary,
+                artifact_path=selectors[0].split("::", maxsplit=1)[0],
+                mode="integration",
+            )
+        )
+    return records
+
+
 def _m3_t08_record(
     repo_root: Path,
     restart_receipt: Path | None,
@@ -1551,6 +1621,48 @@ def run_m3_integration(
     )
 
 
+def _m4_acceptance_records(repo_root: Path) -> list[dict[str, Any]]:
+    preflight_errors = _m3_integration_preflight_errors()
+    if preflight_errors:
+        return _m4_preflight_failure_records(preflight_errors)
+
+    records: list[dict[str, Any]] = []
+    for test_id, selectors in M4_TEST_SELECTORS.items():
+        records.append(
+            run_pytest_check(
+                test_id=test_id,
+                selectors=selectors,
+                repo_root=repo_root,
+                timeout_seconds=900,
+                artifact_path=selectors[0].split("::", maxsplit=1)[0],
+                mode="integration",
+            )
+        )
+    return records
+
+
+def run_m4_integration(
+    repo_root: Path = REPO_ROOT,
+    *,
+    restart_receipt: Path | None = None,
+) -> dict[str, Any]:
+    """Execute the cumulative M0-M4 gate with real HTTP and PostgreSQL checks."""
+
+    started_at = utc_now()
+    records = _m0_offline_records(repo_root, state_milestone="M4")
+    records.extend(_m1_acceptance_records(repo_root))
+    records.extend(_m2_acceptance_records(repo_root))
+    records.extend(_m3_acceptance_records(repo_root, restart_receipt=restart_receipt))
+    records.extend(_m4_acceptance_records(repo_root))
+    return _gate_report(
+        milestone="M4",
+        mode="integration",
+        started_at=started_at,
+        records=records,
+        mandatory_check_ids=MANDATORY_M4_CHECK_IDS,
+    )
+
+
 def validate_request(milestone: str | None, mode: str | None) -> list[str]:
     errors: list[str] = []
     if milestone not in SUPPORTED_MILESTONES:
@@ -1604,16 +1716,18 @@ def _write_report(path: Path, report: Mapping[str, Any]) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run a milestone quality gate.")
-    parser.add_argument("--milestone", help="Milestone identifier (M0, M1, M2, or M3).")
     parser.add_argument(
-        "--mode", help="Gate mode (offline for M0-M2; integration for M3)."
+        "--milestone", help="Milestone identifier (M0, M1, M2, M3, or M4)."
+    )
+    parser.add_argument(
+        "--mode", help="Gate mode (offline for M0-M2; integration for M3-M4)."
     )
     parser.add_argument("--output", help="Optional path for the JSON report.")
     parser.add_argument(
         "--restart-receipt",
         type=Path,
         help=(
-            "M3 only: receipt created by m3_restart_probe.py prepare before the "
+            "M3/M4: receipt created by m3_restart_probe.py prepare before the "
             "PostgreSQL service restart."
         ),
     )
@@ -1625,6 +1739,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     request_errors = validate_request(args.milestone, args.mode)
     if request_errors:
         report = _invalid_request_report(args.milestone, args.mode, request_errors)
+    elif args.milestone == "M4":
+        report = run_m4_integration(
+            REPO_ROOT,
+            restart_receipt=args.restart_receipt,
+        )
     elif args.milestone == "M3":
         report = run_m3_integration(
             REPO_ROOT,
