@@ -11,6 +11,7 @@ not a substitute for reviewing the candidate diff.
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import os
 import platform
@@ -24,7 +25,6 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, Mapping, Sequence
 from urllib.parse import unquote, urlsplit
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SUPPORTED_REQUESTS: dict[str, frozenset[str]] = {
     "M0": frozenset({"offline"}),
@@ -32,6 +32,7 @@ SUPPORTED_REQUESTS: dict[str, frozenset[str]] = {
     "M2": frozenset({"offline"}),
     "M3": frozenset({"integration"}),
     "M4": frozenset({"integration"}),
+    "M5": frozenset({"fault-injection"}),
 }
 SUPPORTED_MILESTONES = frozenset(SUPPORTED_REQUESTS)
 SUPPORTED_MODES = frozenset(
@@ -44,6 +45,7 @@ MILESTONE_PREREQUISITES: dict[str, tuple[str, ...]] = {
     "M2": ("M0", "M1"),
     "M3": ("M0", "M1", "M2"),
     "M4": ("M0", "M1", "M2", "M3"),
+    "M5": ("M0", "M1", "M2", "M3", "M4"),
 }
 
 MANDATORY_M0_CHECK_IDS = frozenset(
@@ -244,6 +246,57 @@ MANDATORY_M4_CHECK_IDS = frozenset(
     }
 )
 
+M5_TEST_SELECTORS: dict[str, tuple[str, ...]] = {
+    "M5-T01": (
+        "integration_tests/test_m5_fault_recovery.py::test_m5_t01_kill_after_retrieval_checkpoint_resumes_without_retrieval",
+    ),
+    "M5-T02": (
+        "integration_tests/test_m5_fault_recovery.py::test_m5_t02_kill_after_model_dispatch_records_unknown_outcome_and_keeps_reserved_budget",
+    ),
+    "M5-T03": (
+        "integration_tests/test_m5_fault_recovery.py::test_m5_t03_kill_after_result_commit_reconciles_without_duplicate_answer",
+    ),
+    "M5-T04": (
+        "integration_tests/test_m5_budget_and_errors.py::test_m5_t04_adversarial_followup_requests_stop_at_durable_global_budgets",
+        "integration_tests/test_m5_followup_runs.py::test_m5_t04_clarification_followup_creates_new_parent_bound_run",
+    ),
+    "M5-T05": (
+        "tests/test_m5_retry_policy.py::test_m5_t05_retryable_429_and_timeout_retry_once_and_consume_attempts",
+        "tests/test_m5_retry_policy.py::test_m5_t05_nonretryable_400_and_401_do_not_retry",
+        "integration_tests/test_m5_budget_and_errors.py::test_m5_t05_transient_429_and_timeout_retry_once_with_global_budget",
+        "integration_tests/test_m5_budget_and_errors.py::test_m5_t05_400_and_401_are_terminal_without_retry",
+    ),
+    "M5-T06": (
+        "integration_tests/test_m5_concurrent_resume.py::test_m5_t06_two_processes_resume_one_run_only_one_gets_execution_lease",
+        "integration_tests/test_m5_concurrent_resume.py::test_m5_t06_stale_owner_is_fenced_after_lease_takeover",
+    ),
+    "M5-T07": (
+        "integration_tests/test_m5_checkpoint_compatibility.py::test_m5_t07_old_checkpoint_fails_closed_or_enters_explicit_migration_state",
+    ),
+    "M5-T08": (
+        "tests/test_m5_tool_security.py::test_m5_t08_prompt_injection_cannot_select_unlisted_tool_or_override_frozen_scope",
+        "integration_tests/test_m5_prompt_injection.py::test_m5_t08_untrusted_evidence_cannot_expand_tool_or_scope_boundary",
+    ),
+    "M5-T09": (
+        "integration_tests/test_m5_fault_recovery.py::test_m5_t09_resume_after_absolute_deadline_finishes_without_new_dispatch",
+    ),
+    "M5-T10": (
+        "tests/test_m5_configuration.py::test_m5_persistent_recovery_rejects_in_memory_checkpointer",
+        "integration_tests/test_m5_fault_recovery.py::test_m5_t10_new_process_cannot_pass_recovery_acceptance_with_in_memory_saver",
+    ),
+}
+
+MANDATORY_M5_CHECK_IDS = frozenset(
+    {
+        *MANDATORY_M4_CHECK_IDS,
+        *M5_TEST_SELECTORS,
+    }
+)
+
+M5_FAULT_RECEIPT_SCHEMA_VERSION = 1
+MAX_M5_FAULT_RECEIPT_BYTES = 1024 * 1024
+MAX_M5_FAULT_RECEIPT_NESTING = 64
+
 REQUIRED_RECORD_FIELDS = frozenset(
     {
         "test_id",
@@ -318,6 +371,7 @@ _INTEGRATION_ENVIRONMENT_NAMES = frozenset(
         "LEGAL_RAG_INTEGRATION_TEST",
     }
 )
+_DATABASE_BACKED_MODES = frozenset({"integration", "fault-injection"})
 
 
 class GateConfigurationError(RuntimeError):
@@ -348,7 +402,7 @@ def environment_summary(
         "python": platform.python_version(),
         "sanitized_environment": True,
     }
-    if mode == "integration":
+    if mode in _DATABASE_BACKED_MODES:
         summary.update(
             {
                 "database_url_configured": bool(
@@ -400,7 +454,7 @@ def sanitized_environment(
     clean = {
         key: value for key, value in original.items() if key.upper() in allowed_names
     }
-    if mode == "integration":
+    if mode in _DATABASE_BACKED_MODES:
         clean.update(
             {
                 key: value
@@ -1454,6 +1508,528 @@ def _m3_integration_preflight_errors(
     return errors
 
 
+_M5_RECEIPT_REQUIRED_EVIDENCE: dict[str, Mapping[str, Any]] = {
+    "M5-T01": {
+        "hard_kill_observed": True,
+        "pids_differ": True,
+        "graph_executor_used": True,
+        "postgres_saver_checkpoint_observed": True,
+        "retrieval_invocations": 1,
+        "retrieval_reused": True,
+    },
+    "M5-T02": {
+        "hard_kill_observed": True,
+        "pids_differ": True,
+        "dispatch_observed": True,
+        "graph_unknown_outcome_path_exercised": True,
+        "outcome_unknown": True,
+        "provider_call_observed": True,
+        "post_provider_pre_artifact_crash_exercised": True,
+        "orphaned_succeeded_attempt_reconciled": True,
+        "duplicate_provider_call_avoided": True,
+        "post_planner_pre_checkpoint_crash_exercised": True,
+        "orphaned_planner_succeeded_attempt_reconciled": True,
+        "duplicate_planner_call_avoided": True,
+        "budget_refunded": False,
+        "zero_duplicate_cost_guaranteed": False,
+    },
+    "M5-T03": {
+        "hard_kill_observed": True,
+        "pids_differ": True,
+        "reconciliation_path_exercised": True,
+        "reconciled_existing_result": True,
+        "answer_count": 1,
+        "generator_calls_after_resume": 0,
+    },
+    "M5-T04": {
+        "clarification_followup_created_new_run": True,
+        "parent_run_link_preserved": True,
+        "original_run_budget_unchanged": True,
+        "graph_loop_exercised": True,
+        "global_budget_enforced": True,
+        "durable_ledger": True,
+    },
+    "M5-T05": {
+        "node_retry_path_exercised": True,
+        "transient_retry_bounded": True,
+        "permanent_error_retried": False,
+        "attempts_reserved_before_dispatch": True,
+    },
+    "M5-T06": {
+        "single_owner": True,
+        "stale_checkpoint_write_rejected": True,
+        "stale_owner_fenced": True,
+        "stale_terminal_write_rejected": True,
+    },
+    "M5-T07": {
+        "incompatible_checkpoint_rejected": True,
+        "checkpoint_mutated": False,
+    },
+    "M5-T08": {
+        "graph_security_path_exercised": True,
+        "unauthorized_tool_calls": 0,
+        "secret_leak_observed": False,
+        "frozen_scope_unchanged": True,
+    },
+    "M5-T09": {
+        "deadline_preserved": True,
+        "graph_deadline_path_exercised": True,
+        "post_deadline_dispatches": 0,
+    },
+    "M5-T10": {
+        "in_memory_rejected": True,
+        "same_process_demo_accepted": False,
+    },
+}
+
+_M5_RECEIPT_FORBIDDEN_KEYS = frozenset(
+    {
+        "answer_text",
+        "api_key",
+        "auth_token",
+        "authorization",
+        "database_url",
+        "draft",
+        "dsn",
+        "evidence_text",
+        "history",
+        "password",
+        "prompt",
+        "question",
+        "secret",
+        "token",
+    }
+)
+_M5_RECEIPT_TOP_LEVEL_FIELDS = frozenset(
+    {
+        "schema_version",
+        "milestone",
+        "candidate_sha",
+        "status",
+        "live_model_calls",
+        "database",
+        "scenarios",
+        "redaction",
+    }
+)
+_M5_RECEIPT_DATABASE_FIELDS = frozenset(
+    {
+        "backend",
+        "checkpointer_backend",
+        "persistent",
+        "in_memory",
+        "migration_head",
+    }
+)
+_M5_RECEIPT_REDACTION_FIELDS = frozenset(
+    {
+        "contains_prompts",
+        "contains_evidence_text",
+        "contains_credentials",
+        "contains_database_url",
+    }
+)
+_M5_RECEIPT_SCENARIO_FIELDS = frozenset({"status", "test_selectors", "evidence"})
+_M5_RECEIPT_PROCESS_EVIDENCE_FIELDS = frozenset({"first_pid", "resume_pid"})
+_M5_RECEIPT_SENSITIVE_VALUE_PATTERNS = (
+    re.compile(
+        r"\b(?:postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis)://[^\s]+",
+        re.IGNORECASE,
+    ),
+    re.compile(r"\bBearer\s+[A-Za-z0-9._~+/-]{12,}=*", re.IGNORECASE),
+)
+
+
+def _git_head_sha(repo_root: Path) -> str:
+    """Return the exact checked-out commit without inheriting credentials."""
+
+    try:
+        completed = subprocess.run(
+            ["git", "rev-parse", "--verify", "HEAD"],
+            cwd=repo_root,
+            env=sanitized_environment(),
+            capture_output=True,
+            text=True,
+            encoding="ascii",
+            errors="replace",
+            timeout=30,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise GateConfigurationError(
+            "could not resolve the checked-out commit"
+        ) from exc
+    sha = completed.stdout.strip().lower()
+    if completed.returncode != 0 or re.fullmatch(r"[0-9a-f]{40}", sha) is None:
+        raise GateConfigurationError("could not resolve the checked-out commit")
+    return sha
+
+
+def _m5_selector_contract_errors(repo_root: Path) -> list[str]:
+    """Fail before the cumulative gate if an M5 selector cannot name real code."""
+
+    errors: list[str] = []
+    seen: set[str] = set()
+    parsed_nodes: dict[Path, set[str]] = {}
+    try:
+        resolved_root = repo_root.resolve(strict=True)
+    except OSError:
+        return ["M5 selector repository root is unavailable"]
+
+    for test_id, selectors in M5_TEST_SELECTORS.items():
+        for selector in selectors:
+            if selector in seen:
+                errors.append(f"M5 selector is assigned more than once: {selector}")
+                continue
+            seen.add(selector)
+            parts = selector.split("::")
+            if len(parts) != 2 or re.fullmatch(r"test_[A-Za-z0-9_]+", parts[1]) is None:
+                errors.append(f"{test_id} has an invalid pytest selector: {selector}")
+                continue
+            relative_path, node_name = parts
+            candidate = (resolved_root / relative_path).resolve(strict=False)
+            if not candidate.is_relative_to(resolved_root):
+                errors.append(f"{test_id} selector escapes the repository: {selector}")
+                continue
+            if not candidate.is_file():
+                errors.append(
+                    f"{test_id} selector file is unavailable: {relative_path}"
+                )
+                continue
+            if candidate not in parsed_nodes:
+                try:
+                    if candidate.stat().st_size > MAX_SCANNED_FILE_BYTES:
+                        raise ValueError("test module exceeds the scan limit")
+                    module = ast.parse(candidate.read_text(encoding="utf-8"))
+                except (OSError, UnicodeError, SyntaxError, ValueError):
+                    errors.append(
+                        f"M5 selector file cannot be safely parsed: {relative_path}"
+                    )
+                    parsed_nodes[candidate] = set()
+                    continue
+                parsed_nodes[candidate] = {
+                    node.name
+                    for node in module.body
+                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                }
+            if node_name not in parsed_nodes[candidate]:
+                errors.append(f"{test_id} selector node is unavailable: {selector}")
+    return errors
+
+
+def _json_object_without_duplicate_keys(
+    pairs: Sequence[tuple[str, Any]],
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in payload:
+            raise ValueError("duplicate JSON object key")
+        payload[key] = value
+    return payload
+
+
+def _receipt_has_forbidden_key(value: Any) -> bool:
+    pending = [value]
+    while pending:
+        current = pending.pop()
+        if isinstance(current, Mapping):
+            for key, nested in current.items():
+                normalized = str(key).strip().casefold().replace("-", "_")
+                if normalized in _M5_RECEIPT_FORBIDDEN_KEYS:
+                    return True
+                pending.append(nested)
+        elif isinstance(current, list):
+            pending.extend(current)
+    return False
+
+
+def _receipt_has_sensitive_value(value: Any) -> bool:
+    pending = [value]
+    while pending:
+        current = pending.pop()
+        if isinstance(current, str):
+            if any(pattern.search(current) for _, pattern in _SECRET_PATTERNS):
+                return True
+            if _SECRET_ASSIGNMENT_RE.search(current):
+                return True
+            if any(
+                pattern.search(current)
+                for pattern in _M5_RECEIPT_SENSITIVE_VALUE_PATTERNS
+            ):
+                return True
+        elif isinstance(current, Mapping):
+            pending.extend(current.values())
+        elif isinstance(current, list):
+            pending.extend(current)
+    return False
+
+
+def _receipt_exceeds_nesting_limit(value: Any) -> bool:
+    """Bound container traversal before validating attacker-controlled receipts."""
+
+    pending: list[tuple[Any, int]] = [(value, 0)]
+    while pending:
+        current, depth = pending.pop()
+        if isinstance(current, Mapping):
+            if depth >= MAX_M5_FAULT_RECEIPT_NESTING:
+                return True
+            pending.extend((nested, depth + 1) for nested in current.values())
+        elif isinstance(current, list):
+            if depth >= MAX_M5_FAULT_RECEIPT_NESTING:
+                return True
+            pending.extend((nested, depth + 1) for nested in current)
+    return False
+
+
+def _unexpected_fields(value: Mapping[str, Any], allowed: frozenset[str]) -> list[str]:
+    return sorted(str(key) for key in set(value) - allowed)
+
+
+def _matches_receipt_expectation(actual: Any, expected: Any) -> bool:
+    if isinstance(expected, bool):
+        return actual is expected
+    if isinstance(expected, int):
+        return (
+            isinstance(actual, int)
+            and not isinstance(actual, bool)
+            and actual == expected
+        )
+    return actual == expected
+
+
+def validate_m5_fault_receipt_payload(
+    payload: Any,
+    *,
+    expected_sha: str,
+) -> list[str]:
+    """Validate the sanitized, exact-commit M5 fault-injection evidence contract."""
+
+    if not isinstance(payload, dict):
+        return ["M5 fault receipt root must be an object"]
+    if _receipt_exceeds_nesting_limit(payload):
+        return ["M5 fault receipt exceeds the maximum allowed nesting depth"]
+
+    errors: list[str] = []
+    if _unexpected_fields(payload, _M5_RECEIPT_TOP_LEVEL_FIELDS):
+        errors.append("M5 fault receipt has unexpected top-level fields")
+    schema_version = payload.get("schema_version")
+    if (
+        not isinstance(schema_version, int)
+        or isinstance(schema_version, bool)
+        or schema_version != M5_FAULT_RECEIPT_SCHEMA_VERSION
+    ):
+        errors.append(
+            "M5 fault receipt schema_version must equal "
+            f"{M5_FAULT_RECEIPT_SCHEMA_VERSION}"
+        )
+    if payload.get("milestone") != "M5":
+        errors.append("M5 fault receipt milestone must equal M5")
+    if payload.get("status") != "passed":
+        errors.append("M5 fault receipt status must equal passed")
+    if payload.get("live_model_calls") is not False:
+        errors.append("M5 fault receipt must prove live_model_calls is false")
+
+    candidate_sha = payload.get("candidate_sha")
+    if (
+        not isinstance(candidate_sha, str)
+        or re.fullmatch(r"[0-9a-fA-F]{40}", candidate_sha) is None
+    ):
+        errors.append(
+            "M5 fault receipt candidate_sha must be a 40-character commit SHA"
+        )
+    elif candidate_sha.casefold() != expected_sha.casefold():
+        errors.append("M5 fault receipt candidate_sha does not match checked-out HEAD")
+
+    database = payload.get("database")
+    if not isinstance(database, dict):
+        errors.append("M5 fault receipt database must be an object")
+    else:
+        if _unexpected_fields(database, _M5_RECEIPT_DATABASE_FIELDS):
+            errors.append("M5 fault receipt database has unexpected fields")
+        if str(database.get("backend", "")).casefold() != "postgresql":
+            errors.append("M5 fault receipt database backend must be postgresql")
+        checkpointer_backend = str(database.get("checkpointer_backend", "")).casefold()
+        if checkpointer_backend not in {"postgresql", "langgraph-postgresql"}:
+            errors.append(
+                "M5 fault receipt checkpointer_backend must be persistent PostgreSQL"
+            )
+        if database.get("persistent") is not True:
+            errors.append("M5 fault receipt must prove the checkpointer is persistent")
+        if database.get("in_memory") is not False:
+            errors.append(
+                "M5 fault receipt must prove the checkpointer is not in-memory"
+            )
+        migration_head = database.get("migration_head")
+        if migration_head != "0006_m5_harness_recovery":
+            errors.append("M5 fault receipt must identify the 0006 migration head")
+
+    redaction = payload.get("redaction")
+    required_redaction_fields = (
+        "contains_prompts",
+        "contains_evidence_text",
+        "contains_credentials",
+        "contains_database_url",
+    )
+    if not isinstance(redaction, dict):
+        errors.append("M5 fault receipt redaction must be an object")
+    else:
+        if _unexpected_fields(redaction, _M5_RECEIPT_REDACTION_FIELDS):
+            errors.append("M5 fault receipt redaction has unexpected fields")
+        for field in required_redaction_fields:
+            if redaction.get(field) is not False:
+                errors.append(f"M5 fault receipt redaction.{field} must be false")
+
+    scenarios = payload.get("scenarios")
+    expected_ids = set(M5_TEST_SELECTORS)
+    if not isinstance(scenarios, dict):
+        errors.append("M5 fault receipt scenarios must be an object")
+    else:
+        actual_ids = set(scenarios)
+        missing = sorted(expected_ids - actual_ids)
+        unexpected = sorted(actual_ids - expected_ids)
+        if missing:
+            errors.append(
+                "M5 fault receipt is missing scenarios: " + ", ".join(missing)
+            )
+        if unexpected:
+            errors.append(
+                "M5 fault receipt has unexpected scenarios: " + ", ".join(unexpected)
+            )
+        for test_id in sorted(expected_ids & actual_ids):
+            scenario = scenarios[test_id]
+            if not isinstance(scenario, dict):
+                errors.append(f"M5 fault receipt {test_id} must be an object")
+                continue
+            if _unexpected_fields(scenario, _M5_RECEIPT_SCENARIO_FIELDS):
+                errors.append(
+                    f"M5 fault receipt {test_id} has unexpected scenario fields"
+                )
+            if scenario.get("status") != "passed":
+                errors.append(f"M5 fault receipt {test_id}.status must equal passed")
+            if scenario.get("test_selectors") != list(M5_TEST_SELECTORS[test_id]):
+                errors.append(
+                    f"M5 fault receipt {test_id}.test_selectors do not match the gate"
+                )
+            evidence = scenario.get("evidence")
+            if not isinstance(evidence, dict):
+                errors.append(f"M5 fault receipt {test_id}.evidence must be an object")
+                continue
+            allowed_evidence_fields = set(_M5_RECEIPT_REQUIRED_EVIDENCE[test_id])
+            if test_id in {"M5-T01", "M5-T02", "M5-T03", "M5-T10"}:
+                allowed_evidence_fields.update(_M5_RECEIPT_PROCESS_EVIDENCE_FIELDS)
+            if test_id == "M5-T06":
+                allowed_evidence_fields.add("contender_pids")
+            if set(evidence) - allowed_evidence_fields:
+                errors.append(
+                    f"M5 fault receipt {test_id}.evidence has unexpected fields"
+                )
+            for field, expected in _M5_RECEIPT_REQUIRED_EVIDENCE[test_id].items():
+                if not _matches_receipt_expectation(evidence.get(field), expected):
+                    errors.append(
+                        f"M5 fault receipt {test_id}.evidence.{field} is invalid"
+                    )
+
+            if test_id in {"M5-T01", "M5-T02", "M5-T03", "M5-T10"}:
+                first_pid = evidence.get("first_pid")
+                resume_pid = evidence.get("resume_pid")
+                valid_pids = (
+                    isinstance(first_pid, int)
+                    and not isinstance(first_pid, bool)
+                    and first_pid > 0
+                    and isinstance(resume_pid, int)
+                    and not isinstance(resume_pid, bool)
+                    and resume_pid > 0
+                    and first_pid != resume_pid
+                )
+                if not valid_pids:
+                    errors.append(
+                        f"M5 fault receipt {test_id} must prove distinct process PIDs"
+                    )
+            if test_id == "M5-T06":
+                contender_pids = evidence.get("contender_pids")
+                valid_contenders = (
+                    isinstance(contender_pids, list)
+                    and len(contender_pids) >= 2
+                    and all(
+                        isinstance(pid, int) and not isinstance(pid, bool) and pid > 0
+                        for pid in contender_pids
+                    )
+                    and len(set(contender_pids)) == len(contender_pids)
+                )
+                if not valid_contenders:
+                    errors.append(
+                        "M5 fault receipt M5-T06 must prove distinct contender PIDs"
+                    )
+
+    if _receipt_has_forbidden_key(payload):
+        errors.append("M5 fault receipt contains a forbidden sensitive-content field")
+    if _receipt_has_sensitive_value(payload):
+        errors.append("M5 fault receipt contains a sensitive-looking value")
+    return errors
+
+
+def validate_m5_fault_receipt_file(
+    receipt_path: Path,
+    *,
+    expected_sha: str,
+) -> list[str]:
+    """Read a bounded UTF-8 receipt and validate it without exposing its values."""
+
+    try:
+        if receipt_path.is_symlink() or not receipt_path.is_file():
+            return ["M5 fault receipt is unavailable"]
+        if receipt_path.stat().st_size > MAX_M5_FAULT_RECEIPT_BYTES:
+            return ["M5 fault receipt exceeds the maximum allowed size"]
+        raw = receipt_path.read_text(encoding="utf-8")
+        payload = json.loads(
+            raw,
+            object_pairs_hook=_json_object_without_duplicate_keys,
+            parse_constant=lambda value: (_ for _ in ()).throw(
+                ValueError(f"invalid JSON constant: {value}")
+            ),
+        )
+    except (
+        OSError,
+        UnicodeError,
+        json.JSONDecodeError,
+        ValueError,
+        RecursionError,
+        MemoryError,
+    ):
+        return ["M5 fault receipt is not valid bounded UTF-8 JSON"]
+    try:
+        return validate_m5_fault_receipt_payload(payload, expected_sha=expected_sha)
+    except (RecursionError, MemoryError):
+        return ["M5 fault receipt is not valid bounded UTF-8 JSON"]
+
+
+def _m5_fault_injection_preflight_errors(
+    repo_root: Path,
+    fault_receipt: Path | None,
+    source: Mapping[str, str] | None = None,
+) -> list[str]:
+    environment = os.environ if source is None else source
+    errors = _m3_integration_preflight_errors(environment)
+    errors.extend(_m5_selector_contract_errors(repo_root))
+    live_calls = environment.get("ALLOW_LIVE_MODEL_CALLS", "false").strip().casefold()
+    if live_calls not in {"", "0", "false", "no", "off"}:
+        errors.append("ALLOW_LIVE_MODEL_CALLS must be false for M5 fault injection")
+    if fault_receipt is None:
+        errors.append(
+            "--fault-receipt is required and must come from the independent M5 fault suite"
+        )
+        return errors
+    try:
+        expected_sha = _git_head_sha(repo_root)
+    except GateConfigurationError as exc:
+        errors.append(str(exc))
+        return errors
+    errors.extend(
+        validate_m5_fault_receipt_file(fault_receipt, expected_sha=expected_sha)
+    )
+    return errors
+
+
 def _m3_preflight_failure_records(errors: Sequence[str]) -> list[dict[str, Any]]:
     summary = "integration preflight failed; commands were not executed:\n" + "\n".join(
         f"- {error}" for error in errors
@@ -1492,6 +2068,60 @@ def _m4_preflight_failure_records(errors: Sequence[str]) -> list[dict[str, Any]]
             )
         )
     return records
+
+
+def _m5_preflight_failure_records(
+    errors: Sequence[str],
+    *,
+    fault_receipt: Path | None = None,
+) -> list[dict[str, Any]]:
+    summary = (
+        "fault-injection preflight failed; commands were not executed:\n"
+        + "\n".join(f"- {error}" for error in errors)
+    )
+    artifact_path = (
+        str(fault_receipt.resolve(strict=False)) if fault_receipt is not None else None
+    )
+    records: list[dict[str, Any]] = []
+    for test_id, selectors in M5_TEST_SELECTORS.items():
+        records.append(
+            result_record(
+                test_id=test_id,
+                command=uv_run_command("pytest", "-q", *selectors),
+                exit_code=1,
+                status="failed",
+                output_summary=summary,
+                artifact_path=artifact_path,
+                mode="fault-injection",
+            )
+        )
+    return records
+
+
+def _m5_cumulative_preflight_failure_records(
+    errors: Sequence[str],
+    *,
+    fault_receipt: Path | None,
+) -> list[dict[str, Any]]:
+    summary = (
+        "M5 cumulative fault-injection preflight failed; no gate commands were "
+        "executed:\n" + "\n".join(f"- {error}" for error in errors)
+    )
+    artifact_path = (
+        str(fault_receipt.resolve(strict=False)) if fault_receipt is not None else None
+    )
+    return [
+        result_record(
+            test_id=test_id,
+            command="quality_gate:M5 cumulative preflight",
+            exit_code=1,
+            status="failed",
+            output_summary=summary,
+            artifact_path=artifact_path,
+            mode="fault-injection",
+        )
+        for test_id in sorted(MANDATORY_M5_CHECK_IDS)
+    ]
 
 
 def _m3_t08_record(
@@ -1663,6 +2293,85 @@ def run_m4_integration(
     )
 
 
+def _m5_acceptance_records(
+    repo_root: Path,
+    *,
+    fault_receipt: Path | None,
+) -> list[dict[str, Any]]:
+    preflight_errors = _m5_fault_injection_preflight_errors(
+        repo_root,
+        fault_receipt,
+    )
+    if preflight_errors:
+        return _m5_preflight_failure_records(
+            preflight_errors,
+            fault_receipt=fault_receipt,
+        )
+
+    if fault_receipt is None:  # Defensive narrowing; preflight rejects this case.
+        return _m5_preflight_failure_records(
+            ["--fault-receipt is required"],
+            fault_receipt=None,
+        )
+    receipt_artifact = str(fault_receipt.resolve(strict=False))
+    records: list[dict[str, Any]] = []
+    for test_id, selectors in M5_TEST_SELECTORS.items():
+        record = run_pytest_check(
+            test_id=test_id,
+            selectors=selectors,
+            repo_root=repo_root,
+            timeout_seconds=1200,
+            artifact_path=receipt_artifact,
+            mode="fault-injection",
+        )
+        record["output_summary"] = _clean_summary(
+            f"{record['output_summary']}\n"
+            f"fault receipt: exact-HEAD {test_id} evidence verified"
+        )
+        records.append(record)
+    return records
+
+
+def run_m5_fault_injection(
+    repo_root: Path = REPO_ROOT,
+    *,
+    restart_receipt: Path | None = None,
+    fault_receipt: Path | None = None,
+) -> dict[str, Any]:
+    """Execute the cumulative M0-M5 gate with durable cross-process evidence."""
+
+    started_at = utc_now()
+    preflight_errors = _m5_fault_injection_preflight_errors(
+        repo_root,
+        fault_receipt,
+    )
+    if preflight_errors:
+        return _gate_report(
+            milestone="M5",
+            mode="fault-injection",
+            started_at=started_at,
+            records=_m5_cumulative_preflight_failure_records(
+                preflight_errors,
+                fault_receipt=fault_receipt,
+            ),
+            mandatory_check_ids=MANDATORY_M5_CHECK_IDS,
+        )
+
+    records = _m0_offline_records(repo_root, state_milestone="M5")
+    records.extend(_m1_acceptance_records(repo_root))
+    records.extend(_m2_acceptance_records(repo_root))
+    records.extend(_m3_acceptance_records(repo_root, restart_receipt=restart_receipt))
+    records.extend(_m4_acceptance_records(repo_root))
+    records.extend(_m5_acceptance_records(repo_root, fault_receipt=fault_receipt))
+    return _gate_report(
+        milestone="M5",
+        mode="fault-injection",
+        started_at=started_at,
+        records=records,
+        mandatory_check_ids=MANDATORY_M5_CHECK_IDS,
+    )
+
+
 def validate_request(milestone: str | None, mode: str | None) -> list[str]:
     errors: list[str] = []
     if milestone not in SUPPORTED_MILESTONES:
@@ -1717,18 +2426,30 @@ def _write_report(path: Path, report: Mapping[str, Any]) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run a milestone quality gate.")
     parser.add_argument(
-        "--milestone", help="Milestone identifier (M0, M1, M2, M3, or M4)."
+        "--milestone", help="Milestone identifier (M0, M1, M2, M3, M4, or M5)."
     )
     parser.add_argument(
-        "--mode", help="Gate mode (offline for M0-M2; integration for M3-M4)."
+        "--mode",
+        help=(
+            "Gate mode (offline for M0-M2; integration for M3-M4; "
+            "fault-injection for M5)."
+        ),
     )
     parser.add_argument("--output", help="Optional path for the JSON report.")
     parser.add_argument(
         "--restart-receipt",
         type=Path,
         help=(
-            "M3/M4: receipt created by m3_restart_probe.py prepare before the "
+            "M3-M5: receipt created by m3_restart_probe.py prepare before the "
             "PostgreSQL service restart."
+        ),
+    )
+    parser.add_argument(
+        "--fault-receipt",
+        type=Path,
+        help=(
+            "M5: sanitized exact-HEAD receipt produced by the independent "
+            "fault-injection suite."
         ),
     )
     return parser
@@ -1739,6 +2460,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     request_errors = validate_request(args.milestone, args.mode)
     if request_errors:
         report = _invalid_request_report(args.milestone, args.mode, request_errors)
+    elif args.milestone == "M5":
+        report = run_m5_fault_injection(
+            REPO_ROOT,
+            restart_receipt=args.restart_receipt,
+            fault_receipt=args.fault_receipt,
+        )
     elif args.milestone == "M4":
         report = run_m4_integration(
             REPO_ROOT,

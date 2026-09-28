@@ -44,9 +44,8 @@ from legal_rag.storage.schema import (
     snapshot_activation_events,
 )
 
-
 RECEIPT_SCHEMA_VERSION = 1
-EXPECTED_MIGRATION_REVISION = "0005_m4_api_sessions"
+EXPECTED_MIGRATION_REVISION = "0006_m5_harness_recovery"
 FIXTURE_PREFIX = "m3-restart"
 FIXTURE_SCOPE_ID = "scope-m3-service-restart"
 FIXTURE_SNAPSHOT_ID = "snapshot-m3-service-restart-v1"
