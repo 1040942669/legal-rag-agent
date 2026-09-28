@@ -3,13 +3,13 @@
 ## 当前结论
 
 - 当前里程碑：M4，计划版本 `v0.5.0`。
-- 当前状态：本地发布候选已通过，远端精确最终 PR-head CI 尚待候选文档提交后复验；不是已发布状态。
-- 分支：`codex/m4-api-sessions`。
+- 当前状态：`v0.5.0` 软件已经发布并完成远端核验；独立发布回执、Issue/Milestone 收口与最终文档状态仍待完成，因此治理状态为 `released_receipt_pending`，不是完全收口的 `released`。
+- 当前分支：`codex/m4-release-receipt`，基于软件 release target `670e005a081cffa36a75af2b202e50eb2b859c3d`。
 - 起始基线：`origin/master` `61f1065fc6d5678d0d57114e2e361294d04906b4`。
-- 最新已推送的文档前 head：`2c4c2a024f226d4f7f91442a543246ba3962029d`。候选文档提交后 HEAD 会继续前进，最终发布只能采用新的精确 PR head。
-- 跟踪：[Issue #16](https://github.com/1040942669/legal-rag-agent/issues/16)、[Milestone 5](https://github.com/1040942669/legal-rag-agent/milestone/5)、draft [PR #17](https://github.com/1040942669/legal-rag-agent/pull/17)。
-- `v0.5.0` Tag、GitHub Release 与 `docs/refactor/receipts/M4.json` 当前都不存在，这是正确状态。
-- M0-M3 已发布且回执完整，最后已核验版本仍是 [v0.4.0](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.4.0)。M4 不移动任何旧 Tag。
+- 软件实现 [PR #17](https://github.com/1040942669/legal-rag-agent/pull/17) 与测试稳定性 [PR #18](https://github.com/1040942669/legal-rag-agent/pull/18) 均已正常合并；未使用 admin、force、squash 或 rebase 绕过。
+- annotated `v0.5.0` Tag 对象 `36d6883cc1bc29f09f7be5625db458739bce4335` 精确 peeled 到 `670e005a...`；[GitHub Release](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.5.0) 于 `2026-09-28T19:59:42Z` 发布，非 draft、非 prerelease、附件 0。
+- `docs/refactor/receipts/M4.json` 已开始记录发布事实，但其独立 receipt PR 尚未创建。按既有里程碑惯例，在 receipt merge/master CI 与治理关闭前，`last_verified_release` 仍保留 M3。
+- [Issue #16](https://github.com/1040942669/legal-rag-agent/issues/16) 与 [Milestone 5](https://github.com/1040942669/legal-rag-agent/milestone/5) 当前仍 open；这是有意的 fail-closed 状态，必须等待回执 merge 后 master CI 成功才关闭。
 
 ## 已推送实现提交
 
@@ -17,6 +17,8 @@
 2. `081acacfc2ddf0d1ba05782a5092b5cc48820e90`：`feat(m4): add transactional API run service`
 3. `43e6a506bd62bb0d02395cc3397801815a01bd16`：`test(m4): verify service release boundary`
 4. `2c4c2a024f226d4f7f91442a543246ba3962029d`：`ci(m4): verify the installed service environment`
+5. `e49eb949639ab48afba32c021121d30485f08b8a`：`docs(m4): prepare release candidate`，PR #17 最终 head
+6. `0d7de0c101af62c832927b2b78bd03e400debf81`：`test(m4): stabilize timeout isolation evidence`，PR #18 最终 head
 
 不得 amend 已共享提交，不得强推。候选文档、最终包证据和远端事实使用后续普通提交追加。
 
@@ -124,7 +126,14 @@ Authorization: Bearer token
 
 ## 当前真实验证
 
-本地环境：Windows、Python 3.12.12、PostgreSQL 18、pgvector 0.8.1。CI canonical 环境为 Linux/Python 3.12.13、PostgreSQL 18、pgvector 0.8.6；最终数字只能来自文档提交后的精确最终 PR head。
+本地环境：Windows、Python 3.12.12、PostgreSQL 18、pgvector 0.8.1。CI canonical 环境为 Linux/Python 3.12.13、PostgreSQL 18、pgvector 0.8.6。软件发布的权威远端证据来自精确 release target `670e005a...` 的 [run 36475260433](https://github.com/1040942669/legal-rag-agent/actions/runs/36475260433)。
+
+- PR #17 精确 head `e49eb949...` 的 [run 36472066302](https://github.com/1040942669/legal-rag-agent/actions/runs/36472066302) 两个 job 成功，随后正常合并为 `e78984f...`。
+- 首次 master [run 36472938508](https://github.com/1040942669/legal-rag-agent/actions/runs/36472938508) 被真实保留为失败：offline job 成功，service job 为 `78 passed, 1 failed`。失败用例把线程调度和三个 PostgreSQL stage-event 事务压进 `0.15s`，相同 Git tree 在 PR run 上 79/79 成功，而该 master runner 的 integration 总耗时慢约 49%。发布因此被阻断，没有提前创建 Tag。
+- PR #18 只把该故障注入测试的预算从 `0.15s` 调整为 `1.0s`，保留 5 秒首调用阻塞、完整三个数据库 callback、late callback fence 和后续 run 成功链；生产默认和 supervisor 语义未改。本地精确用例连续 20/20 通过，PR exact-head [run 36474664257](https://github.com/1040942669/legal-rag-agent/actions/runs/36474664257) 两个 job 成功。
+- release-target [run 36475260433](https://github.com/1040942669/legal-rag-agent/actions/runs/36475260433) 在 `670e005a...` 上两个 job 成功；41/41 累计门禁、79/79 integration、数据库服务重启、独立应用进程重启、wheel 构建与隔离安装探测均通过。
+- master service artifact digest：`sha256:78d859422f562c2c55273e725b3860d882469d41607d5feb46ca62807260e3b0`；M4 gate JSON SHA-256：`2320d3a8f173cc2086d3ba8adb669f8b29bc9c5ea8341e1b62e81443e19d0962`；JUnit SHA-256：`23dfa035761eb860192531ef374032e77d1efec2245ed2be32682e47d8e3155c`。
+- master wheel：`legal_rag_assistant-0.5.0-py3-none-any.whl`，`352218` bytes、`78` entries、SHA-256 `f59a054c04b4a16971fbc9b3f97516b9f29b50787f5bd5c6608ecbb88bbd31a7`。
 
 - 完整离线套件：`801 passed, 1 warning, 157 subtests passed`。
 - 累计门禁内 JUnit：`958 tests, 0 failures, 0 errors, 0 skipped`。
@@ -136,7 +145,7 @@ Authorization: Bearer token
 - 真实 PostgreSQL service restart receipt SHA-256：`d1754488ebfc9fc4bdd8ba7f4198cfe0ab04b87cf6603c97ce4fa6ac762e82ad`。
 - 独立应用进程 restart receipt SHA-256：`ee9c9ad1f65cea066c79cfdb4c8cf95d491577b160944fe70c3720f84bd3d105`。
 - 文档输入冻结后的 0.5.0 wheel：`354228` bytes、`78` entries、SHA-256 `df96b07a844e3a888ac12fb350890e49945d6ba70009f8ba477eef66ac19e583`；仓库外 offline/no-deps 隔离安装、`legal-rag --help` 与 `legal-rag-api --help` 均通过。
-- pre-documentation head `2c4c2a0...` 的 GitHub Actions run `36469045549`：两个 job 均 success；offline artifact digest 为 `sha256:c3da41c02dc55afb0fd6ee9b7e280c4c05f9762e3fa436f8b98948ab8b2b07c8`，service artifact digest 为 `sha256:8429b014c64a6731cdc63e90f5dfc329273a016385c83360508edb7869f4da4b`。该 run 不替代候选文档提交后的精确 final-head CI。
+- 历史 pre-documentation head `2c4c2a0...` 的 GitHub Actions run `36469045549`：两个 job 均 success；offline artifact digest 为 `sha256:c3da41c02dc55afb0fd6ee9b7e280c4c05f9762e3fa436f8b98948ab8b2b07c8`，service artifact digest 为 `sha256:8429b014c64a6731cdc63e90f5dfc329273a016385c83360508edb7869f4da4b`。该历史 run 已被 final PR-head、稳定性 PR-head 与最终 release-target master 证据取代，不作为发布权威依据。
 - `uv lock --check`、一致 dependency selection 的 offline `uv sync --check`、targeted Ruff、workflow YAML 和 `git diff --check`：通过。
 - Starlette TestClient/httpx compatibility layer 有一个非阻塞 deprecation warning；真实 M4 HTTP 验收使用 loopback Uvicorn TCP。
 - 真实或付费生成模型、远程 embedding、reranker 和 Judge 调用：0。
@@ -158,16 +167,13 @@ Authorization: Bearer token
 | M4-T07 | 数据库不可用、执行超时、输入过长可归因且脱敏；旧线程晚写和跨 lease row-lock 写入均被 fence |
 | M4-T08 | 原 CLI import/help 与 optional service 隔离；production provider-free wiring 和候选 wheel 双入口可验证 |
 
-## 发布前仍需完成
+## 软件发布后仍需完成
 
-1. 提交并推送文档候选；更新 PR #17 body。
-2. 等待精确最终 PR head 的 offline 与 M4 service 两个 job 都 success，并核对同 SHA artifacts。
-3. 将 PR 从 draft 转 ready，使用普通 merge commit 合并，不使用 admin、force、squash 或 rebase。
-4. 等待精确 release-target master push 的两个 job 都 success。
-5. 仅此后创建 annotated `v0.5.0` 并普通 push；验证 tag object peeled target 精确等于 release target。
-6. 创建并核验非 draft、非 prerelease GitHub Release，不上传私密或本地产物。
-7. 从最新 master 创建独立 `codex/m4-release-receipt`，记录 PR/master CI artifacts、wheel、restart、Tag 和 Release 事实。回执 PR 与其 merge 后 master CI 都成功后，关闭 Issue #16，再确认并关闭 Milestone 5。
-8. 用小型 documentation-only finalize PR 回填回执 merge/master CI 与关闭时间，把 M4 改为 `released`。不移动 `v0.5.0`，不开始 M5。
+1. 提交并推送当前独立 `codex/m4-release-receipt`，创建 receipt PR，并回填 PR URL 与首个 receipt candidate SHA。
+2. 要求 receipt PR 的精确最终 head 同时通过 offline 与 M4 service 两个 job；正常合并，不使用 admin、force、squash 或 rebase。
+3. 要求 receipt merge commit 的 master push 两个 job 都成功。只有此后才关闭 Issue #16；确认 Milestone 5 的 open issue 数为 0 后再关闭 milestone。
+4. 从最新 master 创建小型 documentation-only finalize PR，回填 receipt PR 最终 head、merge SHA、master CI、Issue/Milestone 关闭时间，并把 M4 状态改为 `released`。该 finalize PR 自身不制造无限自引用回执链。
+5. 整个过程不移动或覆盖 `v0.5.0`，不开始 M5，不调用 live/paid model。
 
 ## 已知限制与提升优先级
 

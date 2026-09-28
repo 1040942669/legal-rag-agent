@@ -2,7 +2,7 @@
 
 一个面向指定中国法律文本快照的可复现 RAG 工程项目。它不是把大模型接到向量库后的演示，而是围绕法律场景中的三个核心问题展开：**如何稳定召回正确法条、如何证明一次优化真的有效、如何在证据不足时安全停止生成**。
 
-仓库已经实现旧 Phase 路线中的规则型工程链路，包括数据画像、分块实验、混合检索、受控查询理解、证据覆盖启发式、引用编号检查、缓存契约和自动实验矩阵。默认链路保持保守：清晰问题直接检索，复杂问题才进入有边界的 adaptive lane；reranker 默认关闭，任何检索或生成增强都必须通过固定评测集、trace、质量与成本指标证明价值。M1 已把结构检查、行为检查和未知语义状态拆开；M2 进一步把 fresh/cache/replay、逐 case artifact、恢复、聚合和外部调用账本固化为显式实验生命周期。M3 的 PostgreSQL/pgvector 版本化语料、精确检索、原子快照切换、可复现导入和受控实验性 HNSW 已作为 [v0.4.0](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.4.0) 发布并完成独立回执。M4 正在 [PR #17](https://github.com/1040942669/legal-rag-agent/pull/17) 中增加持久会话、Bearer 身份隔离、幂等 run、SSE 续读和单进程 supervisor；本地候选已通过累计门禁，但在精确最终 PR-head CI、合并、Tag、Release 与独立回执完成前仍不算发布。
+仓库已经实现旧 Phase 路线中的规则型工程链路，包括数据画像、分块实验、混合检索、受控查询理解、证据覆盖启发式、引用编号检查、缓存契约和自动实验矩阵。默认链路保持保守：清晰问题直接检索，复杂问题才进入有边界的 adaptive lane；reranker 默认关闭，任何检索或生成增强都必须通过固定评测集、trace、质量与成本指标证明价值。M1 已把结构检查、行为检查和未知语义状态拆开；M2 进一步把 fresh/cache/replay、逐 case artifact、恢复、聚合和外部调用账本固化为显式实验生命周期。M3 的 PostgreSQL/pgvector 版本化语料、精确检索、原子快照切换、可复现导入和受控实验性 HNSW 已作为 [v0.4.0](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.4.0) 发布并完成独立回执。M4 的持久会话、Bearer 身份隔离、幂等 run、SSE 续读和单进程 supervisor 已作为 [v0.5.0](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.5.0) 发布；软件、Tag、Release 与精确 release-target CI 已核验，独立回执和 Issue/Milestone 治理收口仍在进行。
 
 > 本项目仅用于检索与工程研究，不提供个案法律意见。仓库不随附完整法律语料，历史快照的内容截止日期为 2025-01-01；因此本文不声称覆盖全部当前有效法律。数据来源及复现边界见下文。
 
@@ -15,7 +15,7 @@
 | 受控 Agent 能力 | 规则 Query Analyzer、严格 JSON normalizer、有限 multi-query planner、证据合并、最多一轮补检索 |
 | 生成边界 | 高风险请求预拒答、证据充分性检查、结构化回答兼容层、引用/范围/行为检查、资料不足或澄清模板、最终交付前复核 |
 | 评测体系 | 120 条分层评测集、30 条固定生成子集、bootstrap 95% CI、显式行为分母、answer/retrieval/Judge N/A、自动五维实验矩阵 |
-| 工程质量 | M2 `v0.3.0` 为 548 个离线测试、157 个子测试与 25 项累计门禁；M3 `v0.4.0` 的候选和 release target 在 Linux/Python 3.12.13 上均通过 671 个离线测试、157 个子测试、61 项 PostgreSQL integration 与 33/33 累计门禁；M4 本地候选为 801 个离线测试、157 个子测试、79 项 PostgreSQL integration 与 41/41 累计门禁，并验证真实数据库服务重启、两个独立应用进程重启和候选 wheel 隔离入口；M4 远端候选证据仍以最终 PR-head CI 为准 |
+| 工程质量 | M2 `v0.3.0` 为 548 个离线测试、157 个子测试与 25 项累计门禁；M3 `v0.4.0` 的候选和 release target 在 Linux/Python 3.12.13 上均通过 671 个离线测试、157 个子测试、61 项 PostgreSQL integration 与 33/33 累计门禁；M4 `v0.5.0` 的最终 release target 通过 801 个离线测试、157 个子测试、79 项 PostgreSQL integration 与 41/41 累计门禁，并验证真实数据库服务重启、两个独立应用进程重启和 wheel 隔离入口 |
 
 历史实验中，`Qwen3-Embedding-4B` dense 的 Hit@5 达到 **0.981 [0.954, 1.000]**，无外部 API 的自研 BM25 baseline 为 **0.704 [0.611, 0.787]**。这些数字来自 2026-06 的固定本地语料快照和当时模型版本，不是跨语料、跨时间的效果承诺。完整实验条件见 [结果摘要](reports/RESULTS_SUMMARY.md)。
 
@@ -325,9 +325,11 @@ uv run python -m legal_rag.storage.import_cli apply `
 
 annotated `v0.4.0` Tag 对象 `1aa41823030681e17b7da70c27b50463d7d997b1` 精确 peeled 到上述 release target；GitHub Release 已于 `2026-09-25T00:22:49Z` 发布，非 draft、非 prerelease、附件 0。M3 当前状态为 `released`。独立机器回执 [PR #14](https://github.com/1040942669/legal-rag-agent/pull/14) 的最终 head `4ec89300c0fbf020baddc18214d0dd7cbd4efedf` 已通过 [CI 36078353461](https://github.com/1040942669/legal-rag-agent/actions/runs/36078353461)，随后普通合并为 `99954c64d53705170024483f2b19d7fbade4ee6d`，该精确 master commit 的 [CI 36078748808](https://github.com/1040942669/legal-rag-agent/actions/runs/36078748808) 两个 job 也均成功。Issue #12 于 `2026-09-25T00:48:06Z` 关闭，Milestone 4 于 `2026-09-25T00:48:09Z` 关闭；后续 M4 工作不移动 `v0.4.0`。
 
-### M4 持久 API、会话与事件流（v0.5.0 候选）
+### M4 持久 API、会话与事件流（v0.5.0 已发布，独立回执待收口）
 
-M4 在 M3 数据边界之外增加一层可选 FastAPI 服务。PostgreSQL 是 session、message、run、result、idempotency key 和 event 的事实来源；HTTP handler 只负责协议与依赖注入，外部检索/生成期间不保持长数据库事务。默认入口使用 `LegalChatRunExecutor(generate=False)` 和冻结 PostgreSQL 语料上的 bound BM25，因此候选验证没有调用真实生成模型或付费服务，也不把 provider-free 结果描述为法律质量提升。
+M4 在 M3 数据边界之外增加一层可选 FastAPI 服务。PostgreSQL 是 session、message、run、result、idempotency key 和 event 的事实来源；HTTP handler 只负责协议与依赖注入，外部检索/生成期间不保持长数据库事务。默认入口使用 `LegalChatRunExecutor(generate=False)` 和冻结 PostgreSQL 语料上的 bound BM25，因此发布验证没有调用真实生成模型或付费服务，也不把 provider-free 结果描述为法律质量提升。
+
+[PR #17](https://github.com/1040942669/legal-rag-agent/pull/17) 的 exact-head CI 成功后正常合并；首次 master [run 36472938508](https://github.com/1040942669/legal-rag-agent/actions/runs/36472938508) 随即以 `78 passed, 1 failed` 暴露一个 150ms 测试预算在慢 runner 上覆盖三个真实 PostgreSQL stage-event 事务的问题，发布因此被阻断。[PR #18](https://github.com/1040942669/legal-rag-agent/pull/18) 只把该测试实例的预算调整为 1s，保留 5s 故障注入、三个 callback、晚写 fence 和生产运行语义；其 exact-head CI 与最终 release target `670e005a081cffa36a75af2b202e50eb2b859c3d` 的 [master run 36475260433](https://github.com/1040942669/legal-rag-agent/actions/runs/36475260433) 均完整成功。annotated `v0.5.0` Tag object `36d6883cc1bc29f09f7be5625db458739bce4335` 精确 peeled 到该 target，GitHub Release 非 draft、非 prerelease、附件 0。当前软件已发布，但独立 receipt PR、Issue #16 与 Milestone 5 仍待收口。
 
 安装服务依赖不会改变原 `legal-rag` CLI 的使用方式：
 
@@ -431,7 +433,7 @@ uv run --offline --frozen --no-sync python scripts/quality_gate.py `
 
 门禁要求 `ALLOW_LIVE_MODEL_CALLS=false`、禁用 dotenv，并把数据库限制在显式测试环境。M3-T01 至 M3-T08 覆盖确定性导入、exact 等价、精确法条、全路径过滤、ANN underfill/fallback、维度与 profile 防护、原子激活/回滚、迁移和真实服务重启；它证明工程与存储合同，不证明法律内容、时效性或模型回答正确。
 
-M4 候选在同一真实 restart receipt 上累积 M0-M3，再运行 M4-T01 至 M4-T08，共 41 个唯一 mandatory ID。普通集成套件会为每次 pytest invocation 创建并销毁独立 loopback 测试数据库；其中还包含真实 Uvicorn TCP、SSE 主动断线续读、两个不同应用 PID 的进程重启、数据库不可用和执行超时归因。候选 wheel 需要在仓库外临时环境中验证 `legal-rag` 与 `legal-rag-api` 两个入口。
+M4 门禁在同一真实 restart receipt 上累积 M0-M3，再运行 M4-T01 至 M4-T08，共 41 个唯一 mandatory ID。普通集成套件会为每次 pytest invocation 创建并销毁独立 loopback 测试数据库；其中还包含真实 Uvicorn TCP、SSE 主动断线续读、两个不同应用 PID 的进程重启、数据库不可用和执行超时归因。发布 wheel 在仓库外临时环境中验证 `legal-rag` 与 `legal-rag-api` 两个入口。
 
 ```powershell
 $env:LEGAL_RAG_INTEGRATION_TEST = "1"
@@ -459,11 +461,11 @@ uv run --offline --frozen --no-sync python scripts/m4_wheel_probe.py `
   --smoke artifacts/m4-wheel/legal_rag_assistant-0.5.0-py3-none-any.whl
 ```
 
-本地候选当前结果为离线 `801 passed`、`157 subtests passed`、JUnit `958/0/0/0`，PostgreSQL 18 + pgvector 0.8.1 integration `79 passed`，累计门禁 `41/41`。这些是候选工作区证据；最终发布判断仍要求包含文档和包输入的精确 PR head、普通合并后的 master target 两套 GitHub Actions 都成功。
+最终 release target 的远端结果为离线 `801 passed`、`157 subtests passed`、累计 JUnit `958/0/0/0`，PostgreSQL 18 + pgvector 0.8.6 integration `79/79`，累计门禁 `41/41`。数据库服务重启、独立应用进程重启、wheel 资源/入口与隔离安装探测均通过。权威 wheel 为 `352218` bytes、`78` entries，SHA-256 `f59a054c04b4a16971fbc9b3f97516b9f29b50787f5bd5c6608ecbb88bbd31a7`。本地 PostgreSQL 18 + pgvector 0.8.1 也通过 79 项 integration；真实或付费模型调用为 0。
 
 需要明确区分三类可复现性：
 
-1. 代码与离线逻辑：M0 发布时由 89 个测试提供基线；M1 `v0.2.0` 由 186 个测试、148 个子测试与 17 项累计门禁提供证据；M2 `v0.3.0` 由 548 个测试、157 个子测试和 25 项累计门禁覆盖；M3 `v0.4.0` 的候选与 release target 均由 671 个离线测试、157 个子测试、61 项数据库集成测试和 33 项累计门禁覆盖；M4 本地候选为 801 个离线测试、157 个子测试、79 项数据库集成测试和 41 项累计门禁，最终远端数字以精确发布候选 CI 为准。这不等于法律正确性保证。
+1. 代码与离线逻辑：M0 发布时由 89 个测试提供基线；M1 `v0.2.0` 由 186 个测试、148 个子测试与 17 项累计门禁提供证据；M2 `v0.3.0` 由 548 个测试、157 个子测试和 25 项累计门禁覆盖；M3 `v0.4.0` 的候选与 release target 均由 671 个离线测试、157 个子测试、61 项数据库集成测试和 33 项累计门禁覆盖；M4 `v0.5.0` release target 由 801 个离线测试、157 个子测试、79 项数据库集成测试和 41 项累计门禁覆盖。这不等于法律正确性保证。
 2. 历史检索数字：依赖 2026-06 的 203 部法律快照及对应 embedding cache。
 3. API 生成分数：还依赖外部模型版本、服务状态和 judge 偏差，不能视为永久固定值。
 
@@ -514,7 +516,7 @@ ARCHITECTURE_DECISION_LOG.md       关键架构决策和反例
 
 截至 2026-09-18，旧 Phase 0-4B 路线实现了可复现 baseline、检索诊断与 trace、受控查询理解、最多一轮补检索、规则 verifier、v3 评测集、reranker adapter、embedding cache v2 和自动实验矩阵。旧 Phase 编号与当前 M0-M7 里程碑不一一对应；旧路线的 reranker/cache A/B 仍是未完成的实验项，不代表当前发布主线的下一步。
 
-当前 M0-M7 主线以 [MASTER_PLAN](docs/refactor/MASTER_PLAN.md)、[STATE](docs/refactor/STATE.json) 和 [HANDOFF](docs/refactor/HANDOFF.md) 为权威来源。M0 已于 2026-09-19 作为 [v0.1.1](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.1.1) 发布并远端核验；M1 已于 2026-09-20 作为 [v0.2.0](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.2.0) 发布并远端核验；M2 软件 [PR #9](https://github.com/1040942669/legal-rag-agent/pull/9) 已正常合并，并于 2026-09-22 作为 [v0.3.0](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.3.0) 发布、远端核验，独立文档回执 [PR #10](https://github.com/1040942669/legal-rag-agent/pull/10) 也已完成。M3 软件 [PR #13](https://github.com/1040942669/legal-rag-agent/pull/13) 已普通合并，并于 2026-09-25 作为 [v0.4.0](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.4.0) 发布、远端核验；独立回执 [PR #14](https://github.com/1040942669/legal-rag-agent/pull/14) 已普通合并，精确 final-head CI 与回执 merge 后 master CI 均成功，Issue #12 与 Milestone 4 已关闭，因此 M3 状态为 `released`。M4 已获授权并处于 `v0.5.0` 发布候选阶段；M5-M7 尚未开始。
+当前 M0-M7 主线以 [MASTER_PLAN](docs/refactor/MASTER_PLAN.md)、[STATE](docs/refactor/STATE.json) 和 [HANDOFF](docs/refactor/HANDOFF.md) 为权威来源。M0 已于 2026-09-19 作为 [v0.1.1](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.1.1) 发布并远端核验；M1 已于 2026-09-20 作为 [v0.2.0](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.2.0) 发布并远端核验；M2 软件 [PR #9](https://github.com/1040942669/legal-rag-agent/pull/9) 已正常合并，并于 2026-09-22 作为 [v0.3.0](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.3.0) 发布、远端核验，独立文档回执 [PR #10](https://github.com/1040942669/legal-rag-agent/pull/10) 也已完成。M3 软件 [PR #13](https://github.com/1040942669/legal-rag-agent/pull/13) 已普通合并，并于 2026-09-25 作为 [v0.4.0](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.4.0) 发布、远端核验；独立回执 [PR #14](https://github.com/1040942669/legal-rag-agent/pull/14) 已普通合并，精确 final-head CI 与回执 merge 后 master CI 均成功，Issue #12 与 Milestone 4 已关闭，因此 M3 状态为 `released`。M4 软件 PR #17 与稳定性 PR #18 已普通合并，并于 2026-09-29 作为 [v0.5.0](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.5.0) 发布、远端核验；独立回执尚未合并，Issue #16 与 Milestone 5 仍 open，因此 M4 状态为 `released_receipt_pending`。M5-M7 尚未开始。
 
 ## 文档导航
 
