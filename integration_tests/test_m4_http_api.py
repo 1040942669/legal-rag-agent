@@ -68,6 +68,7 @@ def _app_harness(
         supervisor_poll_seconds=0.01,
         sse_poll_seconds=0.01,
         sse_heartbeat_seconds=1,
+        graph_version="m4-linear-v1",
     )
     supervisor = RunSupervisor(
         service,

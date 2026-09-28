@@ -4,7 +4,46 @@
 
 ## [Unreleased]
 
-尚无未发布变更。
+M5 `v0.6.0` 候选正在草稿 PR #22 中验证。以下条目尚未发布；最终 exact-head suite、M0-M5 `51/51` 累计门禁、恢复 demo、数据库重启、wheel probe、required review、合并和 release-target CI 均完成前，不创建发布结论。
+
+## [0.6.0] - Unreleased
+
+> 候选状态，尚未发布：当前已推送软件 head 为 `979c12fab74ec0911bfa93fd9de07f7437c1eb5d`。较早 exact commit `7ba6ae8` 的 M5 专项 suite 为 `81/81` 且 fault receipt schema 为 0 errors；冻结实现树全套预检为 `921 passed, 157 subtests passed`。one-command demo 和 wheel probe 只在冻结 dirty/audit tree 预检通过，最终文档 HEAD 的精确复验和 `51/51` gate 尚未运行。PR #22 未合并，`v0.6.0` Tag、GitHub Release 和最终 M5 receipt 均不存在。
+
+### Added
+
+- `m5-bounded-v1` 单一有界 LangGraph 控制图，覆盖查询分析、路由、检索、证据合并/检查、有限 follow-up、生成、验证和结果持久化，不与旧 adaptive loop 叠加。
+- 严格版本化 JSON graph state，拒绝未知字段、非有限数、prompt、secret、credential、raw draft、client 和 connection 对象，并在节点边界冻结 run identity、scope、snapshot、profile、budget 和 absolute deadline。
+- PostgreSQL `PostgresSaver` 持久 checkpoint，以及应用侧可信 checkpoint projection；每个 lease epoch 使用隔离 thread identity，并显式拒绝 `InMemorySaver` 作为持久恢复后端。
+- Alembic `0006_m5_harness_recovery`，新增 durable budget ledger、external attempt journal、node artifact、application checkpoint、parent lineage、deadline、stop reason、lease epoch 和 resume 状态。
+- 显式 owner-scoped resume、lease heartbeat 与 epoch fencing；两个进程竞争同一 run 时至多一个有效 owner，失效 owner 不能推进 checkpoint pointer 或发布终态。
+- side-effect-aware recovery：检索 checkpoint 可复用；dispatch 后未持久化的 provider/planner 结果记为 `outcome_unknown` 且预算不退款；已提交最终结果在图尾崩溃后通过唯一结果对账，避免第二条回答。
+- parent-bound clarification follow-up：`needs_clarification` 保持终态，用户补充创建同 session 的新 child run，child 使用独立 deadline/ledger，父 run 预算不变。
+- 只读工具白名单 `search_laws`、`get_article`、`get_neighbors`、`inspect_evidence_metadata`，并将 user/scope/snapshot/profile/DSN/SQL 固定在可信服务端边界。
+- M5-T01 至 M5-T10 跨进程 PostgreSQL fault-injection suite、关闭 schema 的 fault receipt、一命令恢复 demo、M5 wheel probe 和 M0-M5 累计门禁契约。
+
+### Changed
+
+- 候选包版本升级到 `0.6.0`；`langgraph` 与 `langgraph-checkpoint-postgres` 保持在可选 `service` extra，旧 `legal-rag` CLI 和非 M5 `LegalChatRunExecutor` 路径继续可用。
+- `/api/v1/runs/{id}/resume` 只对兼容 graph version 的 owned `interrupted` run 启用；M4 run 保持明确 unsupported，不静默迁移。
+- 外部操作在 dispatch 前先事务性预留预算。429 和 timeout 只做有界重试，400/401 不盲重试；resume 不重置预算或绝对 deadline。
+- `legal-rag-api --migrate` 在 Alembic 后初始化 PostgreSQL saver schema；普通启动只验证 checkpointer readiness，不隐式迁移或回退内存存储。
+
+### Security
+
+- prompt injection 内容不能注册额外工具、覆盖 authenticated/frozen retrieval boundary、提交 SQL/DSN，或把 prompt、secret、credential 和未验证 draft 写入 checkpoint、event、result 或普通日志。
+- checkpoint serializer 禁止 pickle fallback；业务恢复只信任应用 checkpoint pointer，不把 stale lease 留下的 framework checkpoint 当成当前状态。
+- checkpoint、event、attempt reconciliation 和 terminal publication 同时受 lease owner、lease epoch、database wall clock、revision 和 event sequence 约束。
+- 候选预检禁用 dotenv 和 live provider；真实/付费 generation model、remote embedding、reranker 与 LLM Judge 调用均为 0，也未上传私密语料、凭证或本地数据库内容。
+
+### Known limitations
+
+- 本条目是候选说明，不是发布回执。最终 exact-head 测试、CI、Tag、Release 和治理闭环尚未完成。
+- LangGraph checkpoint 与应用事务不是跨表全局原子提交；M5 通过可信业务 pointer 和保守 outcome reconciliation 缩小风险，但不承诺任意 provider exactly-once、远端撤销或零重复计费。
+- unknown external outcome 默认不静默重试，run 可能以 `completed_with_limits` 结束并给出 stop reason。
+- supervisor 仍不是通用分布式队列；批量评测、导入任务、worker 运营与完整可观测性属于后续 M6。
+- `0006` downgrade 对 M5-only 终态/事件会先拒绝；即使可以执行，也会删除 M5 应用表/列，不能视为 valued data 的无损回滚。
+- 本阶段证明恢复、预算、fencing 和安全工具边界，不证明法律正确性、完整现行法覆盖、live-model 质量或生产容量。
 
 ## [0.5.0] - 2026-09-29
 

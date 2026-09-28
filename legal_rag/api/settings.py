@@ -4,6 +4,7 @@ import math
 import os
 from dataclasses import dataclass
 
+from legal_rag.harness.state import HARNESS_GRAPH_VERSION
 from legal_rag.storage.database import DatabaseSettings
 
 from .auth import AuthenticationConfigurationError, TokenAuthenticator
@@ -31,6 +32,17 @@ def _positive_float(name: str, default: float, *, maximum: float) -> float:
     return value
 
 
+def _non_negative_int(name: str, default: int, *, maximum: int) -> int:
+    raw = os.environ.get(name, str(default)).strip()
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+    if not 0 <= value <= maximum:
+        raise ValueError(f"{name} must be between 0 and {maximum}")
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class ServiceSettings:
     question_max_characters: int = 8_000
@@ -43,7 +55,15 @@ class ServiceSettings:
     supervisor_poll_seconds: float = 0.2
     sse_poll_seconds: float = 0.2
     sse_heartbeat_seconds: float = 15.0
-    graph_version: str = "m4-linear-v1"
+    graph_version: str = HARNESS_GRAPH_VERSION
+    max_retrieval_rounds: int = 2
+    max_queries_per_round: int = 3
+    max_tool_attempts: int = 8
+    max_model_attempts: int = 4
+    max_embedding_attempts: int = 4
+    max_retry_per_operation: int = 1
+    execution_deadline_seconds: int = 90
+    evidence_top_k: int = 5
 
     def __post_init__(self) -> None:
         for name, value, maximum in (
@@ -53,9 +73,21 @@ class ServiceSettings:
             ("LEGAL_RAG_HISTORY_MAX_CHARACTERS", self.history_max_characters, 100_000),
             ("LEGAL_RAG_IDEMPOTENCY_TTL_SECONDS", self.idempotency_ttl_seconds, 31_536_000),
             ("LEGAL_RAG_RUN_LEASE_SECONDS", self.lease_seconds, 86_400),
+            ("LEGAL_RAG_MAX_RETRIEVAL_ROUNDS", self.max_retrieval_rounds, 32),
+            ("LEGAL_RAG_MAX_QUERIES_PER_ROUND", self.max_queries_per_round, 32),
+            ("LEGAL_RAG_MAX_TOOL_ATTEMPTS", self.max_tool_attempts, 1_000),
+            ("LEGAL_RAG_MAX_MODEL_ATTEMPTS", self.max_model_attempts, 1_000),
+            ("LEGAL_RAG_EXECUTION_DEADLINE_SECONDS", self.execution_deadline_seconds, 86_400),
+            ("LEGAL_RAG_EVIDENCE_TOP_K", self.evidence_top_k, 100),
         ):
             if type(value) is not int or not 1 <= value <= maximum:
                 raise ValueError(f"{name} must be between 1 and {maximum}")
+        for name, value, maximum in (
+            ("LEGAL_RAG_MAX_EMBEDDING_ATTEMPTS", self.max_embedding_attempts, 1_000),
+            ("LEGAL_RAG_MAX_RETRY_PER_OPERATION", self.max_retry_per_operation, 20),
+        ):
+            if type(value) is not int or not 0 <= value <= maximum:
+                raise ValueError(f"{name} must be between 0 and {maximum}")
         for name, value, maximum in (
             ("LEGAL_RAG_EXECUTOR_TIMEOUT_SECONDS", self.executor_timeout_seconds, 3_600.0),
             ("LEGAL_RAG_SUPERVISOR_POLL_SECONDS", self.supervisor_poll_seconds, 60.0),
@@ -114,6 +146,30 @@ class ServiceSettings:
             ),
             sse_heartbeat_seconds=_positive_float(
                 "LEGAL_RAG_SSE_HEARTBEAT_SECONDS", 15.0, maximum=300.0
+            ),
+            max_retrieval_rounds=_positive_int(
+                "LEGAL_RAG_MAX_RETRIEVAL_ROUNDS", 2, maximum=32
+            ),
+            max_queries_per_round=_positive_int(
+                "LEGAL_RAG_MAX_QUERIES_PER_ROUND", 3, maximum=32
+            ),
+            max_tool_attempts=_positive_int(
+                "LEGAL_RAG_MAX_TOOL_ATTEMPTS", 8, maximum=1_000
+            ),
+            max_model_attempts=_positive_int(
+                "LEGAL_RAG_MAX_MODEL_ATTEMPTS", 4, maximum=1_000
+            ),
+            max_embedding_attempts=_non_negative_int(
+                "LEGAL_RAG_MAX_EMBEDDING_ATTEMPTS", 4, maximum=1_000
+            ),
+            max_retry_per_operation=_non_negative_int(
+                "LEGAL_RAG_MAX_RETRY_PER_OPERATION", 1, maximum=20
+            ),
+            execution_deadline_seconds=_positive_int(
+                "LEGAL_RAG_EXECUTION_DEADLINE_SECONDS", 90, maximum=86_400
+            ),
+            evidence_top_k=_positive_int(
+                "LEGAL_RAG_EVIDENCE_TOP_K", 5, maximum=100
             ),
         )
 

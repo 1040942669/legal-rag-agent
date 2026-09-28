@@ -24,7 +24,6 @@ from legal_rag.services.run_service import (
     SessionRecord,
 )
 
-
 NOW = datetime(2026, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
 OWNER_TOKEN = "owner-token-" + "a" * 32
 FOREIGN_TOKEN = "foreign-token-" + "b" * 32
@@ -232,6 +231,8 @@ class _FakeRunService:
         idempotency_key: str,
         payload: dict[str, Any],
         graph_version: str,
+        *,
+        parent_run_id: str | None = None,
     ) -> tuple[RunRecord, bool]:
         self.calls["create_run"].append(
             (
@@ -240,6 +241,7 @@ class _FakeRunService:
                 idempotency_key,
                 payload,
                 graph_version,
+                parent_run_id,
             )
         )
         self._require_owner(principal, session_id, SESSION_ID)
@@ -324,7 +326,7 @@ def _application(
         service=fake_service,
         authenticator=authenticator,
         supervisor=supervisor,
-        settings=settings,
+        settings=settings or ServiceSettings(graph_version="m4-linear-v1"),
         start_supervisor=False,
     )
     return app, fake_service, supervisor
@@ -492,6 +494,7 @@ def test_create_run_returns_202_and_absolute_status_and_event_locations(
         json={
             "question": "  Which rule applies?  ",
             "snapshot_id": "snapshot-2026",
+            "parent_run_id": "parent-run-owner",
             "retrieval": {"top_k": 7},
         },
     )
@@ -515,6 +518,7 @@ def test_create_run_returns_202_and_absolute_status_and_event_locations(
                 "retrieval": {"top_k": 7},
             },
             "m4-linear-v1",
+            "parent-run-owner",
         )
     ]
     assert api.supervisor.wake_calls == 1
@@ -637,6 +641,7 @@ def test_get_run_and_evidence_map_only_the_owned_result(api: _Harness) -> None:
     assert run_response.json() == {
         "run_id": RUN_ID,
         "session_id": SESSION_ID,
+        "parent_run_id": None,
         "status": "succeeded",
         "snapshot_id": "snapshot-2026",
         "snapshot_revision": 7,
@@ -647,6 +652,9 @@ def test_get_run_and_evidence_map_only_the_owned_result(api: _Harness) -> None:
         "started_at": "2026-01-02T03:04:05Z",
         "finished_at": "2026-01-02T03:04:05Z",
         "error_code": None,
+        "last_completed_node": None,
+        "execution_deadline_at": None,
+        "stop_reason": None,
         "answer": {"text": "Article 7 applies."},
         "evidence": {"citations": [{"article": 7}]},
         "verification": {"accepted": True},
@@ -838,9 +846,7 @@ def test_sse_refetches_terminal_event_committed_after_an_empty_poll() -> None:
             after_sequence: int,
             limit: int,
         ) -> tuple[RunEventRecord, ...]:
-            self.calls["list_events"].append(
-                (principal, run_id, after_sequence, limit)
-            )
+            self.calls["list_events"].append((principal, run_id, after_sequence, limit))
             self._require_owner(principal, run_id, RUN_ID)
             if self._first_poll:
                 self._first_poll = False

@@ -159,7 +159,7 @@ def test_empty_database_upgrades_to_head_with_vector_extension(
     }
     with migrated_engine.connect() as connection:
         assert MigrationContext.configure(connection).get_current_revision() == (
-            "0005_m4_api_sessions"
+            "0006_m5_harness_recovery"
         )
         extension_version = connection.scalar(
             text("SELECT extversion FROM pg_extension WHERE extname = 'vector'")

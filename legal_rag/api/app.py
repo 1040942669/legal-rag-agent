@@ -27,6 +27,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from legal_rag.services.run_service import (
     ActiveRunConflictError,
+    CheckpointCompatibilityError,
     IdempotencyConflictError,
     InvalidRunStateError,
     ResourceNotFoundError,
@@ -38,6 +39,11 @@ from legal_rag.services.run_service import (
     SessionInactiveError,
 )
 from legal_rag.services.supervisor import RunSupervisor
+from legal_rag.harness.checkpoint import (
+    CheckpointerNotReady,
+    assert_postgres_checkpointer_ready,
+)
+from legal_rag.harness.state import HARNESS_GRAPH_VERSION
 from legal_rag.storage.schema import active_snapshot_pointers, embedding_imports
 
 from .auth import AuthenticationError, ServicePrincipal, TokenAuthenticator
@@ -53,13 +59,28 @@ from .schemas import (
 )
 from .settings import ServiceSettings
 
-
-M4_ALEMBIC_HEAD = "0005_m4_api_sessions"
+M5_ALEMBIC_HEAD = "0006_m5_harness_recovery"
+# Kept as an import-compatible alias for M4 clients and tests.
+M4_ALEMBIC_HEAD = M5_ALEMBIC_HEAD
 STREAM_END_RUN_STATUSES = frozenset(
-    {"interrupted", "succeeded", "failed", "cancelled"}
+    {
+        "interrupted",
+        "succeeded",
+        "completed_with_limits",
+        "needs_clarification",
+        "failed",
+        "cancelled",
+    }
 )
 TERMINAL_EVENT_TYPES = frozenset(
-    {"answer.final", "run.failed", "run.cancelled", "run.interrupted"}
+    {
+        "answer.final",
+        "run.completed_with_limits",
+        "run.needs_clarification",
+        "run.failed",
+        "run.cancelled",
+        "run.interrupted",
+    }
 )
 URL_CREDENTIAL_NAMES = frozenset({"token", "access_token", "authorization"})
 
@@ -88,6 +109,7 @@ def _run_response(record: RunRecord) -> RunResponse:
     return RunResponse(
         run_id=record.run_id,
         session_id=record.session_id,
+        parent_run_id=record.parent_run_id,
         status=record.status,
         snapshot_id=record.snapshot_id,
         snapshot_revision=record.snapshot_revision,
@@ -98,6 +120,9 @@ def _run_response(record: RunRecord) -> RunResponse:
         started_at=record.started_at,
         finished_at=record.finished_at,
         error_code=record.error_code,
+        last_completed_node=record.last_completed_node,
+        execution_deadline_at=record.execution_deadline_at,
+        stop_reason=record.stop_reason,
         answer=dict(result.answer_payload) if result is not None else None,
         evidence=dict(result.evidence_payload) if result is not None else None,
         verification=(
@@ -161,8 +186,8 @@ def create_app(
                 app.state.shutdown_incomplete = True
 
     app = FastAPI(
-        title="Legal RAG M4 Service",
-        version="0.5.0",
+        title="Legal RAG M5 Service",
+        version="0.6.0",
         lifespan=lifespan,
         docs_url=None,
         redoc_url=None,
@@ -267,6 +292,15 @@ def create_app(
             "the requested retrieval configuration is unavailable",
         )
 
+    @app.exception_handler(CheckpointCompatibilityError)
+    async def checkpoint_compatibility_handler(request: Request, exc):
+        del request, exc
+        return _error(
+            409,
+            "checkpoint_incompatible",
+            "the persisted checkpoint is incompatible with this run",
+        )
+
     @app.exception_handler(SessionInactiveError)
     async def session_inactive_handler(request: Request, exc):
         del request, exc
@@ -314,7 +348,7 @@ def create_app(
             migration = connection.scalar(
                 text("SELECT version_num FROM alembic_version")
             )
-            if migration != M4_ALEMBIC_HEAD:
+            if migration != M5_ALEMBIC_HEAD:
                 return False
             for principal in authenticator.principals:
                 configured = connection.scalar(
@@ -336,6 +370,11 @@ def create_app(
                 )
                 if configured is None:
                     return False
+        if resolved_settings.graph_version == HARNESS_GRAPH_VERSION:
+            try:
+                assert_postgres_checkpointer_ready(service.engine)
+            except CheckpointerNotReady:
+                return False
         return not start_supervisor or supervisor.is_ready
 
     @app.get("/health/live", name="health_live")
@@ -435,6 +474,7 @@ def create_app(
                 422, "input_too_long", "question exceeds the configured limit"
             )
         payload = body.model_dump(mode="json", exclude_none=True)
+        parent_run_id = payload.pop("parent_run_id", None)
         record, replayed = await run_in_threadpool(
             service.create_run,
             principal,
@@ -442,6 +482,7 @@ def create_app(
             idempotency_key,
             payload,
             resolved_settings.graph_version,
+            parent_run_id=parent_run_id,
         )
         if not replayed:
             supervisor.wake()
@@ -486,19 +527,28 @@ def create_app(
         record = await run_in_threadpool(service.cancel_run, principal, run_id)
         return CancelRunResponse(run_id=record.run_id, status=record.status)
 
-    @app.post("/api/v1/runs/{run_id}/resume", name="resume_run")
+    @app.post(
+        "/api/v1/runs/{run_id}/resume",
+        response_model=CancelRunResponse,
+        name="resume_run",
+    )
     async def resume_run_route(
         run_id: str,
         principal: ServicePrincipal = Depends(principal_dependency),
     ):
-        await run_in_threadpool(service.resume_unsupported, principal, run_id)
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "code": "resume_contract_violation",
-                "message": "run resume unexpectedly returned",
-            },
-        )
+        if resolved_settings.graph_version != HARNESS_GRAPH_VERSION:
+            await run_in_threadpool(service.resume_unsupported, principal, run_id)
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "code": "resume_contract_violation",
+                    "message": "run resume unexpectedly returned",
+                },
+            )
+        record = await run_in_threadpool(service.resume_run, principal, run_id)
+        if record.status == "interrupted":
+            supervisor.wake()
+        return CancelRunResponse(run_id=record.run_id, status=record.status)
 
     @app.get("/api/v1/runs/{run_id}/events", name="stream_run_events")
     async def stream_run_events_route(
@@ -567,4 +617,4 @@ def create_app(
     return app
 
 
-__all__ = ["M4_ALEMBIC_HEAD", "create_app"]
+__all__ = ["M4_ALEMBIC_HEAD", "M5_ALEMBIC_HEAD", "create_app"]

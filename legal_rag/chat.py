@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 from collections.abc import Mapping
 from copy import deepcopy
@@ -7,8 +8,16 @@ from dataclasses import dataclass, field, replace
 from threading import RLock
 from typing import Any
 
-from .adaptive import AdaptiveRetrievalResult, retrieve_adaptive
-from .evidence import build_low_confidence_answer, check_evidence_sufficiency
+from .adaptive import (
+    AdaptiveRetrievalResult,
+    merge_followup_results,
+    retrieve_adaptive,
+)
+from .evidence import (
+    build_low_confidence_answer,
+    check_evidence_sufficiency,
+    with_stop_reason,
+)
 from .json_utils import validate_json_unicode
 from .llm import build_completion_client
 from .models import (
@@ -553,7 +562,14 @@ class LegalChatAssistant:
                 session_revision=self._session_revision,
             )
 
-    def retrieve_turn(self, prepared: PreparedQuestion) -> RetrievedTurn:
+    def retrieve_turn(
+        self,
+        prepared: PreparedQuestion,
+        *,
+        max_followup_rounds: int = 1,
+    ) -> RetrievedTurn:
+        if type(max_followup_rounds) is not int or max_followup_rounds < 0:
+            raise ValueError("max_followup_rounds must be a non-negative integer")
         boundary = resolve_retrieval_boundary(self.retriever)
         if should_refuse_before_retrieval(prepared.analysis.risk_flags):
             answer = programmatic_answer(
@@ -582,6 +598,7 @@ class LegalChatAssistant:
             max_queries=self.adaptive_max_queries,
             per_plan_top_k=self.adaptive_per_plan_top_k,
             normalizer_retries=self.normalizer_retries,
+            max_followup_rounds=max_followup_rounds,
         )
         results, rejected_source_ids, source_id_map = filter_results_to_context(
             adaptive_result.results,
@@ -636,6 +653,112 @@ class LegalChatAssistant:
             adaptive_result=adaptive_result,
             results=tuple(staged_results),
             evidence_check=evidence_check,
+            retrieval_boundary=boundary,
+            rejected_source_ids=tuple(rejected_source_ids),
+            source_id_map=dict(source_id_map),
+            terminal_kind=terminal_kind,
+            terminal_answer=terminal_answer,
+            terminal_expected_answer_mode=terminal_expected_answer_mode,
+        )
+
+    def merge_followup_turn(
+        self,
+        retrieved: RetrievedTurn,
+        followup_results: list[SearchResult],
+        *,
+        queries: list[str],
+        exhausted_stop_reason: str = "max_retrieval_rounds",
+    ) -> RetrievedTurn:
+        """Merge one graph-controlled follow-up round without another loop.
+
+        M5 reserves and dispatches each query outside this method.  This method
+        performs only deterministic boundary checks, merge, evidence checking,
+        and construction of the next immutable staged turn.
+        """
+
+        existing = self._validated_stage_results(
+            retrieved,
+            stage="chat follow-up input",
+        )
+        if retrieved.adaptive_result is None or retrieved.evidence_check is None:
+            raise ValueError("follow-up requires a completed retrieval stage")
+        if (
+            not isinstance(queries, list)
+            or not queries
+            or not all(
+                isinstance(query, str)
+                and query
+                and query == query.strip()
+                for query in queries
+            )
+        ):
+            raise ValueError("follow-up queries must be normalized strings")
+        if not isinstance(followup_results, list):
+            raise ValueError("followup_results must be a list")
+        boundary = retrieved.retrieval_boundary or resolve_retrieval_boundary(
+            self.retriever
+        )
+        assert_results_match_boundary(
+            followup_results,
+            boundary,
+            stage="chat graph follow-up retrieval",
+        )
+        merged = merge_followup_results(
+            list(existing),
+            deepcopy(followup_results),
+            final_top_k=self.top_k,
+        )
+        filtered, rejected_source_ids, source_id_map = filter_results_to_context(
+            merged,
+            self.verification_context,
+        )
+        checked = check_evidence_sufficiency(
+            retrieved.prepared.standalone_question,
+            filtered,
+            analysis=retrieved.adaptive_result.analysis,
+            normalized_query=retrieved.adaptive_result.normalized_query,
+            plans=retrieved.adaptive_result.plans,
+        )
+        stop_reason = (
+            "sufficient_after_followup"
+            if checked.sufficient
+            else exhausted_stop_reason
+        )
+        checked = with_stop_reason(checked, stop_reason)
+        adaptive = replace(
+            retrieved.adaptive_result,
+            results=deepcopy(filtered),
+            evidence_check=checked,
+            merge_trace={
+                **retrieved.adaptive_result.merge_trace,
+                "graph_followup": {
+                    "query_count": len(queries),
+                    "input_result_count": len(followup_results),
+                    "returned_count": len(filtered),
+                },
+            },
+            followup_trace={
+                "controller": "m5_graph",
+                "rounds_used": 1,
+                "query_hashes": [
+                    hashlib.sha256(query.encode("utf-8")).hexdigest()
+                    for query in queries
+                ],
+                "stop_reason": stop_reason,
+            },
+        )
+        terminal_answer = None
+        terminal_kind = None
+        terminal_expected_answer_mode = None
+        if not filtered or not checked.sufficient:
+            terminal_answer = build_limited_structured_answer(checked)
+            terminal_kind = "evidence_limited"
+            terminal_expected_answer_mode = expected_limited_answer_mode(checked)
+        return RetrievedTurn(
+            prepared=retrieved.prepared,
+            adaptive_result=adaptive,
+            results=tuple(deepcopy(filtered)),
+            evidence_check=checked,
             retrieval_boundary=boundary,
             rejected_source_ids=tuple(rejected_source_ids),
             source_id_map=dict(source_id_map),

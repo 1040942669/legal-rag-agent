@@ -24,7 +24,6 @@ from legal_rag.storage.database import (
     create_database_engine,
 )
 
-
 PROFILE_ID = "a" * 64
 SECOND_PROFILE_ID = "b" * 64
 PRIMARY_TOKEN = "primary-token-" + "a" * 32
@@ -193,12 +192,30 @@ def test_question_is_trimmed_and_default_retrieval_options_are_bounded() -> None
     assert request.question == "What law applies?"
     assert request.retrieval.top_k == 5
 
-    assert RunCreateRequest(
-        question="Question", retrieval={"top_k": 1}
-    ).retrieval.top_k == 1
-    assert RunCreateRequest(
-        question="Question", retrieval={"top_k": 20}
-    ).retrieval.top_k == 20
+    assert (
+        RunCreateRequest(question="Question", retrieval={"top_k": 1}).retrieval.top_k
+        == 1
+    )
+    assert (
+        RunCreateRequest(question="Question", retrieval={"top_k": 20}).retrieval.top_k
+        == 20
+    )
+
+
+def test_parent_run_id_is_optional_and_rejects_ambiguous_characters() -> None:
+    assert (
+        RunCreateRequest(
+            question="Follow-up", parent_run_id="parent-run-id"
+        ).parent_run_id
+        == "parent-run-id"
+    )
+
+    for parent_run_id in (" parent-run-id", "parent-run-id\n", "x" * 37):
+        with pytest.raises(ValidationError):
+            RunCreateRequest(
+                question="Follow-up",
+                parent_run_id=parent_run_id,
+            )
 
 
 @pytest.mark.parametrize(
@@ -238,7 +255,7 @@ def test_service_settings_use_defaults_without_environment(
     settings = ServiceSettings.from_env()
 
     assert settings == ServiceSettings()
-    assert settings.graph_version == "m4-linear-v1"
+    assert settings.graph_version == "m5-bounded-v1"
 
 
 def test_service_settings_parse_environment_values(

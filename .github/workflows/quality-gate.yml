@@ -145,7 +145,8 @@ jobs:
           LEGAL_RAG_M4_PROCESS_RECEIPT: ${{ runner.temp }}/m4-process-restart-receipt.json
         run: >-
           uv run --frozen --no-sync pytest -q
-          integration_tests
+          integration_tests/test_m3_*.py
+          integration_tests/test_m4_*.py
           --junitxml="${RUNNER_TEMP}/m4-service-junit.xml"
 
       - name: Prepare persistent state for the PostgreSQL service restart
@@ -227,8 +228,9 @@ jobs:
           set -euo pipefail
           mapfile -t candidate_wheels < <(find "${RUNNER_TEMP}/m4-wheel" -maxdepth 1 -type f -name '*.whl' -print)
           test "${#candidate_wheels[@]}" -eq 1
+          candidate_version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
           uv run --frozen --no-sync python scripts/m4_wheel_probe.py "${candidate_wheels[0]}" \
-            --expected-version 0.5.0 \
+            --expected-version "${candidate_version}" \
             --smoke \
             --timeout-seconds 120 \
             --temp-root "${RUNNER_TEMP}" \
@@ -255,5 +257,184 @@ jobs:
             ${{ runner.temp }}/m4-wheel-probe-receipt.json
             ${{ runner.temp }}/m4-quality-gate.json
             ${{ runner.temp }}/m4-wheel/*.whl
+          if-no-files-found: error
+          retention-days: 14
+
+  m5-fault-injection:
+    name: m5 fault injection / PostgreSQL 18 + pgvector 0.8.6
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      ALLOW_LIVE_MODEL_CALLS: "false"
+      DO_NOT_TRACK: "1"
+      HF_DATASETS_OFFLINE: "1"
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      HF_HUB_OFFLINE: "1"
+      LEGAL_RAG_DATABASE_URL: "postgresql+psycopg://m5_test@127.0.0.1:5432/legal_rag_m3_test_m5"
+      LEGAL_RAG_DISABLE_DOTENV: "1"
+      LEGAL_RAG_EXPECTED_PGVECTOR_VERSION: "0.8.6"
+      LEGAL_RAG_INTEGRATION_TEST: "1"
+      NO_PROXY: "*"
+      PYTHONDONTWRITEBYTECODE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.6-pg18@sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a
+        env:
+          POSTGRES_DB: legal_rag_m3_test_m5
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_USER: m5_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U m5_test -d legal_rag_m3_test_m5"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    steps:
+      - name: Check out the pull request head commit
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Check out the pushed commit
+        if: github.event_name == 'push'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.13"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.10.10"
+          enable-cache: false
+
+      - name: Verify the lock file
+        run: uv lock --check
+
+      - name: Install locked service and fault-test dependencies
+        run: uv sync --frozen --group dev --extra service
+
+      - name: Verify the M5 environment in uv offline mode
+        run: uv sync --check --offline --frozen --group dev --extra service
+
+      - name: Run the independent M5 fault-injection suite
+        env:
+          LEGAL_RAG_M5_CANDIDATE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          LEGAL_RAG_M5_FAULT_RECEIPT: ${{ runner.temp }}/m5-fault-receipt.json
+        run: >-
+          uv run --offline --frozen --no-sync pytest -q
+          -o xfail_strict=true
+          integration_tests/test_m5_fault_recovery.py
+          integration_tests/test_m5_budget_and_errors.py
+          integration_tests/test_m5_concurrent_resume.py
+          integration_tests/test_m5_checkpoint_compatibility.py
+          integration_tests/test_m5_followup_runs.py
+          integration_tests/test_m5_prompt_injection.py
+          integration_tests/test_m5_schema.py
+          tests/test_m5_configuration.py
+          tests/test_m5_graph_runtime.py
+          tests/test_m5_recovery_demo.py
+          tests/test_m5_retry_policy.py
+          tests/test_m5_state_contract.py
+          tests/test_m5_tool_security.py
+          --junitxml="${RUNNER_TEMP}/m5-fault-junit.xml"
+
+      - name: Reject skipped or xfailed M5 suite tests
+        env:
+          M5_FAULT_JUNIT: ${{ runner.temp }}/m5-fault-junit.xml
+        run: >-
+          uv run --offline --frozen --no-sync python -c
+          'import os; from pathlib import Path; from scripts.quality_gate import _junit_counts;
+          counts = _junit_counts(Path(os.environ["M5_FAULT_JUNIT"]));
+          valid = counts["tests"] > 0 and not any(counts[name] for name in ("failures", "errors", "skipped"));
+          raise SystemExit(0 if valid else f"mandatory M5 suite JUnit is not clean: {counts}")'
+
+      - name: Require a non-empty M5 fault receipt
+        run: test -s "${RUNNER_TEMP}/m5-fault-receipt.json"
+
+      - name: Run the one-command M5 recovery demo
+        env:
+          LEGAL_RAG_M5_CANDIDATE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+        run: >-
+          uv run --offline --frozen --no-sync python scripts/m5_recovery_demo.py
+          --candidate-sha "${LEGAL_RAG_M5_CANDIDATE_SHA}"
+          > "${RUNNER_TEMP}/m5-recovery-demo-receipt.json"
+
+      - name: Prepare persistent state for the cumulative PostgreSQL restart check
+        run: >-
+          uv run --offline --frozen --no-sync python scripts/m3_restart_probe.py prepare
+          --receipt "${RUNNER_TEMP}/m3-restart-receipt.json"
+
+      - name: Restart the PostgreSQL service container
+        env:
+          POSTGRES_SERVICE_CONTAINER_ID: ${{ job.services.postgres.id }}
+        run: |
+          test -n "${POSTGRES_SERVICE_CONTAINER_ID}"
+          docker restart "${POSTGRES_SERVICE_CONTAINER_ID}"
+          for attempt in {1..30}; do
+            if docker exec "${POSTGRES_SERVICE_CONTAINER_ID}" pg_isready -U m5_test -d legal_rag_m3_test_m5; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs "${POSTGRES_SERVICE_CONTAINER_ID}"
+          exit 1
+
+      - name: Verify persistent state from a new process after restart
+        run: >-
+          uv run --offline --frozen --no-sync python scripts/m3_restart_probe.py verify
+          --receipt "${RUNNER_TEMP}/m3-restart-receipt.json"
+          > "${RUNNER_TEMP}/m3-restart-verification.json"
+
+      - name: Build the M5 candidate wheel
+        run: uv build --wheel --out-dir "${RUNNER_TEMP}/m5-wheel"
+
+      - name: Run the isolated M5 release-wheel probe
+        run: |
+          set -euo pipefail
+          mapfile -t candidate_wheels < <(find "${RUNNER_TEMP}/m5-wheel" -maxdepth 1 -type f -name '*.whl' -print)
+          test "${#candidate_wheels[@]}" -eq 1
+          uv run --offline --frozen --no-sync python scripts/release_wheel_probe.py "${candidate_wheels[0]}" \
+            --profile M5 \
+            --expected-version 0.6.0 \
+            --smoke \
+            --timeout-seconds 180 \
+            --temp-root "${RUNNER_TEMP}" \
+            > "${RUNNER_TEMP}/m5-wheel-probe-receipt.json" 2>&1
+
+      - name: Run the M5 cumulative fault-injection quality gate
+        run: >-
+          uv run --offline --frozen --no-sync python scripts/quality_gate.py
+          --milestone M5
+          --mode fault-injection
+          --restart-receipt "${RUNNER_TEMP}/m3-restart-receipt.json"
+          --fault-receipt "${RUNNER_TEMP}/m5-fault-receipt.json"
+          --output "${RUNNER_TEMP}/m5-quality-gate.json"
+
+      - name: Upload the M5 fault-injection evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: m5-fault-${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/m5-fault-junit.xml
+            ${{ runner.temp }}/m5-fault-receipt.json
+            ${{ runner.temp }}/m5-recovery-demo-receipt.json
+            ${{ runner.temp }}/m3-restart-receipt.json
+            ${{ runner.temp }}/m3-restart-verification.json
+            ${{ runner.temp }}/m5-wheel-probe-receipt.json
+            ${{ runner.temp }}/m5-quality-gate.json
+            ${{ runner.temp }}/m5-wheel/*.whl
           if-no-files-found: error
           retention-days: 14

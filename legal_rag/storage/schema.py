@@ -501,6 +501,16 @@ runs = Table(
     Column("run_id", String(36), primary_key=True),
     Column("session_id", String(36), nullable=False),
     Column("user_id", String(128), nullable=False),
+    Column(
+        "parent_run_id",
+        String(36),
+        ForeignKey(
+            "runs.run_id",
+            name="fk_runs_parent_run",
+            ondelete="SET NULL",
+        ),
+        nullable=True,
+    ),
     Column("status", String(32), nullable=False, server_default="queued"),
     Column("request_hash", String(64), nullable=False),
     Column("request_payload", JSONB, nullable=False),
@@ -512,6 +522,12 @@ runs = Table(
     Column("boundary_fingerprint", String(64), nullable=False),
     Column("retrieval_config_hash", String(64), nullable=False),
     Column("graph_version", String(64), nullable=False),
+    Column("state_schema_version", Integer, nullable=False, server_default="1"),
+    Column("checkpoint_namespace", String(255), nullable=True),
+    Column("last_checkpoint_id", String(255), nullable=True),
+    Column("last_completed_node", String(64), nullable=True),
+    Column("execution_deadline_at", DateTime(timezone=True), nullable=True),
+    Column("stop_reason", String(64), nullable=True),
     Column(
         "created_at", DateTime(timezone=True), nullable=False, server_default=func.now()
     ),
@@ -528,14 +544,32 @@ runs = Table(
     Column("event_sequence", BigInteger, nullable=False, server_default="0"),
     Column("lease_owner", String(128), nullable=True),
     Column("lease_expires_at", DateTime(timezone=True), nullable=True),
+    Column("lease_epoch", BigInteger, nullable=False, server_default="0"),
+    Column("resume_requested_at", DateTime(timezone=True), nullable=True),
     CheckConstraint(
-        "status IN ('queued', 'running', 'interrupted', 'succeeded', 'failed', 'cancelled')",
+        "status IN ('queued', 'running', 'interrupted', 'succeeded', "
+        "'completed_with_limits', 'needs_clarification', 'failed', 'cancelled')",
         name="ck_runs_status",
+    ),
+    CheckConstraint(
+        "parent_run_id IS NULL OR parent_run_id <> run_id",
+        name="ck_runs_parent_not_self",
+    ),
+    CheckConstraint(
+        "state_schema_version > 0",
+        name="ck_runs_state_schema_version",
     ),
     CheckConstraint("revision >= 0", name="ck_runs_revision"),
     CheckConstraint("event_sequence >= 0", name="ck_runs_event_sequence"),
+    CheckConstraint("lease_epoch >= 0", name="ck_runs_lease_epoch"),
     CheckConstraint(
-        "((status IN ('succeeded', 'failed', 'cancelled') AND finished_at IS NOT NULL) "
+        "last_checkpoint_id IS NULL OR checkpoint_namespace IS NOT NULL",
+        name="ck_runs_checkpoint_pointer",
+    ),
+    CheckConstraint(
+        "((status IN ('succeeded', 'completed_with_limits', "
+        "'needs_clarification', 'failed', 'cancelled') "
+        "AND finished_at IS NOT NULL) "
         "OR (status IN ('queued', 'running', 'interrupted') AND finished_at IS NULL))",
         name="ck_runs_finished_at",
     ),
@@ -567,11 +601,404 @@ runs = Table(
 
 Index("ix_runs_user_created", runs.c.user_id, runs.c.created_at)
 Index("ix_runs_status_queued", runs.c.status, runs.c.queued_at)
+Index("ix_runs_parent_run_id", runs.c.parent_run_id)
+Index(
+    "ix_runs_resume_requested",
+    runs.c.status,
+    runs.c.resume_requested_at,
+    postgresql_where=runs.c.resume_requested_at.is_not(None),
+)
 Index(
     "uq_runs_one_active_per_session",
     runs.c.session_id,
     unique=True,
     postgresql_where=runs.c.status.in_(("queued", "running", "interrupted")),
+)
+
+
+# M5 application-owned recovery records.  LangGraph's private checkpoint tables
+# are intentionally managed by LangGraph itself and are not part of this
+# metadata or the Alembic history.
+run_budget_ledgers = Table(
+    "run_budget_ledgers",
+    metadata,
+    Column(
+        "run_id",
+        String(36),
+        ForeignKey(
+            "runs.run_id",
+            name="fk_run_budget_ledgers_run",
+            ondelete="CASCADE",
+        ),
+        primary_key=True,
+    ),
+    Column("max_retrieval_rounds", Integer, nullable=False),
+    Column("max_queries_per_round", Integer, nullable=False),
+    Column("max_tool_attempts", Integer, nullable=False),
+    Column("max_model_attempts", Integer, nullable=False),
+    Column("max_embedding_attempts", Integer, nullable=False),
+    Column("max_retry_per_operation", Integer, nullable=False),
+    Column("evidence_top_k", Integer, nullable=False),
+    Column("retrieval_rounds_used", Integer, nullable=False, server_default="0"),
+    Column("queries_used", Integer, nullable=False, server_default="0"),
+    Column("tool_attempts_used", Integer, nullable=False, server_default="0"),
+    Column("model_attempts_used", Integer, nullable=False, server_default="0"),
+    Column("embedding_attempts_used", Integer, nullable=False, server_default="0"),
+    Column("revision", BigInteger, nullable=False, server_default="0"),
+    Column(
+        "created_at", DateTime(timezone=True), nullable=False, server_default=func.now()
+    ),
+    Column(
+        "updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()
+    ),
+    CheckConstraint(
+        "max_retrieval_rounds BETWEEN 1 AND 32",
+        name="ck_run_budget_ledgers_retrieval_limit",
+    ),
+    CheckConstraint(
+        "max_queries_per_round BETWEEN 1 AND 32",
+        name="ck_run_budget_ledgers_query_limit",
+    ),
+    CheckConstraint(
+        "max_tool_attempts BETWEEN 1 AND 1000",
+        name="ck_run_budget_ledgers_tool_limit",
+    ),
+    CheckConstraint(
+        "max_model_attempts BETWEEN 1 AND 1000",
+        name="ck_run_budget_ledgers_model_limit",
+    ),
+    CheckConstraint(
+        "max_embedding_attempts BETWEEN 0 AND 1000",
+        name="ck_run_budget_ledgers_embedding_limit",
+    ),
+    CheckConstraint(
+        "max_retry_per_operation BETWEEN 0 AND 20",
+        name="ck_run_budget_ledgers_retry_limit",
+    ),
+    CheckConstraint(
+        "evidence_top_k BETWEEN 1 AND 100",
+        name="ck_run_budget_ledgers_evidence_limit",
+    ),
+    CheckConstraint(
+        "retrieval_rounds_used BETWEEN 0 AND max_retrieval_rounds",
+        name="ck_run_budget_ledgers_retrieval_used",
+    ),
+    CheckConstraint(
+        "queries_used BETWEEN 0 AND (max_retrieval_rounds * max_queries_per_round)",
+        name="ck_run_budget_ledgers_queries_used",
+    ),
+    CheckConstraint(
+        "tool_attempts_used BETWEEN 0 AND max_tool_attempts",
+        name="ck_run_budget_ledgers_tool_used",
+    ),
+    CheckConstraint(
+        "model_attempts_used BETWEEN 0 AND max_model_attempts",
+        name="ck_run_budget_ledgers_model_used",
+    ),
+    CheckConstraint(
+        "embedding_attempts_used BETWEEN 0 AND max_embedding_attempts",
+        name="ck_run_budget_ledgers_embedding_used",
+    ),
+    CheckConstraint("revision >= 0", name="ck_run_budget_ledgers_revision"),
+    CheckConstraint(
+        "updated_at >= created_at",
+        name="ck_run_budget_ledgers_timestamps",
+    ),
+)
+
+
+run_external_attempts = Table(
+    "run_external_attempts",
+    metadata,
+    Column("attempt_id", String(36), primary_key=True),
+    Column(
+        "run_id",
+        String(36),
+        ForeignKey(
+            "runs.run_id",
+            name="fk_run_external_attempts_run",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+    ),
+    Column("lease_epoch", BigInteger, nullable=False),
+    Column("operation_key", String(255), nullable=False),
+    Column("operation_kind", String(32), nullable=False),
+    Column("operation_name", String(64), nullable=False),
+    Column("attempt_no", Integer, nullable=False),
+    Column("request_hash", String(64), nullable=False),
+    Column("provider_request_id", String(255), nullable=True),
+    Column("status", String(32), nullable=False, server_default="reserved"),
+    Column("retryable", Boolean, nullable=True),
+    Column("error_code", String(64), nullable=True),
+    Column("result_ref", String(255), nullable=True),
+    Column("result_hash", String(64), nullable=True),
+    Column(
+        "reserved_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    Column("dispatched_at", DateTime(timezone=True), nullable=True),
+    Column("completed_at", DateTime(timezone=True), nullable=True),
+    CheckConstraint("lease_epoch >= 0", name="ck_run_external_attempts_lease_epoch"),
+    CheckConstraint(
+        "btrim(operation_key) <> '' AND btrim(operation_name) <> ''",
+        name="ck_run_external_attempts_operation",
+    ),
+    CheckConstraint(
+        "operation_kind IN ('model', 'embedding', 'tool')",
+        name="ck_run_external_attempts_kind",
+    ),
+    CheckConstraint("attempt_no > 0", name="ck_run_external_attempts_attempt_no"),
+    CheckConstraint(
+        "request_hash ~ '^[0-9a-f]{64}$'",
+        name="ck_run_external_attempts_request_hash",
+    ),
+    CheckConstraint(
+        "result_hash IS NULL OR result_hash ~ '^[0-9a-f]{64}$'",
+        name="ck_run_external_attempts_result_hash",
+    ),
+    CheckConstraint(
+        "status IN ('reserved', 'dispatched', 'succeeded', 'failed', "
+        "'outcome_unknown', 'abandoned_before_dispatch')",
+        name="ck_run_external_attempts_status",
+    ),
+    CheckConstraint(
+        "((result_ref IS NULL AND result_hash IS NULL) OR "
+        "(result_ref IS NOT NULL AND result_hash IS NOT NULL))",
+        name="ck_run_external_attempts_result_pair",
+    ),
+    CheckConstraint(
+        "(dispatched_at IS NULL OR dispatched_at >= reserved_at) AND "
+        "(completed_at IS NULL OR completed_at >= "
+        "COALESCE(dispatched_at, reserved_at))",
+        name="ck_run_external_attempts_timestamps",
+    ),
+    CheckConstraint(
+        "((status = 'reserved' AND dispatched_at IS NULL AND completed_at IS NULL "
+        "AND provider_request_id IS NULL AND retryable IS NULL "
+        "AND error_code IS NULL AND result_ref IS NULL) OR "
+        "(status = 'dispatched' AND dispatched_at IS NOT NULL "
+        "AND completed_at IS NULL AND retryable IS NULL "
+        "AND error_code IS NULL AND result_ref IS NULL) OR "
+        "(status = 'succeeded' AND dispatched_at IS NOT NULL "
+        "AND completed_at IS NOT NULL AND retryable IS NULL "
+        "AND error_code IS NULL AND result_ref IS NOT NULL) OR "
+        "(status IN ('failed', 'outcome_unknown') "
+        "AND dispatched_at IS NOT NULL AND completed_at IS NOT NULL "
+        "AND retryable IS NOT NULL AND error_code IS NOT NULL "
+        "AND result_ref IS NULL) OR "
+        "(status = 'abandoned_before_dispatch' AND dispatched_at IS NULL "
+        "AND completed_at IS NOT NULL AND provider_request_id IS NULL "
+        "AND retryable IS NOT NULL AND error_code IS NOT NULL "
+        "AND result_ref IS NULL))",
+        name="ck_run_external_attempts_lifecycle",
+    ),
+    UniqueConstraint(
+        "run_id",
+        "operation_key",
+        "attempt_no",
+        name="uq_run_external_attempts_operation_attempt",
+    ),
+)
+
+Index(
+    "ix_run_external_attempts_recovery",
+    run_external_attempts.c.run_id,
+    run_external_attempts.c.status,
+    run_external_attempts.c.reserved_at,
+)
+Index(
+    "ix_run_external_attempts_provider_request",
+    run_external_attempts.c.provider_request_id,
+    postgresql_where=run_external_attempts.c.provider_request_id.is_not(None),
+)
+
+
+run_node_artifacts = Table(
+    "run_node_artifacts",
+    metadata,
+    Column("artifact_id", String(36), primary_key=True),
+    Column(
+        "run_id",
+        String(36),
+        ForeignKey(
+            "runs.run_id",
+            name="fk_run_node_artifacts_run",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+    ),
+    Column("node_name", String(64), nullable=False),
+    Column("artifact_kind", String(32), nullable=False),
+    Column("artifact_ref", String(255), nullable=False),
+    Column("payload_hash", String(64), nullable=False),
+    Column("payload", JSONB, nullable=True),
+    Column("lease_epoch", BigInteger, nullable=False),
+    Column(
+        "created_at", DateTime(timezone=True), nullable=False, server_default=func.now()
+    ),
+    CheckConstraint(
+        "btrim(node_name) <> '' AND btrim(artifact_ref) <> ''",
+        name="ck_run_node_artifacts_identity",
+    ),
+    CheckConstraint(
+        "artifact_kind IN ('retrieval', 'verification', 'terminal')",
+        name="ck_run_node_artifacts_kind",
+    ),
+    CheckConstraint(
+        "payload_hash ~ '^[0-9a-f]{64}$'",
+        name="ck_run_node_artifacts_payload_hash",
+    ),
+    CheckConstraint(
+        "payload IS NULL OR jsonb_typeof(payload) = 'object'",
+        name="ck_run_node_artifacts_payload",
+    ),
+    CheckConstraint("lease_epoch >= 0", name="ck_run_node_artifacts_lease_epoch"),
+    UniqueConstraint(
+        "run_id",
+        "node_name",
+        "artifact_kind",
+        "artifact_ref",
+        name="uq_run_node_artifacts_identity",
+    ),
+)
+
+Index(
+    "ix_run_node_artifacts_node_created",
+    run_node_artifacts.c.run_id,
+    run_node_artifacts.c.node_name,
+    run_node_artifacts.c.created_at,
+)
+
+
+_M5_CHECKPOINT_STATE_KEYS = (
+    "run_id",
+    "session_id",
+    "user_id",
+    "schema_version",
+    "graph_version",
+    "retrieval_config_hash",
+    "question",
+    "bounded_history_refs",
+    "snapshot_id",
+    "embedding_profile_id",
+    "analysis",
+    "proposed_queries",
+    "completed_query_hashes",
+    "retrieval_rounds_used",
+    "model_attempts_used",
+    "tool_attempts_used",
+    "embedding_attempts_used",
+    "execution_deadline_at",
+    "budget_ledger_ref",
+    "retrieved_evidence_refs",
+    "immutable_evidence_hashes",
+    "retrieved_artifact_ref",
+    "retrieved_artifact_hash",
+    "answer_draft_ref",
+    "verification_result_ref",
+    "verification_result_hash",
+    "last_completed_node",
+    "checkpoint_id",
+    "stop_reason",
+    "last_error_code",
+    "route",
+    "completion_status",
+    "next_node",
+)
+_M5_CHECKPOINT_STATE_KEYS_SQL = "ARRAY[{}]::text[]".format(
+    ", ".join(f"'{key}'" for key in _M5_CHECKPOINT_STATE_KEYS)
+)
+
+
+run_checkpoints = Table(
+    "run_checkpoints",
+    metadata,
+    Column(
+        "run_id",
+        String(36),
+        ForeignKey(
+            "runs.run_id",
+            name="fk_run_checkpoints_run",
+            ondelete="CASCADE",
+        ),
+        primary_key=True,
+    ),
+    Column("checkpoint_namespace", String(255), primary_key=True),
+    Column("checkpoint_id", String(255), primary_key=True),
+    Column("parent_checkpoint_id", String(255), nullable=True),
+    Column("schema_version", Integer, nullable=False),
+    Column("graph_version", String(64), nullable=False),
+    Column("retrieval_config_hash", String(64), nullable=False),
+    Column("last_completed_node", String(64), nullable=True),
+    Column("state_payload", JSONB, nullable=False),
+    Column("state_hash", String(64), nullable=False),
+    Column("lease_epoch", BigInteger, nullable=False),
+    Column(
+        "created_at", DateTime(timezone=True), nullable=False, server_default=func.now()
+    ),
+    CheckConstraint(
+        "btrim(checkpoint_namespace) <> '' AND btrim(checkpoint_id) <> ''",
+        name="ck_run_checkpoints_identity",
+    ),
+    CheckConstraint(
+        "parent_checkpoint_id IS NULL OR parent_checkpoint_id <> checkpoint_id",
+        name="ck_run_checkpoints_parent_not_self",
+    ),
+    CheckConstraint("schema_version > 0", name="ck_run_checkpoints_schema_version"),
+    CheckConstraint("lease_epoch >= 0", name="ck_run_checkpoints_lease_epoch"),
+    CheckConstraint(
+        "retrieval_config_hash ~ '^[0-9a-f]{64}$'",
+        name="ck_run_checkpoints_config_hash",
+    ),
+    CheckConstraint(
+        "state_hash ~ '^[0-9a-f]{64}$'",
+        name="ck_run_checkpoints_state_hash",
+    ),
+    CheckConstraint(
+        "jsonb_typeof(state_payload) = 'object' "
+        f"AND state_payload ?& {_M5_CHECKPOINT_STATE_KEYS_SQL} "
+        f"AND (state_payload - {_M5_CHECKPOINT_STATE_KEYS_SQL}) = '{{}}'::jsonb "
+        "AND jsonb_typeof(state_payload -> 'run_id') = 'string' "
+        "AND state_payload ->> 'run_id' = run_id "
+        "AND jsonb_typeof(state_payload -> 'schema_version') = 'number' "
+        "AND (state_payload ->> 'schema_version')::integer = schema_version "
+        "AND jsonb_typeof(state_payload -> 'graph_version') = 'string' "
+        "AND state_payload ->> 'graph_version' = graph_version "
+        "AND jsonb_typeof(state_payload -> 'retrieval_config_hash') = 'string' "
+        "AND state_payload ->> 'retrieval_config_hash' = retrieval_config_hash "
+        "AND jsonb_typeof(state_payload -> 'checkpoint_id') = 'string' "
+        "AND state_payload ->> 'checkpoint_id' = checkpoint_id "
+        "AND (state_payload ->> 'last_completed_node') "
+        "IS NOT DISTINCT FROM last_completed_node "
+        "AND state_payload -> 'answer_draft_ref' = 'null'::jsonb",
+        name="ck_run_checkpoints_state_payload",
+    ),
+    ForeignKeyConstraint(
+        ["run_id", "checkpoint_namespace", "parent_checkpoint_id"],
+        [
+            "run_checkpoints.run_id",
+            "run_checkpoints.checkpoint_namespace",
+            "run_checkpoints.checkpoint_id",
+        ],
+        name="fk_run_checkpoints_parent",
+        deferrable=True,
+        initially="DEFERRED",
+    ),
+)
+
+Index(
+    "ix_run_checkpoints_run_created",
+    run_checkpoints.c.run_id,
+    run_checkpoints.c.created_at,
+)
+Index(
+    "ix_run_checkpoints_lease",
+    run_checkpoints.c.run_id,
+    run_checkpoints.c.checkpoint_namespace,
+    run_checkpoints.c.lease_epoch,
 )
 
 
@@ -705,7 +1132,9 @@ run_events = Table(
     CheckConstraint(
         "event_type IN ('run.queued', 'run.started', 'retrieval.completed', "
         "'generation.started', 'verification.completed', 'answer.final', "
-        "'run.failed', 'run.cancelled', 'run.interrupted')",
+        "'run.failed', 'run.cancelled', 'run.interrupted', "
+        "'run.resume_requested', 'run.resumed', 'attempt.outcome_unknown', "
+        "'run.completed_with_limits', 'run.needs_clarification')",
         name="ck_run_events_type",
     ),
 )
