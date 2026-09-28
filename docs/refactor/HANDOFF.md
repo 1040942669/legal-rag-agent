@@ -3,13 +3,13 @@
 ## 当前结论
 
 - 当前里程碑：M4，计划版本 `v0.5.0`。
-- 当前状态：`v0.5.0` 软件已经发布并完成远端核验；独立发布回执、Issue/Milestone 收口与最终文档状态仍待完成，因此治理状态为 `released_receipt_pending`，不是完全收口的 `released`。
-- 当前分支：`codex/m4-release-receipt`，基于软件 release target `670e005a081cffa36a75af2b202e50eb2b859c3d`。
+- 当前状态：M4 已完整收口为 `released`。`v0.5.0` 软件、独立发布回执、回执 merge 后 master CI、Issue #16 与 Milestone 5 均已远端核验；本分支只把这些已经发生的事实写回最终文档。
+- 当前分支：`codex/m4-release-finalize`，基于 receipt merge target `0ece1e4bb2c34ff0a4e41e0ff987a9c7420285de`。
 - 起始基线：`origin/master` `61f1065fc6d5678d0d57114e2e361294d04906b4`。
 - 软件实现 [PR #17](https://github.com/1040942669/legal-rag-agent/pull/17) 与测试稳定性 [PR #18](https://github.com/1040942669/legal-rag-agent/pull/18) 均已正常合并；未使用 admin、force、squash 或 rebase 绕过。
 - annotated `v0.5.0` Tag 对象 `36d6883cc1bc29f09f7be5625db458739bce4335` 精确 peeled 到 `670e005a...`；[GitHub Release](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.5.0) 于 `2026-09-28T19:59:42Z` 发布，非 draft、非 prerelease、附件 0。
-- 独立回执 [PR #19](https://github.com/1040942669/legal-rag-agent/pull/19) 已创建为 draft；首个候选 `4245372cc24fc8a19c9ad87d23d95d26c48ad778` 的 [run 36478018148](https://github.com/1040942669/legal-rag-agent/actions/runs/36478018148) 两个 job 均成功。对抗审查发现 PR/head 字段和已经发生的 PR/CI 尚未回填，因此正在形成修正后的 final head；旧候选绿灯不会外推到新 head。按既有里程碑惯例，在 receipt merge/master CI 与治理关闭前，`last_verified_release` 仍保留 M3。
-- [Issue #16](https://github.com/1040942669/legal-rag-agent/issues/16) 与 [Milestone 5](https://github.com/1040942669/legal-rag-agent/milestone/5) 当前仍 open；这是有意的 fail-closed 状态，必须等待回执 merge 后 master CI 成功才关闭。
+- 独立回执 [PR #19](https://github.com/1040942669/legal-rag-agent/pull/19) 的 final head `b1b41d59...` 通过 [run 36480188286](https://github.com/1040942669/legal-rag-agent/actions/runs/36480188286) 两个 job 后，普通合并为 `0ece1e4bb2c34ff0a4e41e0ff987a9c7420285de`；该精确 master commit 的 [run 36481058959](https://github.com/1040942669/legal-rag-agent/actions/runs/36481058959) 两个 job 也成功。没有 admin、force、squash 或 rebase 绕过。
+- [Issue #16](https://github.com/1040942669/legal-rag-agent/issues/16) 于 `2026-09-28T20:49:07Z` 关闭；确认 open issues 为 0 后，[Milestone 5](https://github.com/1040942669/legal-rag-agent/milestone/5) 于 `2026-09-28T20:49:11Z` 关闭。`last_verified_release` 已更新为 M4 / `v0.5.0`。
 
 ## 已推送实现提交
 
@@ -20,6 +20,7 @@
 5. `e49eb949639ab48afba32c021121d30485f08b8a`：`docs(m4): prepare release candidate`，PR #17 最终 head
 6. `0d7de0c101af62c832927b2b78bd03e400debf81`：`test(m4): stabilize timeout isolation evidence`，PR #18 最终 head
 7. `4245372cc24fc8a19c9ad87d23d95d26c48ad778`：`docs(m4): record verified v0.5.0 release receipt`，PR #19 首个候选
+8. `b1b41d59e53740d5b00a035b392c670ff6df1fa1`：`docs(m4): finalize release receipt candidate`，PR #19 final head
 
 不得 amend 已共享提交，不得强推。候选文档、最终包证据和远端事实使用后续普通提交追加。
 
@@ -135,6 +136,8 @@ Authorization: Bearer token
 - release-target [run 36475260433](https://github.com/1040942669/legal-rag-agent/actions/runs/36475260433) 在 `670e005a...` 上两个 job 成功；41/41 累计门禁、79/79 integration、数据库服务重启、独立应用进程重启、wheel 构建与隔离安装探测均通过。
 - master service artifact digest：`sha256:78d859422f562c2c55273e725b3860d882469d41607d5feb46ca62807260e3b0`；M4 gate JSON SHA-256：`2320d3a8f173cc2086d3ba8adb669f8b29bc9c5ea8341e1b62e81443e19d0962`；JUnit SHA-256：`23dfa035761eb860192531ef374032e77d1efec2245ed2be32682e47d8e3155c`。
 - master wheel：`legal_rag_assistant-0.5.0-py3-none-any.whl`，`352218` bytes、`78` entries、SHA-256 `f59a054c04b4a16971fbc9b3f97516b9f29b50787f5bd5c6608ecbb88bbd31a7`。
+- receipt PR #19 final head `b1b41d59...` 的 [run 36480188286](https://github.com/1040942669/legal-rag-agent/actions/runs/36480188286) 两个 job 成功：41/41 cumulative gate、79/79 integration、JUnit 0 failure/error/skip；offline/service artifact digest 分别为 `sha256:2c699ef563317302bb169be7b945de3e847eb3c135f9da1924c809c1afcc372d` 和 `sha256:0a5aea0a914777c82fc2f31b7863cebe55a16a6dbbb9f629c96d1c093f3f5bdd`。
+- receipt merge `0ece1e4...` 的 [master run 36481058959](https://github.com/1040942669/legal-rag-agent/actions/runs/36481058959) 两个 job 成功：41/41 cumulative gate、79/79 integration、JUnit 0 failure/error/skip；offline/service artifact digest 分别为 `sha256:d90f3ff69ebe91fca33104aad37cd93974e34bbdd3eedf0a1742e6afba4031dd` 和 `sha256:b4b86d9a276cbca032bcc2811506d756c65d8e71dc590039a0e6978893263a6d`。
 
 - 完整离线套件：`801 passed, 1 warning, 157 subtests passed`。
 - 累计门禁内 JUnit：`958 tests, 0 failures, 0 errors, 0 skipped`。
@@ -168,13 +171,12 @@ Authorization: Bearer token
 | M4-T07 | 数据库不可用、执行超时、输入过长可归因且脱敏；旧线程晚写和跨 lease row-lock 写入均被 fence |
 | M4-T08 | 原 CLI import/help 与 optional service 隔离；production provider-free wiring 和候选 wheel 双入口可验证 |
 
-## 软件发布后仍需完成
+## 软件发布后的治理闭环
 
-1. 提交并推送当前 `codex/m4-release-receipt` 的审查修正，回填既有 PR #19、首个 candidate SHA 与其成功 CI。
-2. 要求 PR #19 修正后的精确最终 head 同时通过 offline 与 M4 service 两个 job；正常合并，不使用 admin、force、squash 或 rebase。
-3. 要求 receipt merge commit 的 master push 两个 job 都成功。只有此后才关闭 Issue #16；确认 Milestone 5 的 open issue 数为 0 后再关闭 milestone。
-4. 从最新 master 创建小型 documentation-only finalize PR，回填 receipt PR 最终 head、merge SHA、master CI、Issue/Milestone 关闭时间，并把 M4 状态改为 `released`。该 finalize PR 自身不制造无限自引用回执链。
-5. 整个过程不移动或覆盖 `v0.5.0`，不开始 M5，不调用 live/paid model。
+1. PR #19 首候选和修正 final head 均分别通过 exact-head CI；final head 之后正常 merge。
+2. receipt merge commit 的 master push 两个 job 成功后，Issue #16 才关闭；Milestone 5 在 open issue 数为 0 后才关闭。
+3. 当前 documentation-only finalize 只记录上述远端事实，把 M4 状态更新为 `released`。它不移动或覆盖 `v0.5.0`，也不制造无限自引用回执链。
+4. M5 未开始；任何 M5 代码、真实/付费模型调用或生产部署都需要新的明确授权。
 
 ## 已知限制与提升优先级
 
@@ -206,4 +208,4 @@ Authorization: Bearer token
 
 ## 停止条件
 
-M4 只有在软件 PR、release-target master CI、annotated Tag、GitHub Release、独立 receipt PR、receipt merge 后 master CI、Issue #16 与 Milestone 5 收口、最终文档状态全部远端核验后才标记 `released`。完成后停止。M5 必须等待新的明确授权。
+M4 的软件 PR、release-target master CI、annotated Tag、GitHub Release、独立 receipt PR、receipt merge 后 master CI、Issue #16、Milestone 5 与最终文档状态均已收口，状态为 `released`。将当前 documentation-only finalize 分支创建 PR，在精确 final head CI 成功后按保护规则正常合并，并确认精确 merge target 的 master CI 后停止；该 PR 自身不再生成递归回执。M5 保持 `not_started`，必须等待新的明确授权。

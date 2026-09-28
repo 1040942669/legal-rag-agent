@@ -35,19 +35,56 @@
       "wheel_size_bytes": 352679
     }
   },
-  "receipt_final_sha": null,
-  "receipt_final_ci_url": null,
-  "receipt_final_ci_artifacts": null,
-  "receipt_merge_sha": null,
-  "receipt_master_ci_url": null,
-  "receipt_master_ci_sha": null,
-  "receipt_master_ci_artifacts": null,
+  "receipt_final_sha": "b1b41d59e53740d5b00a035b392c670ff6df1fa1",
+  "receipt_final_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36480188286",
+  "receipt_final_ci_artifacts": {
+    "offline": {
+      "name": "m2-quality-gate-b1b41d59e53740d5b00a035b392c670ff6df1fa1-1",
+      "digest": "sha256:2c699ef563317302bb169be7b945de3e847eb3c135f9da1924c809c1afcc372d",
+      "gate_json_sha256": "25c53671d44737dd54c80a6727c264b5c180e0609bcb9eb9212647154fea6e60"
+    },
+    "service": {
+      "name": "m4-service-b1b41d59e53740d5b00a035b392c670ff6df1fa1-1",
+      "digest": "sha256:0a5aea0a914777c82fc2f31b7863cebe55a16a6dbbb9f629c96d1c093f3f5bdd",
+      "gate_json_sha256": "a060d680135530f1341e8e26ea65b3596e8625d9a90ecd19df114a83a18f9d31",
+      "junit_sha256": "43d61fa3322a4b94a3339226cb8d15cbede724d41963954553b37c1503dc417b",
+      "restart_prepare_sha256": "6e69aa9fa2728b40d654c644b2fc1dd31aaabab39bcb8557d683424ab0f58345",
+      "restart_verify_sha256": "d9594778fa287217112db291dacc948e27b37aff8ca0cd112c6f1b9b7926a2c9",
+      "process_restart_receipt_sha256": "fc518cada70d1b1aded3c1d52c3b2ea0da9121e127058087edee0ad66e709b37",
+      "wheel_probe_receipt_sha256": "b94cd33723a3fa8c2e86b694fa44561a7a44f3294272fb5e7ed538156b4894f6",
+      "wheel_sha256": "0355974474a5799618f243e3945ced725bc39ab9bafda8ddbbac40c7a4cfa057",
+      "wheel_size_bytes": 352775
+    }
+  },
+  "receipt_merge_sha": "0ece1e4bb2c34ff0a4e41e0ff987a9c7420285de",
+  "receipt_pr_merged_at": "2026-09-28T20:42:07Z",
+  "receipt_master_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36481058959",
+  "receipt_master_ci_sha": "0ece1e4bb2c34ff0a4e41e0ff987a9c7420285de",
+  "receipt_master_ci_artifacts": {
+    "offline": {
+      "name": "m2-quality-gate-0ece1e4bb2c34ff0a4e41e0ff987a9c7420285de-1",
+      "digest": "sha256:d90f3ff69ebe91fca33104aad37cd93974e34bbdd3eedf0a1742e6afba4031dd",
+      "gate_json_sha256": "d92d1c64152921b8a074dd8b511e06df827bad6a5e0c3e5b2bfd93f30f66e14c"
+    },
+    "service": {
+      "name": "m4-service-0ece1e4bb2c34ff0a4e41e0ff987a9c7420285de-1",
+      "digest": "sha256:b4b86d9a276cbca032bcc2811506d756c65d8e71dc590039a0e6978893263a6d",
+      "gate_json_sha256": "28192cddcf0dce596ceec19769f617d16ec8fe3689f37a56443c7fd4e88eea9e",
+      "junit_sha256": "bd6be4cd641160501dfc3782c27433d8d3b65018b433440c517661e48399b851",
+      "restart_prepare_sha256": "4e12ac9f3595410094f0b1186cd3c3ace42576a0bb2226b9423c4ad80b84fbcd",
+      "restart_verify_sha256": "3d0e6a23a387dd058733360df7502f8a8de2c7b80978d6de231be58fcbac7c2f",
+      "process_restart_receipt_sha256": "626a43dfc4516994dfd50eec2dcfba82565e4ed24363049b1191225123b839f9",
+      "wheel_probe_receipt_sha256": "93c73108d36f06e7f3ad8f016e03f04aa94fd27263fa5c78ce467acb7d05467d",
+      "wheel_sha256": "bacf88b9692bc5e29f66fa20c0c72975ca47d03914b48224899c5eabc254d2a5",
+      "wheel_size_bytes": 352775
+    }
+  },
   "issue_url": "https://github.com/1040942669/legal-rag-agent/issues/16",
-  "issue_state": "open",
-  "issue_closed_at": null,
+  "issue_state": "closed",
+  "issue_closed_at": "2026-09-28T20:49:07Z",
   "milestone_url": "https://github.com/1040942669/legal-rag-agent/milestone/5",
-  "milestone_state": "open",
-  "milestone_closed_at": null,
+  "milestone_state": "closed",
+  "milestone_closed_at": "2026-09-28T20:49:11Z",
   "final_pr_head_sha": "e49eb949639ab48afba32c021121d30485f08b8a",
   "initial_merge_sha": "e78984f548dc0885e3bdf26d62565f39dd61af01",
   "stabilization_pr_head_sha": "0d7de0c101af62c832927b2b78bd03e400debf81",
@@ -138,7 +175,7 @@
   "release_is_immutable": false,
   "release_asset_count": 0,
   "published_at": "2026-09-28T19:59:42Z",
-  "verified_at": "2026-09-28T20:01:37Z",
+  "verified_at": "2026-09-28T20:49:11Z",
   "verification_method": "GitHub Release API/CLI confirmed the published non-draft and non-prerelease release; GitHub Git Data API confirmed the annotated tag object and peeled target; GitHub Actions confirmed successful exact-head PR, stabilization PR and release-target master runs; the failed initial master run was preserved; downloaded artifacts were hashed locally.",
   "acceptance_report": "reports/refactor/M4.md",
   "package_evidence": {
@@ -203,6 +240,6 @@
     "Readiness performs bounded serving-boundary checks rather than a full row-by-row corpus audit, and the default HTTP route does not yet expose exact dense, catalog or experimental HNSW retrieval.",
     "Alembic 0005 downgrade deletes all M4 session, run, message, result, idempotency and event history and therefore requires an explicitly approved backup and rollback procedure."
   ],
-  "receipt_status": "verified_release_receipt_pending_merge",
-  "note": "The software PR, stabilization PR, exact release-target CI, annotated tag and GitHub Release are verified. Receipt PR #19 exists and its first candidate 4245372 passed both exact-head CI jobs; the corrected final receipt head, its merge and master CI, Issue #16 closure, Milestone 5 closure and documentation-only final state remain pending. The v0.5.0 tag is fixed at the software release target and must not be moved."
+  "receipt_status": "verified",
+  "note": "The software PR, stabilization PR, exact release-target CI, annotated tag, GitHub Release, receipt PR #19 final-head CI, normal receipt merge, exact receipt merge-target master CI, Issue #16 closure and Milestone 5 closure are verified. This documentation-only finalization records those already completed external facts and intentionally does not create a recursive receipt for itself. The v0.5.0 tag remains fixed at the software release target and was not moved."
 }
