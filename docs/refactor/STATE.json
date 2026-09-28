@@ -7,14 +7,14 @@
     "observed_default_branch": "master",
     "observed_baseline_commit": "61f1065fc6d5678d0d57114e2e361294d04906b4",
     "observed_on": "2026-09-29",
-    "workspace_head": "0ece1e4bb2c34ff0a4e41e0ff987a9c7420285de",
-    "workspace_head_note": "Verified M4 receipt merge target and base of the documentation-only finalization branch. The finalization commit intentionally records already completed external facts without moving the immutable v0.5.0 software tag or creating a recursive receipt chain.",
-    "workspace_branch": "codex/m4-release-finalize",
+    "workspace_head": "979c12fab74ec0911bfa93fd9de07f7437c1eb5d",
+    "workspace_head_note": "Latest pushed M5 pre-documentation candidate. The exact final PR head, merge target, tag, GitHub Release, and release receipt remain pending and must be recorded only after remote verification.",
+    "workspace_branch": "codex/m5-harness-recovery",
     "workspace_dirty": false,
     "remote_tags_checked": true
   },
-  "execution_status": "released",
-  "active_milestone": "M4",
+  "execution_status": "ready_for_review",
+  "active_milestone": "M5",
   "last_verified_release": {
     "milestone_id": "M4",
     "version": "v0.5.0",
@@ -605,23 +605,70 @@
       "name": "Harness与恢复",
       "planned_version": "v0.6.0",
       "required": true,
-      "status": "not_started",
-      "branch": null,
-      "issue_url": null,
-      "milestone_url": null,
-      "pr_url": null,
-      "candidate_sha": null,
+      "status": "ready_for_review",
+      "branch": "codex/m5-harness-recovery",
+      "receipt_branch": "codex/m5-release-receipt",
+      "issue_url": "https://github.com/1040942669/legal-rag-agent/issues/21",
+      "issue_state": "open",
+      "milestone_url": "https://github.com/1040942669/legal-rag-agent/milestone/6",
+      "milestone_state": "open",
+      "pr_url": "https://github.com/1040942669/legal-rag-agent/pull/22",
+      "pr_state": "open_draft",
+      "candidate_sha": "979c12fab74ec0911bfa93fd9de07f7437c1eb5d",
+      "candidate_sha_role": "latest_pushed_pre_documentation_candidate",
+      "implementation_commits": [
+        "4a7dc54e15fd0f7a48d0acea78dd91945890e8db",
+        "d6f50c8e719b257bd5a3fea36e867268b3cb8243",
+        "ae65907e5e34abaa2461c28d420e7ee23e2630f3",
+        "27c0179b176f8474365db1c805787324482343e5",
+        "a0dd830c879abd6b17288abb1034857c4c5b3696",
+        "7ba6ae831ba6f3cf0fa5739f87033fffe59bc763",
+        "aaa56131743da94d25b38beb670a4b6f8c4d7f53",
+        "979c12fab74ec0911bfa93fd9de07f7437c1eb5d"
+      ],
       "release_target_sha": null,
       "tag": null,
       "release_url": null,
       "remote_release_verified": false,
       "tests": {
-        "status": "not_run",
-        "passed": null,
-        "failed": null,
-        "skipped": null,
-        "report_path": null
+        "status": "passed",
+        "passed": 921,
+        "failed": 0,
+        "skipped": 0,
+        "subtests_passed": 157,
+        "m5_exact_suite_passed": 81,
+        "m5_fault_scenarios_passed": 10,
+        "local_postgresql_major": 18,
+        "local_pgvector_version": "0.8.1",
+        "mandatory_tests_passed": 10,
+        "mandatory_tests_total": 10,
+        "cumulative_mandatory_checks_passed": 51,
+        "cumulative_mandatory_checks_total": 51,
+        "live_model_calls": 0,
+        "report_path": "reports/refactor/M5.md",
+        "scope": "Provider-free M0-M5 engineering evidence. Exact final PR-head and release-target CI evidence, tag, release, and independent receipt are still pending."
       },
+      "interim_progress": {
+        "completed_subtasks": [
+          "A: JSON-only LangGraph state, bounded budgets, retry policy, and PostgreSQL checkpointer configuration",
+          "B: Alembic 0006 recovery schema, durable application projections, absolute deadlines, and lease epoch fencing",
+          "C: real bounded graph execution, side-effect journal, outcome_unknown reconciliation, and explicit resume API",
+          "D: parent-linked clarification follow-up runs with independent budgets and M4 idempotency compatibility",
+          "E: independent-process M5-T01 through M5-T10 fault injection, exact-HEAD receipt, cumulative gate, and isolated wheel probe"
+        ],
+        "latest_pushed_candidate_sha": "979c12fab74ec0911bfa93fd9de07f7437c1eb5d",
+        "pre_documentation_local_full_suite": "921 passed, 157 subtests passed",
+        "pre_documentation_local_exact_m5_suite": "81 passed",
+        "pre_documentation_fault_receipt_schema_errors": 0,
+        "release_status": "not_published"
+      },
+      "release_requirements_remaining": [
+        "Commit and push the candidate documentation and state update.",
+        "Pass the cumulative 51-check gate and all required CI jobs on the exact final PR head.",
+        "Normally merge PR #22 without bypassing review or branch protection, then pass CI on the exact master merge target.",
+        "Create and verify annotated tag v0.6.0 and a non-draft, non-prerelease GitHub Release at the verified release target.",
+        "Record immutable release facts in an independent receipt PR, pass its exact-head and post-merge master CI, then close Issue #21 and Milestone 6."
+      ],
       "blockers": []
     },
     {
@@ -673,5 +720,5 @@
       "blockers": []
     }
   ],
-  "next_action": "Stop after the documentation-only finalization is normally merged and its exact master CI is verified. Do not start M5 without new explicit authorization."
+  "next_action": "Finish M5 candidate documentation, pass exact final-head CI, normally merge PR #22, verify release-target master CI, publish immutable v0.6.0 artifacts, complete the independent receipt chain, and then stop without starting M6."
 }
