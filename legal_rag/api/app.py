@@ -59,7 +59,6 @@ from .schemas import (
 )
 from .settings import ServiceSettings
 
-
 M5_ALEMBIC_HEAD = "0006_m5_harness_recovery"
 # Kept as an import-compatible alias for M4 clients and tests.
 M4_ALEMBIC_HEAD = M5_ALEMBIC_HEAD
@@ -110,6 +109,7 @@ def _run_response(record: RunRecord) -> RunResponse:
     return RunResponse(
         run_id=record.run_id,
         session_id=record.session_id,
+        parent_run_id=record.parent_run_id,
         status=record.status,
         snapshot_id=record.snapshot_id,
         snapshot_revision=record.snapshot_revision,
@@ -120,6 +120,9 @@ def _run_response(record: RunRecord) -> RunResponse:
         started_at=record.started_at,
         finished_at=record.finished_at,
         error_code=record.error_code,
+        last_completed_node=record.last_completed_node,
+        execution_deadline_at=record.execution_deadline_at,
+        stop_reason=record.stop_reason,
         answer=dict(result.answer_payload) if result is not None else None,
         evidence=dict(result.evidence_payload) if result is not None else None,
         verification=(
@@ -471,6 +474,7 @@ def create_app(
                 422, "input_too_long", "question exceeds the configured limit"
             )
         payload = body.model_dump(mode="json", exclude_none=True)
+        parent_run_id = payload.pop("parent_run_id", None)
         record, replayed = await run_in_threadpool(
             service.create_run,
             principal,
@@ -478,6 +482,7 @@ def create_app(
             idempotency_key,
             payload,
             resolved_settings.graph_version,
+            parent_run_id=parent_run_id,
         )
         if not replayed:
             supervisor.wake()

@@ -42,6 +42,7 @@ M5_TEST_SELECTORS: dict[str, tuple[str, ...]] = {
     ),
     "M5-T04": (
         "integration_tests/test_m5_budget_and_errors.py::test_m5_t04_adversarial_followup_requests_stop_at_durable_global_budgets",
+        "integration_tests/test_m5_followup_runs.py::test_m5_t04_clarification_followup_creates_new_parent_bound_run",
     ),
     "M5-T05": (
         "tests/test_m5_retry_policy.py::test_m5_t05_retryable_429_and_timeout_retry_once_and_consume_attempts",

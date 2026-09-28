@@ -51,6 +51,7 @@ class RetrievalOptions(StrictModel):
 class RunCreateRequest(StrictModel):
     question: str = Field(min_length=1, max_length=100_000)
     snapshot_id: str | None = Field(default=None, min_length=1, max_length=255)
+    parent_run_id: str | None = Field(default=None, min_length=1, max_length=36)
     retrieval: RetrievalOptions = Field(default_factory=RetrievalOptions)
 
     @field_validator("question")
@@ -70,6 +71,17 @@ class RunCreateRequest(StrictModel):
             raise ValueError("snapshot_id is invalid")
         return value
 
+    @field_validator("parent_run_id")
+    @classmethod
+    def normalize_parent_run_id(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        if value != value.strip() or any(
+            ord(character) < 32 or 127 <= ord(character) <= 159 for character in value
+        ):
+            raise ValueError("parent_run_id is invalid")
+        return value
+
 
 class RunAcceptedResponse(StrictModel):
     run_id: str
@@ -82,6 +94,7 @@ class RunAcceptedResponse(StrictModel):
 class RunResponse(StrictModel):
     run_id: str
     session_id: str
+    parent_run_id: str | None
     status: str
     snapshot_id: str
     snapshot_revision: int
@@ -92,6 +105,9 @@ class RunResponse(StrictModel):
     started_at: datetime | None
     finished_at: datetime | None
     error_code: str | None
+    last_completed_node: str | None
+    execution_deadline_at: datetime | None
+    stop_reason: str | None
     answer: dict[str, Any] | None = None
     evidence: dict[str, Any] | None = None
     verification: dict[str, Any] | None = None

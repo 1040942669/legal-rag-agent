@@ -66,14 +66,11 @@ from legal_rag.storage.schema import (
     snapshot_activation_events,
 )
 
-
 JSONMapping = Mapping[str, Any]
 
 ACTIVE_RUN_STATUSES = frozenset({"queued", "running", "interrupted"})
 ANSWER_BEARING_RUN_STATUSES = frozenset(HARNESS_TERMINAL_STATUSES)
-TERMINAL_RUN_STATUSES = frozenset(
-    {*ANSWER_BEARING_RUN_STATUSES, "failed", "cancelled"}
-)
+TERMINAL_RUN_STATUSES = frozenset({*ANSWER_BEARING_RUN_STATUSES, "failed", "cancelled"})
 STAGE_EVENT_TYPES = frozenset(
     {
         "retrieval.completed",
@@ -147,6 +144,7 @@ _REQUEST_RESERVED_FIELDS = frozenset(
         "graph_version",
         "lease_expires_at",
         "lease_owner",
+        "parent_run_id",
         "profile_id",
         "scope_id",
         "snapshot_revision",
@@ -517,9 +515,7 @@ def _safe_stage_event_payload(event_type: str, value: Any) -> dict[str, Any]:
             )
     elif event_type == "verification.completed":
         if type(payload["passed"]) is not bool:
-            raise UnsafePayloadError(
-                f"{event_type} payload passed must be a boolean"
-            )
+            raise UnsafePayloadError(f"{event_type} payload passed must be a boolean")
         if type(payload["fallback_used"]) is not bool:
             raise UnsafePayloadError(
                 f"{event_type} payload fallback_used must be a boolean"
@@ -556,11 +552,7 @@ def _safe_failure_payload(
     retryable = payload.get("retryable")
     if retryable is not None and type(retryable) is not bool:
         raise UnsafePayloadError("run.failed payload retryable must be a boolean")
-    details = {
-        key: payload[key]
-        for key in ("stage", "retryable")
-        if key in payload
-    }
+    details = {key: payload[key] for key in ("stage", "retryable") if key in payload}
     details["status"] = "failed"
     details["error_code"] = error_code
     return details
@@ -1076,14 +1068,24 @@ class RunService:
             graph_version, "graph_version", 64
         )
         payload = _canonical_request_payload(request_payload)
-        request_hash = canonical_json_sha256(payload)
-        retrieval_config = _retrieval_configuration(payload)
-        retrieval_config_hash = canonical_json_sha256(retrieval_config)
         resolved_parent_run_id = (
             None
             if parent_run_id is None
             else _canonical_identifier(parent_run_id, "parent_run_id", 36)
         )
+        # Preserve the M4 hash for ordinary runs so an unexpired idempotency
+        # key remains replayable during the M5 rollout.  Follow-up runs bind
+        # the parent into the hash, preventing one key from being replayed
+        # against a different clarification lineage.
+        request_hash = (
+            canonical_json_sha256(payload)
+            if resolved_parent_run_id is None
+            else canonical_json_sha256(
+                {"request": payload, "parent_run_id": resolved_parent_run_id}
+            )
+        )
+        retrieval_config = _retrieval_configuration(payload)
+        retrieval_config_hash = canonical_json_sha256(retrieval_config)
 
         with self.engine.begin() as connection:
             session_row = self._session_row(
@@ -1500,14 +1502,34 @@ class RunService:
             )
             recovered: list[RunRecord] = []
             for row in stale_rows:
+                checkpoint_created_at = None
+                if (
+                    row["checkpoint_namespace"] is not None
+                    and row["last_checkpoint_id"] is not None
+                ):
+                    checkpoint_created_at = connection.scalar(
+                        select(run_checkpoints.c.created_at).where(
+                            run_checkpoints.c.run_id == row["run_id"],
+                            run_checkpoints.c.checkpoint_namespace
+                            == row["checkpoint_namespace"],
+                            run_checkpoints.c.checkpoint_id
+                            == row["last_checkpoint_id"],
+                        )
+                    )
+                # A successful model attempt newer than the latest trusted
+                # checkpoint has only an in-process result.  The old worker
+                # observed the provider response, but a new worker cannot
+                # reconstruct it from the placeholder attempt reference.
+                # Reconcile both planner and generator windows conservatively
+                # instead of silently dispatching either model again.
                 attempts = (
                     connection.execute(
-                        select(run_external_attempts).where(
+                        select(run_external_attempts)
+                        .where(
                             run_external_attempts.c.run_id == row["run_id"],
-                            run_external_attempts.c.lease_epoch
-                            == row["lease_epoch"],
+                            run_external_attempts.c.lease_epoch == row["lease_epoch"],
                             run_external_attempts.c.status.in_(
-                                ("reserved", "dispatched")
+                                ("reserved", "dispatched", "succeeded")
                             ),
                         )
                         .order_by(run_external_attempts.c.reserved_at)
@@ -1518,7 +1540,22 @@ class RunService:
                 )
                 unknown_count = 0
                 for attempt in attempts:
-                    if attempt["status"] == "dispatched":
+                    if attempt["status"] == "succeeded":
+                        if attempt["operation_kind"] != "model":
+                            continue
+                        if (
+                            checkpoint_created_at is not None
+                            # Equal timestamps are conservatively unresolved:
+                            # database clocks can have coarser precision than
+                            # the transaction ordering we need to prove here.
+                            and attempt["completed_at"] < checkpoint_created_at
+                        ):
+                            continue
+                        status = "outcome_unknown"
+                        error_code = "provider_result_not_durable"
+                        retryable = False
+                        unknown_count += 1
+                    elif attempt["status"] == "dispatched":
                         status = "outcome_unknown"
                         error_code = "provider_outcome_unknown"
                         retryable = False
@@ -1530,14 +1567,15 @@ class RunService:
                     connection.execute(
                         update(run_external_attempts)
                         .where(
-                            run_external_attempts.c.attempt_id
-                            == attempt["attempt_id"],
+                            run_external_attempts.c.attempt_id == attempt["attempt_id"],
                             run_external_attempts.c.status == attempt["status"],
                         )
                         .values(
                             status=status,
                             retryable=retryable,
                             error_code=error_code,
+                            result_ref=None,
+                            result_hash=None,
                             completed_at=cutoff,
                         )
                     )
@@ -1892,8 +1930,9 @@ class RunService:
             if ledger is None:
                 raise RunServiceDataError("run has no durable budget ledger")
             previous_attempt = connection.scalar(
-                select(func.coalesce(func.max(run_external_attempts.c.attempt_no), 0))
-                .where(
+                select(
+                    func.coalesce(func.max(run_external_attempts.c.attempt_no), 0)
+                ).where(
                     run_external_attempts.c.run_id == resolved_run_id,
                     run_external_attempts.c.operation_key == resolved_key,
                 )
@@ -1991,7 +2030,9 @@ class RunService:
             if attempt["status"] == "dispatched":
                 return
             if attempt["status"] != "reserved":
-                raise InvalidRunStateError("attempt cannot be dispatched from its state")
+                raise InvalidRunStateError(
+                    "attempt cannot be dispatched from its state"
+                )
             connection.execute(
                 update(run_external_attempts)
                 .where(
@@ -2208,9 +2249,7 @@ class RunService:
         resolved_namespace = _canonical_identifier(
             checkpoint_namespace, "checkpoint_namespace", 255
         )
-        resolved_checkpoint = _canonical_identifier(
-            checkpoint_id, "checkpoint_id", 255
-        )
+        resolved_checkpoint = _canonical_identifier(checkpoint_id, "checkpoint_id", 255)
         if parent_checkpoint_id is not None:
             _canonical_identifier(parent_checkpoint_id, "parent_checkpoint_id", 255)
         try:
@@ -2581,9 +2620,7 @@ class RunService:
         )
 
     @staticmethod
-    def _assert_execution_deadline(
-        row: Mapping[str, Any], now: datetime
-    ) -> None:
+    def _assert_execution_deadline(row: Mapping[str, Any], now: datetime) -> None:
         deadline = row["execution_deadline_at"]
         if not isinstance(deadline, datetime):
             raise RunServiceDataError("running run has no absolute deadline")
@@ -2628,7 +2665,9 @@ class RunService:
         if namespace is None and checkpoint_id is None:
             return None
         if not isinstance(namespace, str) or not isinstance(checkpoint_id, str):
-            raise CheckpointCompatibilityError("trusted checkpoint pointer is incomplete")
+            raise CheckpointCompatibilityError(
+                "trusted checkpoint pointer is incomplete"
+            )
         row = (
             connection.execute(
                 select(run_checkpoints).where(
@@ -2750,9 +2789,7 @@ class RunService:
                     run_results.c.run_id.label("_result_run_id"),
                     run_results.c.final_message_id.label("_result_message_id"),
                     run_results.c.answer_payload.label("_result_answer_payload"),
-                    run_results.c.evidence_payload.label(
-                        "_result_evidence_payload"
-                    ),
+                    run_results.c.evidence_payload.label("_result_evidence_payload"),
                     run_results.c.verification_payload.label(
                         "_result_verification_payload"
                     ),

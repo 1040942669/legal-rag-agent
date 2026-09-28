@@ -339,6 +339,18 @@ class BoundedHarnessNodes:
     def plan_followup(self, state: HarnessState) -> HarnessState:
         retrieved = self._retrieved(state)
         changed = self._copy(state)
+        if (
+            self.persistence.has_outcome_unknown(
+                state["run_id"], operation_name="plan_followup"
+            )
+            and not self.retry_unknown_external
+        ):
+            budget = self.persistence.get_budget(state["run_id"])
+            self._sync_budget(changed, budget)
+            changed["proposed_queries"] = []
+            changed["completion_status"] = "completed_with_limits"
+            changed["stop_reason"] = "external_outcome_unknown"
+            return self._complete(changed, "plan_followup", "generate")
         if self.followup_planner is None:
             raw_queries: Sequence[str] = (
                 retrieved.evidence_check.followup_queries
@@ -475,9 +487,7 @@ class BoundedHarnessNodes:
             except Exception as error:
                 decision = retry_decision(error)
                 status = (
-                    "outcome_unknown"
-                    if decision.error_code == "timeout"
-                    else "failed"
+                    "outcome_unknown" if decision.error_code == "timeout" else "failed"
                 )
                 self.persistence.finish_attempt(
                     reservation.attempt_id,
@@ -506,6 +516,7 @@ class BoundedHarnessNodes:
                 status="succeeded",
                 result_hash=canonical_hash(list(output)),
             )
+            self._fault("after_planner_attempt_succeeded_before_checkpoint", state)
             return output
 
     def _invoke_generator(
@@ -547,9 +558,7 @@ class BoundedHarnessNodes:
             except Exception as error:
                 decision = retry_decision(error)
                 status = (
-                    "outcome_unknown"
-                    if decision.error_code == "timeout"
-                    else "failed"
+                    "outcome_unknown" if decision.error_code == "timeout" else "failed"
                 )
                 self.persistence.finish_attempt(
                     reservation.attempt_id,
@@ -583,6 +592,12 @@ class BoundedHarnessNodes:
                     }
                 ),
             )
+            # A provider response is not recoverable until the verified result
+            # artifact and the graph checkpoint are durable.  The fault point
+            # proves that recovery treats this narrow post-response window as
+            # an unavailable external result instead of silently dispatching
+            # the model again.
+            self._fault("after_model_attempt_succeeded_before_artifact", state)
             return generated
 
     def _invoke_initial_retrieval(
@@ -728,7 +743,9 @@ class BoundedHarnessNodes:
         artifact_id = state["retrieved_artifact_ref"]
         artifact_hash = state["retrieved_artifact_hash"]
         if artifact_id is None or artifact_hash is None:
-            raise ExecutionFailure(code="missing_retrieval_artifact", stage="checkpoint")
+            raise ExecutionFailure(
+                code="missing_retrieval_artifact", stage="checkpoint"
+            )
         payload = self.persistence.load_node_artifact(
             state["run_id"],
             artifact_id,
@@ -835,6 +852,7 @@ class BoundedHarnessNodes:
     def _fault(self, point: str, state: HarnessState) -> None:
         if self.fault_hook is not None:
             self.fault_hook(point, validate_harness_state(dict(state)))
+
 
 __all__ = [
     "BoundedHarnessNodes",

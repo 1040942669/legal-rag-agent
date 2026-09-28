@@ -11,11 +11,15 @@ from typing import Any
 from langgraph.checkpoint.memory import InMemorySaver
 from sqlalchemy import func, select
 
+from legal_rag.chat import LegalChatAssistant
 from legal_rag.harness.checkpoint import (
     PersistentCheckpointerRequired,
     require_persistent_checkpointer,
 )
 from legal_rag.harness.runner import GraphRunExecutor
+from legal_rag.models import VerificationContext
+from legal_rag.retrieval import BM25Retriever
+from legal_rag.retrieval_contracts import RetrievalBoundary
 from legal_rag.services.run_executor import (
     DeterministicRunExecutor,
     SafeRunResult,
@@ -23,6 +27,7 @@ from legal_rag.services.run_executor import (
 from legal_rag.services.run_service import RunService
 from legal_rag.services.service_retrieval import PostgresAssistantFactory
 from legal_rag.storage.database import DatabaseSettings, create_database_engine
+from legal_rag.storage.retrieval import BoundCorpus, BoundaryBoundRetriever
 from legal_rag.storage.schema import (
     messages,
     run_external_attempts,
@@ -82,6 +87,33 @@ def _graph_executor(
         PostgresAssistantFactory(service.engine),
         generate=generate,
         fault_hook=fault_hook,
+    )
+
+
+def _empty_assistant(execution) -> LegalChatAssistant:
+    boundary = RetrievalBoundary(
+        scope_id=execution.scope_id,
+        snapshot_id=execution.snapshot_id,
+        profile_id=execution.profile_id,
+    )
+    if boundary.fingerprint != execution.boundary_fingerprint:
+        raise AssertionError("empty assistant boundary mismatch")
+    corpus = BoundCorpus(boundary=boundary, entries=())
+    retriever = BoundaryBoundRetriever(BM25Retriever([]), corpus=corpus)
+
+    class RejectCompletionClient:
+        def complete(self, prompt: str) -> str:
+            del prompt
+            raise AssertionError("limited planner graph must not call a generator")
+
+    return LegalChatAssistant(
+        retriever,
+        model="m5-provider-free-empty",
+        completion_client=RejectCompletionClient(),
+        verification_context=VerificationContext(
+            snapshot_id=execution.snapshot_id,
+            allowed_scope_ids=[execution.scope_id],
+        ),
     )
 
 
@@ -242,6 +274,239 @@ def _t02_resume(service: RunService, run_id: str, output: Path) -> None:
         generate=True,
     )
     _write_output(output, {"pid": os.getpid(), "outcome_unknown": True})
+
+
+def _t02_post_return_first(service: RunService, run_id: str, output: Path) -> None:
+    worker, run = _claim(service, "m5-t02-post-return-first")
+    if run.run_id != run_id:
+        raise AssertionError("claimed an unexpected post-return run")
+    frozen = service.load_execution_input(
+        run_id,
+        worker,
+        lease_epoch=run.lease_epoch,
+    )
+    observations = {"provider_returns": 0}
+
+    class ReturningProviderFreeClient:
+        hidden_retries_disabled = True
+        propagate_control_errors = True
+
+        def complete(self, prompt: str) -> str:
+            del prompt
+            observations["provider_returns"] += 1
+            return json.dumps(
+                {
+                    "answer_text": "服务端测试法第一条要求遵守测试义务 [S1]。",
+                    "answer_mode": "evidence_answer",
+                    "claims": [
+                        {
+                            "claim_id": "C1",
+                            "text": "服务端测试法第一条要求遵守测试义务",
+                            "source_ids": ["S1"],
+                        }
+                    ],
+                    "limitations": [],
+                    "clarification_question": None,
+                },
+                ensure_ascii=False,
+            )
+
+    def fault(point, state) -> None:
+        del state
+        if point != "after_model_attempt_succeeded_before_artifact":
+            return
+        if observations["provider_returns"] != 1:
+            raise AssertionError("provider return was not observed exactly once")
+        _write_output(
+            output,
+            {
+                "pid": os.getpid(),
+                "provider_returned": True,
+                "attempt_succeeded_before_artifact": True,
+            },
+        )
+        _hang()
+
+    postgres_factory = PostgresAssistantFactory(service.engine)
+
+    def assistant_factory(execution):
+        assistant = postgres_factory(execution)
+        assistant.llm = ReturningProviderFreeClient()
+        return assistant
+
+    GraphRunExecutor(
+        service,
+        assistant_factory,
+        generate=True,
+        fault_hook=fault,
+    ).execute_claimed(
+        frozen,
+        worker,
+        lambda event_type, safe_payload: service.append_stage_event(
+            run_id,
+            event_type,
+            safe_payload,
+            worker_id=worker,
+            lease_epoch=run.lease_epoch,
+        ),
+    )
+
+
+def _t02_post_return_resume(service: RunService, run_id: str, output: Path) -> None:
+    worker, run = _claim(service, "m5-t02-post-return-resume")
+    if run.run_id != run_id:
+        raise AssertionError("claimed an unexpected post-return resumed run")
+    if not service.has_outcome_unknown(run_id, operation_name="generate_answer"):
+        raise AssertionError("lost provider result was not reconciled outcome_unknown")
+    frozen = service.load_execution_input(
+        run_id,
+        worker,
+        lease_epoch=run.lease_epoch,
+    )
+    observations = {"provider_calls": 0}
+
+    class RejectDuplicateProviderCall:
+        hidden_retries_disabled = True
+        propagate_control_errors = True
+
+        def complete(self, prompt: str) -> str:
+            del prompt
+            observations["provider_calls"] += 1
+            raise AssertionError("resume silently called the provider a second time")
+
+    postgres_factory = PostgresAssistantFactory(service.engine)
+
+    def assistant_factory(execution):
+        assistant = postgres_factory(execution)
+        assistant.llm = RejectDuplicateProviderCall()
+        return assistant
+
+    GraphRunExecutor(
+        service,
+        assistant_factory,
+        generate=True,
+    ).execute_claimed(
+        frozen,
+        worker,
+        lambda event_type, safe_payload: service.append_stage_event(
+            run_id,
+            event_type,
+            safe_payload,
+            worker_id=worker,
+            lease_epoch=run.lease_epoch,
+        ),
+    )
+    _write_output(
+        output,
+        {
+            "pid": os.getpid(),
+            "outcome_unknown": True,
+            "provider_calls_after_resume": observations["provider_calls"],
+        },
+    )
+
+
+def _t02_planner_post_return_first(
+    service: RunService,
+    run_id: str,
+    output: Path,
+) -> None:
+    worker, run = _claim(service, "m5-t02-planner-post-return-first")
+    if run.run_id != run_id:
+        raise AssertionError("claimed an unexpected planner post-return run")
+    frozen = service.load_execution_input(
+        run_id,
+        worker,
+        lease_epoch=run.lease_epoch,
+    )
+    observations = {"planner_returns": 0}
+
+    def returning_planner(state, retrieved):
+        del state, retrieved
+        observations["planner_returns"] += 1
+        return ["bounded provider-free planner followup"]
+
+    def fault(point, state) -> None:
+        del state
+        if point != "after_planner_attempt_succeeded_before_checkpoint":
+            return
+        if observations["planner_returns"] != 1:
+            raise AssertionError("planner return was not observed exactly once")
+        _write_output(
+            output,
+            {
+                "pid": os.getpid(),
+                "planner_returned": True,
+                "attempt_succeeded_before_checkpoint": True,
+            },
+        )
+        _hang()
+
+    GraphRunExecutor(
+        service,
+        _empty_assistant,
+        generate=False,
+        followup_planner=returning_planner,
+        fault_hook=fault,
+    ).execute_claimed(
+        frozen,
+        worker,
+        lambda event_type, safe_payload: service.append_stage_event(
+            run_id,
+            event_type,
+            safe_payload,
+            worker_id=worker,
+            lease_epoch=run.lease_epoch,
+        ),
+    )
+
+
+def _t02_planner_post_return_resume(
+    service: RunService,
+    run_id: str,
+    output: Path,
+) -> None:
+    worker, run = _claim(service, "m5-t02-planner-post-return-resume")
+    if run.run_id != run_id:
+        raise AssertionError("claimed an unexpected resumed planner run")
+    if not service.has_outcome_unknown(run_id, operation_name="plan_followup"):
+        raise AssertionError("lost planner result was not reconciled outcome_unknown")
+    frozen = service.load_execution_input(
+        run_id,
+        worker,
+        lease_epoch=run.lease_epoch,
+    )
+    observations = {"planner_calls": 0}
+
+    def reject_duplicate_planner_call(state, retrieved):
+        del state, retrieved
+        observations["planner_calls"] += 1
+        raise AssertionError("resume silently called the planner a second time")
+
+    GraphRunExecutor(
+        service,
+        _empty_assistant,
+        generate=False,
+        followup_planner=reject_duplicate_planner_call,
+    ).execute_claimed(
+        frozen,
+        worker,
+        lambda event_type, safe_payload: service.append_stage_event(
+            run_id,
+            event_type,
+            safe_payload,
+            worker_id=worker,
+            lease_epoch=run.lease_epoch,
+        ),
+    )
+    _write_output(
+        output,
+        {
+            "pid": os.getpid(),
+            "outcome_unknown": True,
+            "planner_calls_after_resume": observations["planner_calls"],
+        },
+    )
 
 
 def _t03_first(service: RunService, run_id: str, output: Path) -> None:
@@ -509,6 +774,14 @@ def main(argv: list[str] | None = None) -> int:
             _t02_first(service, args.run_id, args.output)
         elif args.phase == "m5-t02-resume":
             _t02_resume(service, args.run_id, args.output)
+        elif args.phase == "m5-t02-post-return-first":
+            _t02_post_return_first(service, args.run_id, args.output)
+        elif args.phase == "m5-t02-post-return-resume":
+            _t02_post_return_resume(service, args.run_id, args.output)
+        elif args.phase == "m5-t02-planner-post-return-first":
+            _t02_planner_post_return_first(service, args.run_id, args.output)
+        elif args.phase == "m5-t02-planner-post-return-resume":
+            _t02_planner_post_return_resume(service, args.run_id, args.output)
         elif args.phase == "m5-t03-first":
             _t03_first(service, args.run_id, args.output)
         elif args.phase == "m5-t03-reconcile":
