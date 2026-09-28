@@ -649,7 +649,10 @@ def test_m4_t07_model_timeout_is_attributable_and_does_not_poison_next_run(
     executor = _TimeoutThenSuccessExecutor()
     settings = ServiceSettings(
         lease_seconds=2,
-        executor_timeout_seconds=0.15,
+        # The first call blocks for five seconds. Give the healthy second call
+        # enough room for its three real PostgreSQL stage-event transactions on
+        # slower shared CI runners while preserving a deterministic timeout.
+        executor_timeout_seconds=1.0,
         supervisor_poll_seconds=0.01,
         sse_poll_seconds=0.01,
         sse_heartbeat_seconds=1,
