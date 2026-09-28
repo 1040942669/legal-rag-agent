@@ -8,7 +8,7 @@
 
 ## [0.5.0] - 2026-09-29
 
-> 发布候选：M4 本地实现与累计验收已通过，软件仍在 draft PR #17。精确最终 PR-head CI、普通合并、master target CI、annotated `v0.5.0`、GitHub Release 与独立发布回执尚未完成；本条目不构成已发布声明。
+> 已发布，独立回执待收口：PR #17 完成 M4 候选实现并通过 exact-head CI；首次 merge 后 master service CI 以 `78 passed, 1 failed` 暴露了把三个真实 PostgreSQL callback 压入 150ms 的测试时序假设，因此发布被阻断。PR #18 只修正该测试预算，随后 exact-head 与最终 release-target master CI 全部通过。annotated `v0.5.0` 和 non-draft、non-prerelease GitHub Release 已发布；独立 receipt PR #19 已创建且首个候选 CI 成功，修正后的 final-head/merge/master CI、Issue #16 与 Milestone 5 仍待完成。
 
 ### Added
 
