@@ -44,7 +44,7 @@ from legal_rag.storage.schema import (
 
 
 LEGACY_REVISION = "0002_m3_immutable_rows"
-HEAD_REVISION = "0004_m3_ann_guards"
+HEAD_REVISION = "0005_m4_api_sessions"
 
 
 @contextmanager

@@ -122,6 +122,40 @@ def _state_with_released_m0_m1_m2_and_active_m3() -> dict[str, object]:
     }
 
 
+def _state_with_released_m0_through_m3_and_active_m4() -> dict[str, object]:
+    state = _state_with_released_m0_m1_m2_and_active_m3()
+    milestones = state["milestones"]
+    assert isinstance(milestones, list)
+    m3 = milestones[-1]
+    assert isinstance(m3, dict)
+    m3.update(
+        {
+            "status": "released",
+            "tests": {"status": "passed"},
+            "tag": "v0.4.0",
+            "release_url": "https://example.invalid/releases/v0.4.0",
+            "remote_release_verified": True,
+        }
+    )
+    milestones.append(
+        {
+            "id": "M4",
+            "required": True,
+            "status": "in_progress",
+            "tests": {"status": "not_run"},
+            "tag": None,
+            "release_url": None,
+            "remote_release_verified": False,
+        }
+    )
+    state["active_milestone"] = "M4"
+    state["repository"] = {
+        "full_name": "owner/repository",
+        "workspace_head": "d" * 40,
+    }
+    return state
+
+
 def _valid_run_manifest() -> dict[str, object]:
     return {
         "schema_version": 1,
@@ -317,6 +351,21 @@ def test_active_m3_gate_requires_all_released_prerequisites() -> None:
 
     errors = gate.validate_state_payload(state, milestone="M3")
     assert "prerequisite milestone M2 must already be released" in errors
+
+
+def test_active_m4_gate_requires_all_released_prerequisites() -> None:
+    state = _state_with_released_m0_through_m3_and_active_m4()
+    assert gate.validate_state_payload(state, milestone="M4") == []
+
+    m3 = state["milestones"][3]  # type: ignore[index]
+    m3["status"] = "in_progress"
+    m3["tests"] = {"status": "in_progress"}
+    m3["tag"] = None
+    m3["release_url"] = None
+    m3["remote_release_verified"] = False
+
+    errors = gate.validate_state_payload(state, milestone="M4")
+    assert "prerequisite milestone M3 must already be released" in errors
 
 
 def test_execution_status_must_match_the_actual_active_milestone() -> None:
@@ -519,6 +568,95 @@ def test_m3_report_has_exactly_one_record_for_all_33_mandatory_ids(
     assert len({record["test_id"] for record in report["checks"]}) == 33
 
 
+def test_m4_gate_is_cumulative_and_maps_every_named_acceptance_test() -> None:
+    expected_m4_ids = {f"M4-T{index:02d}" for index in range(1, 9)}
+
+    assert set(gate.MANDATORY_M4_CHECK_IDS) == (
+        set(gate.MANDATORY_M3_CHECK_IDS) | expected_m4_ids
+    )
+    assert len(gate.MANDATORY_M4_CHECK_IDS) == 41
+    assert set(gate.M4_TEST_SELECTORS) == expected_m4_ids
+    assert all(gate.M4_TEST_SELECTORS[test_id] for test_id in expected_m4_ids)
+    assert all(
+        any(selector.startswith("integration_tests/") for selector in selectors)
+        for selectors in gate.M4_TEST_SELECTORS.values()
+    )
+    assert (
+        "integration_tests/test_m4_service_wiring.py::test_m4_t08_provider_free_service_wiring_uses_frozen_postgres_corpus"
+        in gate.M4_TEST_SELECTORS["M4-T08"]
+    )
+    assert (
+        "tests/test_m4_supervisor.py::test_timed_out_execution_does_not_poison_the_next_run"
+        in gate.M4_TEST_SELECTORS["M4-T07"]
+    )
+    assert (
+        "tests/test_m4_supervisor.py::test_callback_from_a_timed_out_execution_is_fenced"
+        in gate.M4_TEST_SELECTORS["M4-T07"]
+    )
+
+
+def test_m4_report_has_exactly_one_record_for_all_41_mandatory_ids(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    def records_for(ids, *, mode):
+        return [
+            gate.result_record(
+                test_id=test_id,
+                command="fixture",
+                exit_code=0,
+                status="passed",
+                output_summary="ok",
+                duration_ms=1,
+                mode=mode,
+            )
+            for test_id in sorted(ids)
+        ]
+
+    monkeypatch.setattr(
+        gate,
+        "_m0_offline_records",
+        lambda repo_root, state_milestone: records_for(
+            gate.MANDATORY_M0_CHECK_IDS, mode="offline"
+        ),
+    )
+    monkeypatch.setattr(
+        gate,
+        "_m1_acceptance_records",
+        lambda repo_root: records_for(gate.M1_TEST_SELECTORS, mode="offline"),
+    )
+    monkeypatch.setattr(
+        gate,
+        "_m2_acceptance_records",
+        lambda repo_root: records_for(gate.M2_TEST_SELECTORS, mode="offline"),
+    )
+    monkeypatch.setattr(
+        gate,
+        "_m3_acceptance_records",
+        lambda repo_root, restart_receipt=None: records_for(
+            gate.M3_TEST_SELECTORS, mode="integration"
+        ),
+    )
+    monkeypatch.setattr(
+        gate,
+        "_m4_acceptance_records",
+        lambda repo_root: records_for(gate.M4_TEST_SELECTORS, mode="integration"),
+    )
+
+    report = gate.run_m4_integration(
+        tmp_path,
+        restart_receipt=tmp_path / "restart-receipt.json",
+    )
+
+    assert report["status"] == "passed"
+    assert report["exit_code"] == 0
+    assert report["mode"] == "integration"
+    assert report["duration_ms"] == 41
+    assert len(report["mandatory_check_ids"]) == 41
+    assert len(report["checks"]) == 41
+    assert len({record["test_id"] for record in report["checks"]}) == 41
+
+
 def test_mandatory_pytest_check_fails_closed_on_skip_or_xfail(
     monkeypatch,
     tmp_path: Path,
@@ -638,6 +776,29 @@ def test_m3_gate_fails_closed_before_pytest_when_database_is_missing(
     )
 
 
+def test_m4_gate_fails_closed_before_pytest_when_database_is_missing(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("LEGAL_RAG_DATABASE_URL", raising=False)
+    monkeypatch.delenv("LEGAL_RAG_INTEGRATION_TEST", raising=False)
+
+    def must_not_run(**kwargs):
+        raise AssertionError(f"unexpected pytest execution: {kwargs}")
+
+    monkeypatch.setattr(gate, "run_pytest_check", must_not_run)
+    records = gate._m4_acceptance_records(tmp_path)
+
+    assert {record["test_id"] for record in records} == set(gate.M4_TEST_SELECTORS)
+    assert len(records) == 8
+    assert all(record["status"] == "failed" for record in records)
+    assert all(record["exit_code"] == 1 for record in records)
+    assert all(
+        "LEGAL_RAG_DATABASE_URL is required" in record["output_summary"]
+        for record in records
+    )
+
+
 def test_m3_t08_requires_external_restart_receipt(tmp_path: Path) -> None:
     record = gate._m3_t08_record(tmp_path, None)
 
@@ -740,6 +901,10 @@ def test_m3_integration_request_is_accepted() -> None:
     assert gate.validate_request("M3", "integration") == []
 
 
+def test_m4_integration_request_is_accepted() -> None:
+    assert gate.validate_request("M4", "integration") == []
+
+
 def test_main_dispatches_the_requested_milestone(monkeypatch, capsys) -> None:
     calls: list[str] = []
 
@@ -748,7 +913,7 @@ def test_main_dispatches_the_requested_milestone(monkeypatch, capsys) -> None:
         return {
             "schema_version": 1,
             "milestone": milestone,
-            "mode": "integration" if milestone == "M3" else "offline",
+            "mode": "integration" if milestone in {"M3", "M4"} else "offline",
             "started_at": "2026-09-20T00:00:00Z",
             "finished_at": "2026-09-20T00:00:00Z",
             "status": "passed",
@@ -768,6 +933,12 @@ def test_main_dispatches_the_requested_milestone(monkeypatch, capsys) -> None:
         return report_for("M3")
 
     monkeypatch.setattr(gate, "run_m3_integration", run_m3)
+
+    def run_m4(repo_root, *, restart_receipt=None):
+        restart_receipts.append(restart_receipt)
+        return report_for("M4")
+
+    monkeypatch.setattr(gate, "run_m4_integration", run_m4)
 
     assert gate.main(["--milestone", "M2", "--mode", "offline"]) == 0
     assert calls == ["M2"]
@@ -790,6 +961,23 @@ def test_main_dispatches_the_requested_milestone(monkeypatch, capsys) -> None:
     assert calls == ["M2", "M3"]
     assert restart_receipts == [restart_receipt]
     assert json.loads(capsys.readouterr().out)["milestone"] == "M3"
+
+    assert (
+        gate.main(
+            [
+                "--milestone",
+                "M4",
+                "--mode",
+                "integration",
+                "--restart-receipt",
+                str(restart_receipt),
+            ]
+        )
+        == 0
+    )
+    assert calls == ["M2", "M3", "M4"]
+    assert restart_receipts == [restart_receipt, restart_receipt]
+    assert json.loads(capsys.readouterr().out)["milestone"] == "M4"
 
 
 def test_main_returns_configuration_exit_code_for_unsupported_request(capsys) -> None:
@@ -818,6 +1006,57 @@ def test_ci_runs_the_cumulative_m2_gate_with_a_pinned_report_upload() -> None:
     assert "if-no-files-found: error" in workflow
 
 
+def test_ci_runs_m4_after_mandatory_wheel_and_restart_verification() -> None:
+    workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
+
+    assert "m4-service-integration:" in workflow
+    assert workflow.count("--extra service") >= 2
+    assert "--extra database" not in workflow
+    assert "scripts/m3_restart_probe.py prepare" in workflow
+    assert "docker restart" in workflow
+    assert "scripts/m3_restart_probe.py verify" in workflow
+    assert '--restart-receipt "${RUNNER_TEMP}/m3-restart-receipt.json"' in workflow
+    assert "--milestone M4" in workflow
+    assert "--mode integration" in workflow
+    assert workflow.index("- name: Build the M4 candidate wheel") < workflow.index(
+        "- name: Run the M4 cumulative integration quality gate"
+    )
+    assert workflow.index(
+        "- name: Verify M4 wheel resources and console entry points"
+    ) < workflow.index("- name: Run the M4 cumulative integration quality gate")
+    assert workflow.index(
+        "- name: Run the isolated M4 wheel installation probe"
+    ) < workflow.index("- name: Run the M4 cumulative integration quality gate")
+    assert "scripts/m4_wheel_probe.py" in workflow
+    assert "--expected-version 0.5.0" in workflow
+    assert "--smoke" in workflow
+    assert "m4-wheel-probe-receipt.json" in workflow
+    gate_step = workflow.split(
+        "- name: Run the M4 cumulative integration quality gate", maxsplit=1
+    )[1].split("- name: Upload the M4 service integration report", maxsplit=1)[0]
+    assert "--wheel" not in gate_step
+
+
+def test_ci_checks_m4_wheel_runtime_resources_and_entry_points() -> None:
+    workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
+
+    required_resources = {
+        "legal_rag/storage/alembic/versions/0005_m4_api_sessions.py",
+        "legal_rag/api/app.py",
+        "legal_rag/api/auth.py",
+        "legal_rag/api/command.py",
+        "legal_rag/api/schemas.py",
+        "legal_rag/api/settings.py",
+        "legal_rag/services/run_service.py",
+        "legal_rag/services/run_executor.py",
+        "legal_rag/services/service_retrieval.py",
+        "legal_rag/services/supervisor.py",
+    }
+    assert all(resource in workflow for resource in required_resources)
+    assert 'scripts.get("legal-rag") == "legal_rag.cli:main"' in workflow
+    assert 'scripts.get("legal-rag-api") == "legal_rag.api.command:main"' in workflow
+
+
 def test_ci_checks_out_and_labels_the_exact_event_commit() -> None:
     workflow = _WORKFLOW_PATH.read_text(encoding="utf-8")
 
@@ -827,6 +1066,11 @@ def test_ci_checks_out_and_labels_the_exact_event_commit() -> None:
     assert "ref: ${{ github.sha }}" in workflow
     assert (
         "m2-quality-gate-${{ github.event_name == 'pull_request' "
+        "&& github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}"
+        in workflow
+    )
+    assert (
+        "m4-service-${{ github.event_name == 'pull_request' "
         "&& github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}"
         in workflow
     )

@@ -45,9 +45,11 @@ class _FakeService:
         run_ids: tuple[str, ...] = (),
         *,
         recovery_outcomes: tuple[BaseException | None, ...] = (),
+        recovery_batches: tuple[int, ...] = (),
     ) -> None:
         self._run_ids = list(run_ids)
         self._recovery_outcomes = list(recovery_outcomes)
+        self._recovery_batches = list(recovery_batches)
         self._lock = threading.Lock()
         self.successes: list[tuple[str, str, Any]] = []
         self.failures: list[tuple[str, str, str, Any]] = []
@@ -59,7 +61,11 @@ class _FakeService:
         with self._lock:
             return len(self.recovery_times)
 
-    def recover_stale_runs(self) -> int:
+    def recover_stale_runs(
+        self,
+        *,
+        batch_limit: int = 100,
+    ) -> tuple[_ClaimedRun, ...]:
         with self._lock:
             self.recovery_times.append(time.monotonic())
             outcome = (
@@ -67,9 +73,18 @@ class _FakeService:
                 if self._recovery_outcomes
                 else None
             )
+            batch_size = (
+                self._recovery_batches.pop(0)
+                if self._recovery_batches
+                else 0
+            )
         if outcome is not None:
             raise outcome
-        return 0
+        assert batch_size <= batch_limit
+        return tuple(
+            _ClaimedRun(f"recovered-{self.recovery_count}-{index}")
+            for index in range(batch_size)
+        )
 
     def claim_next_run(
         self,
@@ -235,7 +250,7 @@ def test_stop_is_prompt_and_restart_is_refused_while_execution_drains() -> None:
     assert executor.first_started.wait(timeout=1.0)
 
     started_stopping = time.monotonic()
-    assert supervisor.stop(timeout=0.75) is True
+    assert supervisor.stop(timeout=0.75) is False
     stop_elapsed = time.monotonic() - started_stopping
 
     try:
@@ -246,7 +261,7 @@ def test_stop_is_prompt_and_restart_is_refused_while_execution_drains() -> None:
     finally:
         executor.release_first.set()
         assert executor.first_finished.wait(timeout=1.0)
-        supervisor.stop()
+        assert supervisor.stop() is True
 
 
 def test_periodic_stale_recovery_retries_after_service_failure() -> None:
@@ -266,6 +281,19 @@ def test_periodic_stale_recovery_retries_after_service_failure() -> None:
 
         assert service.recovery_times[1] - service.recovery_times[0] >= 0.4
         assert supervisor.last_loop_error is None
+    finally:
+        assert supervisor.stop(timeout=0.75) is True
+
+
+def test_startup_recovers_every_full_stale_batch_before_becoming_ready() -> None:
+    service = _FakeService(recovery_batches=(100, 100, 3))
+    supervisor = _supervisor(service, _NeverExecutor())
+
+    try:
+        supervisor.start()
+
+        assert service.recovery_count >= 3
+        assert supervisor.is_ready is True
     finally:
         assert supervisor.stop(timeout=0.75) is True
 

@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+import legal_rag.storage.database as database_module
 from legal_rag.api.auth import (
     AuthenticationConfigurationError,
     AuthenticationError,
@@ -17,7 +18,11 @@ from legal_rag.api.auth import (
 )
 from legal_rag.api.schemas import RunCreateRequest, SessionCreateRequest
 from legal_rag.api.settings import ServiceSettings, load_environment_configuration
-from legal_rag.storage.database import DatabaseConfigurationError
+from legal_rag.storage.database import (
+    DatabaseConfigurationError,
+    DatabaseSettings,
+    create_database_engine,
+)
 
 
 PROFILE_ID = "a" * 64
@@ -27,6 +32,10 @@ SECONDARY_TOKEN = "secondary-token-" + "b" * 32
 
 SERVICE_ENVIRONMENT_VARIABLES = (
     "LEGAL_RAG_DATABASE_URL",
+    "LEGAL_RAG_DATABASE_CONNECT_TIMEOUT_SECONDS",
+    "LEGAL_RAG_DATABASE_POOL_TIMEOUT_SECONDS",
+    "LEGAL_RAG_DATABASE_STATEMENT_TIMEOUT_MS",
+    "LEGAL_RAG_DATABASE_LOCK_TIMEOUT_MS",
     "LEGAL_RAG_AUTH_TOKENS_JSON",
     "LEGAL_RAG_QUESTION_MAX_CHARACTERS",
     "LEGAL_RAG_MESSAGE_PAGE_MAX",
@@ -343,10 +352,48 @@ def test_environment_loader_parses_database_tokens_and_service_limits_offline(
     assert database.redacted_url == (
         "postgresql+psycopg://service:***@db.invalid/legal_rag"
     )
+    assert database.connect_timeout_seconds == 5
+    assert database.pool_timeout_seconds == 5.0
+    assert database.statement_timeout_ms == 30_000
+    assert database.lock_timeout_ms == 5_000
     assert authenticator.authenticate_header(f"Bearer {PRIMARY_TOKEN}").user_id == (
         "user-alpha"
     )
     assert service.question_max_characters == 2048
+
+
+def test_service_database_engine_applies_bounded_client_timeouts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    sentinel = object()
+
+    def fake_create_engine(url: str, **kwargs: object) -> object:
+        captured["url"] = url
+        captured.update(kwargs)
+        return sentinel
+
+    monkeypatch.setattr(database_module, "create_engine", fake_create_engine)
+    settings = DatabaseSettings(
+        "postgresql+psycopg://service:secret@db.invalid/legal_rag",
+        connect_timeout_seconds=7,
+        pool_timeout_seconds=8.5,
+        statement_timeout_ms=9_000,
+        lock_timeout_ms=4_000,
+    )
+
+    engine = create_database_engine(settings)
+
+    assert engine is sentinel
+    assert captured == {
+        "url": settings.url,
+        "pool_pre_ping": True,
+        "pool_timeout": 8.5,
+        "connect_args": {
+            "connect_timeout": 7,
+            "options": "-c statement_timeout=9000 -c lock_timeout=4000",
+        },
+    }
 
 
 def test_environment_loader_requires_database_and_token_configuration(

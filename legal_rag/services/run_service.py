@@ -208,6 +208,19 @@ _SAFE_VERIFICATION_FIELDS = frozenset(
         "visible_source_ids",
     }
 )
+_STAGE_EVENT_FIELDS = {
+    "retrieval.completed": frozenset(
+        {
+            "result_count",
+            "checked_result_count",
+            "rejected_count",
+            "stop_reason",
+        }
+    ),
+    "generation.started": frozenset(),
+    "verification.completed": frozenset({"passed", "fallback_used"}),
+}
+_SAFE_FAILURE_FIELDS = frozenset({"error_code", "stage", "retryable"})
 
 
 class RunServiceError(RuntimeError):
@@ -429,6 +442,97 @@ def _safe_payload(
     if len(canonical_json_bytes(copied)) > maximum_bytes:
         raise UnsafePayloadError(f"{field_name} exceeds the safe payload limit")
     return copied
+
+
+def _require_closed_fields(
+    payload: Mapping[str, Any],
+    expected: frozenset[str],
+    *,
+    field_name: str,
+) -> None:
+    actual = frozenset(payload)
+    if actual != expected:
+        raise UnsafePayloadError(
+            f"{field_name} must contain exactly {sorted(expected)!r}"
+        )
+
+
+def _safe_stage_event_payload(event_type: str, value: Any) -> dict[str, Any]:
+    payload = _safe_payload(
+        value,
+        field_name="safe_payload",
+        maximum_bytes=MAX_EVENT_JSON_BYTES,
+    )
+    expected = _STAGE_EVENT_FIELDS[event_type]
+    _require_closed_fields(payload, expected, field_name=f"{event_type} payload")
+    if event_type == "retrieval.completed":
+        for field_name in (
+            "result_count",
+            "checked_result_count",
+            "rejected_count",
+        ):
+            value = payload[field_name]
+            if type(value) is not int or value < 0:
+                raise UnsafePayloadError(
+                    f"{event_type} payload {field_name} must be a non-negative integer"
+                )
+        stop_reason = payload["stop_reason"]
+        if (
+            not isinstance(stop_reason, str)
+            or _ERROR_CODE_PATTERN.fullmatch(stop_reason) is None
+        ):
+            raise UnsafePayloadError(
+                f"{event_type} payload stop_reason must be a safe name"
+            )
+    elif event_type == "verification.completed":
+        if type(payload["passed"]) is not bool:
+            raise UnsafePayloadError(
+                f"{event_type} payload passed must be a boolean"
+            )
+        if type(payload["fallback_used"]) is not bool:
+            raise UnsafePayloadError(
+                f"{event_type} payload fallback_used must be a boolean"
+            )
+    return payload
+
+
+def _safe_failure_payload(
+    value: Any,
+    *,
+    error_code: str,
+) -> dict[str, Any]:
+    payload = _safe_payload(
+        value,
+        field_name="safe_payload",
+        maximum_bytes=MAX_EVENT_JSON_BYTES,
+    )
+    unexpected = frozenset(payload) - _SAFE_FAILURE_FIELDS
+    if unexpected:
+        raise UnsafePayloadError(
+            f"run.failed payload contains unsupported fields {sorted(unexpected)!r}"
+        )
+    supplied_error = payload.get("error_code")
+    if supplied_error is not None and (
+        not isinstance(supplied_error, str)
+        or _ERROR_CODE_PATTERN.fullmatch(supplied_error) is None
+    ):
+        raise UnsafePayloadError("run.failed payload error_code must be a safe name")
+    stage = payload.get("stage")
+    if stage is not None and (
+        not isinstance(stage, str) or _ERROR_CODE_PATTERN.fullmatch(stage) is None
+    ):
+        raise UnsafePayloadError("run.failed payload stage must be a safe name")
+    retryable = payload.get("retryable")
+    if retryable is not None and type(retryable) is not bool:
+        raise UnsafePayloadError("run.failed payload retryable must be a boolean")
+    details = {
+        key: payload[key]
+        for key in ("stage", "retryable")
+        if key in payload
+    }
+    details["status"] = "failed"
+    details["error_code"] = error_code
+    return details
 
 
 @dataclass(frozen=True, slots=True)
@@ -945,16 +1049,16 @@ class RunService:
                         raise IdempotencyConflictError(
                             "idempotency key is bound to a different request"
                         )
-                    replayed_row = self._owned_run_row(
+                    replayed = self._owned_run_record(
                         connection,
                         idempotency_row["run_id"],
                         bound.user_id,
                     )
-                    if replayed_row is None:
+                    if replayed is None:
                         raise RunServiceDataError(
                             "idempotency key references a missing owned run"
                         )
-                    return self._run_record(connection, replayed_row), True
+                    return replayed, True
                 connection.execute(
                     delete(idempotency_keys).where(
                         idempotency_keys.c.user_id == bound.user_id,
@@ -1072,10 +1176,14 @@ class RunService:
         bound = _coerce_principal(principal)
         resolved_run_id = _canonical_identifier(run_id, "run_id", 36)
         with self.engine.connect() as connection:
-            row = self._owned_run_row(connection, resolved_run_id, bound.user_id)
-            if row is None:
+            record = self._owned_run_record(
+                connection,
+                resolved_run_id,
+                bound.user_id,
+            )
+            if record is None:
                 raise ResourceNotFoundError()
-            return self._run_record(connection, row)
+            return record
 
     def assert_owned_run(self, principal: ServicePrincipal, run_id: str) -> RunRecord:
         """Authorization helper with the same non-enumerating not-found result."""
@@ -1368,11 +1476,7 @@ class RunService:
         resolved_worker = _canonical_identifier(worker_id, "worker_id", 128)
         if event_type not in STAGE_EVENT_TYPES:
             raise ServiceContractError("event_type is not an appendable stage event")
-        payload = _safe_payload(
-            safe_payload,
-            field_name="safe_payload",
-            maximum_bytes=MAX_EVENT_JSON_BYTES,
-        )
+        payload = _safe_stage_event_payload(event_type, safe_payload)
         with self.engine.begin() as connection:
             row = self._run_row(connection, resolved_run_id, for_update=True)
             if row is None:
@@ -1489,13 +1593,10 @@ class RunService:
         resolved_run_id = _canonical_identifier(run_id, "run_id", 36)
         resolved_worker = _canonical_identifier(worker_id, "worker_id", 128)
         resolved_error = _canonical_error_code(error_code)
-        details = _safe_payload(
+        details = _safe_failure_payload(
             safe_payload or {},
-            field_name="safe_payload",
-            maximum_bytes=MAX_EVENT_JSON_BYTES,
+            error_code=resolved_error,
         )
-        details["status"] = "failed"
-        details["error_code"] = resolved_error
         with self.engine.begin() as connection:
             row = self._run_row(connection, resolved_run_id, for_update=True)
             if row is None:
@@ -1525,7 +1626,10 @@ class RunService:
 
     @staticmethod
     def _database_now(connection: Connection) -> datetime:
-        value = connection.scalar(select(func.now()))
+        # PostgreSQL ``now()`` is frozen at transaction start. A worker can wait
+        # on a row lock past its lease deadline, so lease fences and TTLs must
+        # use the actual wall clock after the lock is acquired.
+        value = connection.scalar(select(func.clock_timestamp()))
         if not isinstance(value, datetime):
             raise RunServiceDataError("database did not return a timestamp")
         # PostgreSQL returns an aware value for TIMESTAMPTZ.  Some lightweight
@@ -1576,6 +1680,53 @@ class RunService:
         if for_update:
             statement = statement.with_for_update(of=runs)
         return connection.execute(statement).mappings().one_or_none()
+
+    @classmethod
+    def _owned_run_record(
+        cls,
+        connection: Connection,
+        run_id: str,
+        user_id: str,
+    ) -> RunRecord | None:
+        """Read a run and optional result from one PostgreSQL statement snapshot."""
+
+        row = (
+            connection.execute(
+                select(
+                    runs,
+                    run_results.c.run_id.label("_result_run_id"),
+                    run_results.c.final_message_id.label("_result_message_id"),
+                    run_results.c.answer_payload.label("_result_answer_payload"),
+                    run_results.c.evidence_payload.label(
+                        "_result_evidence_payload"
+                    ),
+                    run_results.c.verification_payload.label(
+                        "_result_verification_payload"
+                    ),
+                    run_results.c.created_at.label("_result_created_at"),
+                    messages.c.content.label("_result_answer_text"),
+                )
+                .select_from(
+                    runs.outerjoin(
+                        run_results,
+                        run_results.c.run_id == runs.c.run_id,
+                    ).outerjoin(
+                        messages,
+                        messages.c.message_id == run_results.c.final_message_id,
+                    )
+                )
+                .where(
+                    runs.c.run_id == run_id,
+                    runs.c.user_id == user_id,
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if row is None:
+            return None
+        result = cls._embedded_run_result_record(row)
+        return cls._build_run_record(row, result)
 
     @staticmethod
     def _event_row(
@@ -1912,9 +2063,36 @@ class RunService:
             created_at=row["created_at"],
         )
 
-    @classmethod
-    def _run_record(cls, connection: Connection, row: Mapping[str, Any]) -> RunRecord:
-        result = cls._run_result_record(connection, row["run_id"])
+    @staticmethod
+    def _embedded_run_result_record(
+        row: Mapping[str, Any],
+    ) -> RunResultRecord | None:
+        if row["_result_run_id"] is None:
+            return None
+        answer_text = row["_result_answer_text"]
+        if not isinstance(answer_text, str):
+            raise RunServiceDataError("run result has no final assistant message")
+        return RunResultRecord(
+            run_id=row["_result_run_id"],
+            final_message_id=row["_result_message_id"],
+            answer_text=answer_text,
+            answer_payload=_readonly_json_mapping(
+                row["_result_answer_payload"], "answer_payload"
+            ),
+            evidence_payload=_readonly_json_mapping(
+                row["_result_evidence_payload"], "evidence_payload"
+            ),
+            verification_payload=_readonly_json_mapping(
+                row["_result_verification_payload"], "verification_payload"
+            ),
+            created_at=row["_result_created_at"],
+        )
+
+    @staticmethod
+    def _build_run_record(
+        row: Mapping[str, Any],
+        result: RunResultRecord | None,
+    ) -> RunRecord:
         if row["status"] == "succeeded" and result is None:
             raise RunServiceDataError("succeeded run has no final result")
         if row["status"] != "succeeded" and result is not None:
@@ -1948,6 +2126,11 @@ class RunService:
             lease_expires_at=row["lease_expires_at"],
             result=result,
         )
+
+    @classmethod
+    def _run_record(cls, connection: Connection, row: Mapping[str, Any]) -> RunRecord:
+        result = cls._run_result_record(connection, row["run_id"])
+        return cls._build_run_record(row, result)
 
 
 __all__ = [

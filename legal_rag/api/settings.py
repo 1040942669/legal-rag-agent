@@ -123,7 +123,28 @@ def load_environment_configuration() -> tuple[
     TokenAuthenticator,
     ServiceSettings,
 ]:
-    database = DatabaseSettings.from_env()
+    database = DatabaseSettings.from_env(
+        connect_timeout_seconds=_positive_int(
+            "LEGAL_RAG_DATABASE_CONNECT_TIMEOUT_SECONDS",
+            5,
+            maximum=300,
+        ),
+        pool_timeout_seconds=_positive_float(
+            "LEGAL_RAG_DATABASE_POOL_TIMEOUT_SECONDS",
+            5.0,
+            maximum=300.0,
+        ),
+        statement_timeout_ms=_positive_int(
+            "LEGAL_RAG_DATABASE_STATEMENT_TIMEOUT_MS",
+            30_000,
+            maximum=3_600_000,
+        ),
+        lock_timeout_ms=_positive_int(
+            "LEGAL_RAG_DATABASE_LOCK_TIMEOUT_MS",
+            5_000,
+            maximum=3_600_000,
+        ),
+    )
     token_json = os.environ.get("LEGAL_RAG_AUTH_TOKENS_JSON", "").strip()
     if not token_json:
         raise AuthenticationConfigurationError("LEGAL_RAG_AUTH_TOKENS_JSON is required")

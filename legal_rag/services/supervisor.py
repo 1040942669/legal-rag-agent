@@ -9,6 +9,7 @@ from typing import Any
 
 from .run_executor import ExecutionFailure, RunExecutor
 from .run_service import (
+    DEFAULT_STALE_RECOVERY_BATCH,
     InvalidRunStateError,
     ResourceNotFoundError,
     RunService,
@@ -90,7 +91,7 @@ class RunSupervisor:
         self._stop.clear()
         self._wake.clear()
         try:
-            self.service.recover_stale_runs()
+            self._recover_all_stale_runs()
             self._recovery_complete = True
             self._last_recovery_monotonic = time.monotonic()
         except Exception:
@@ -106,16 +107,40 @@ class RunSupervisor:
         self._thread.start()
 
     def stop(self, timeout: float = 5.0) -> bool:
+        deadline = time.monotonic() + max(0.0, timeout)
         self._stop.set()
         self._wake.set()
         if self._execution_active is not None:
             self._execution_active.clear()
         if self._thread is not None:
-            self._thread.join(timeout=max(0.0, timeout))
+            self._thread.join(timeout=max(0.0, deadline - time.monotonic()))
             if not self._thread.is_alive():
                 self._thread = None
+        if self.is_alive:
+            return False
+
+        draining_threads = [
+            thread
+            for thread in [self._execution_thread, *self._quarantined_threads]
+            if thread is not None and thread.is_alive()
+        ]
+        drain_deadline = min(deadline, time.monotonic() + 0.1)
+        seen: set[int] = set()
+        for thread in draining_threads:
+            identity = id(thread)
+            if identity in seen:
+                continue
+            seen.add(identity)
+            thread.join(timeout=max(0.0, drain_deadline - time.monotonic()))
         self._reap_quarantined_threads()
-        return not self.is_alive
+        execution_alive = (
+            self._execution_thread is not None and self._execution_thread.is_alive()
+        )
+        return (
+            not self.is_alive
+            and not execution_alive
+            and not self._quarantined_threads
+        )
 
     def wake(self) -> None:
         self._wake.set()
@@ -141,7 +166,7 @@ class RunSupervisor:
                     or time.monotonic() - self._last_recovery_monotonic
                     >= recovery_interval
                 ):
-                    self.service.recover_stale_runs()
+                    self._recover_all_stale_runs()
                     self._recovery_complete = True
                     self._last_recovery_monotonic = time.monotonic()
                 worked = self.run_once()
@@ -153,6 +178,14 @@ class RunSupervisor:
             if not worked:
                 self._wake.wait(self.poll_seconds)
                 self._wake.clear()
+
+    def _recover_all_stale_runs(self) -> None:
+        while True:
+            recovered = self.service.recover_stale_runs(
+                batch_limit=DEFAULT_STALE_RECOVERY_BATCH
+            )
+            if len(recovered) < DEFAULT_STALE_RECOVERY_BATCH:
+                return
 
     def _execute_claimed(self, run_id: str) -> None:
         try:

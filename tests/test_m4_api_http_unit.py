@@ -822,9 +822,56 @@ def test_sse_last_event_id_returns_the_strictly_ordered_suffix(
     assert api.service.calls["list_events"] == [(OWNER, RUN_ID, 2, 100)]
 
 
+def test_sse_refetches_terminal_event_committed_after_an_empty_poll() -> None:
+    class TerminalCommitRaceService(_FakeRunService):
+        def __init__(self) -> None:
+            super().__init__()
+            self.run = _run_record(status="running", result=None)
+            self.events = (self.events[-1],)
+            self._first_poll = True
+
+        def list_events(
+            self,
+            principal: ServicePrincipal,
+            run_id: str,
+            *,
+            after_sequence: int,
+            limit: int,
+        ) -> tuple[RunEventRecord, ...]:
+            self.calls["list_events"].append(
+                (principal, run_id, after_sequence, limit)
+            )
+            self._require_owner(principal, run_id, RUN_ID)
+            if self._first_poll:
+                self._first_poll = False
+                self.run = _run_record(result=self.result)
+                return ()
+            return tuple(
+                event for event in self.events if event.sequence > after_sequence
+            )[:limit]
+
+    service = TerminalCommitRaceService()
+    app, _, _ = _application(service=service)
+    headers = _authorization()
+    headers["Last-Event-ID"] = "3"
+
+    with TestClient(app) as client:
+        response = client.get(f"/api/v1/runs/{RUN_ID}/events", headers=headers)
+
+    assert response.status_code == 200
+    assert "id: 4\nevent: answer.final\n" in response.text
+    assert service.calls["list_events"] == [
+        (OWNER, RUN_ID, 3, 100),
+        (OWNER, RUN_ID, 3, 100),
+    ]
+
+
 def test_sse_reconnect_after_interrupted_event_closes_without_heartbeating() -> None:
     service = _FakeRunService()
-    service.run = _run_record(status="interrupted", result=None)
+    service.run = replace(
+        _run_record(status="interrupted", result=None),
+        event_sequence=1,
+    )
     service.events = (
         RunEventRecord(
             run_id=RUN_ID,

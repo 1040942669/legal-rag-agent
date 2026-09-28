@@ -544,8 +544,10 @@ def create_app(
                 if terminal_seen:
                     return
                 record = await run_in_threadpool(service.get_run, principal, run_id)
-                if record.status in STREAM_END_RUN_STATUSES and not events:
-                    return
+                if record.status in STREAM_END_RUN_STATUSES:
+                    if cursor >= record.event_sequence:
+                        return
+                    continue
                 now = time.monotonic()
                 if now - last_heartbeat >= resolved_settings.sse_heartbeat_seconds:
                     yield ": heartbeat\n\n"
