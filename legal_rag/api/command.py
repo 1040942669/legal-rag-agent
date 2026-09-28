@@ -33,6 +33,8 @@ def main(argv: list[str] | None = None) -> int:
         setup_postgres_checkpointer,
     )
     from legal_rag.harness.runner import GraphRunExecutor
+    from legal_rag.harness.state import HARNESS_GRAPH_VERSION
+    from legal_rag.services.run_executor import LegalChatRunExecutor
     from legal_rag.services.run_service import RunService
     from legal_rag.services.service_retrieval import PostgresAssistantFactory
     from legal_rag.services.supervisor import RunSupervisor
@@ -46,8 +48,10 @@ def main(argv: list[str] | None = None) -> int:
     engine = create_database_engine(database)
     if args.migrate:
         upgrade_database(engine)
-        setup_postgres_checkpointer(engine)
-    assert_postgres_checkpointer_ready(engine)
+        if settings.graph_version == HARNESS_GRAPH_VERSION:
+            setup_postgres_checkpointer(engine)
+    if settings.graph_version == HARNESS_GRAPH_VERSION:
+        assert_postgres_checkpointer_ready(engine)
     service = RunService(
         engine,
         idempotency_ttl=timedelta(seconds=settings.idempotency_ttl_seconds),
@@ -64,11 +68,18 @@ def main(argv: list[str] | None = None) -> int:
             evidence_top_k=settings.evidence_top_k,
         ),
     )
-    executor = GraphRunExecutor(
-        service,
-        PostgresAssistantFactory(engine),
-        generate=False,
-    )
+    assistant_factory = PostgresAssistantFactory(engine)
+    if settings.graph_version == HARNESS_GRAPH_VERSION:
+        executor = GraphRunExecutor(
+            service,
+            assistant_factory,
+            generate=False,
+        )
+    else:
+        executor = LegalChatRunExecutor(
+            assistant_factory,
+            generate=False,
+        )
     supervisor = RunSupervisor(
         service,
         executor,
