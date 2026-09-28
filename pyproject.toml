@@ -1,6 +1,6 @@
 [project]
 name = "legal-rag-assistant"
-version = "0.5.0"
+version = "0.6.0"
 description = "A reproducible RAG assistant for versioned Chinese law text snapshots."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -31,6 +31,8 @@ database = [
 service = [
     "alembic>=1.15,<2",
     "fastapi>=0.115,<1",
+    "langgraph>=1.2.12,<1.3",
+    "langgraph-checkpoint-postgres>=3.1.2,<3.2",
     "pgvector>=0.5,<0.6",
     "psycopg[binary]>=3.2,<4",
     "pydantic>=2.10,<3",
