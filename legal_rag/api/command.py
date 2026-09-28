@@ -6,7 +6,7 @@ from datetime import timedelta
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run the optional M4 Legal RAG HTTP service.",
+        description="Run the optional M5 Legal RAG HTTP service.",
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
@@ -27,7 +27,12 @@ def main(argv: list[str] | None = None) -> int:
     # never requires FastAPI, SQLAlchemy, or a database configuration.
     import uvicorn
 
-    from legal_rag.services.run_executor import LegalChatRunExecutor
+    from legal_rag.harness.budget import HarnessBudgetConfig
+    from legal_rag.harness.checkpoint import (
+        assert_postgres_checkpointer_ready,
+        setup_postgres_checkpointer,
+    )
+    from legal_rag.harness.runner import GraphRunExecutor
     from legal_rag.services.run_service import RunService
     from legal_rag.services.service_retrieval import PostgresAssistantFactory
     from legal_rag.services.supervisor import RunSupervisor
@@ -41,13 +46,26 @@ def main(argv: list[str] | None = None) -> int:
     engine = create_database_engine(database)
     if args.migrate:
         upgrade_database(engine)
+        setup_postgres_checkpointer(engine)
+    assert_postgres_checkpointer_ready(engine)
     service = RunService(
         engine,
         idempotency_ttl=timedelta(seconds=settings.idempotency_ttl_seconds),
         history_message_limit=settings.history_max_messages,
         history_character_limit=settings.history_max_characters,
+        budget_config=HarnessBudgetConfig(
+            max_retrieval_rounds=settings.max_retrieval_rounds,
+            max_queries_per_round=settings.max_queries_per_round,
+            max_tool_attempts=settings.max_tool_attempts,
+            max_model_attempts=settings.max_model_attempts,
+            max_embedding_attempts=settings.max_embedding_attempts,
+            max_retry_per_operation=settings.max_retry_per_operation,
+            execution_deadline_seconds=settings.execution_deadline_seconds,
+            evidence_top_k=settings.evidence_top_k,
+        ),
     )
-    executor = LegalChatRunExecutor(
+    executor = GraphRunExecutor(
+        service,
         PostgresAssistantFactory(engine),
         generate=False,
     )
@@ -77,4 +95,3 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

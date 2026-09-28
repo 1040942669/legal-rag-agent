@@ -390,7 +390,7 @@ def _emit(
     callback(event_type, _json_object(f"{event_type} payload", payload))
 
 
-def _restore_completed_history(
+def restore_completed_history(
     assistant: LegalChatAssistant,
     input: RunExecutionInput,
 ) -> None:
@@ -559,6 +559,29 @@ def _raise_execution_error(error: Exception, *, stage: str) -> None:
     raise ExecutionFailure(code=f"{stage}_failed", stage=stage) from None
 
 
+def safe_run_result_from_verified(
+    input: RunExecutionInput,
+    retrieved: RetrievedTurn,
+    verified: VerifiedTurn,
+) -> SafeRunResult:
+    """Convert staged output to the only public/persistable result envelope."""
+
+    if not isinstance(input, RunExecutionInput):
+        raise ExecutionFailure(code="invalid_execution_input", stage="output")
+    if not isinstance(retrieved, RetrievedTurn):
+        raise ExecutionFailure(code="invalid_retrieval_output", stage="output")
+    if not isinstance(verified, VerifiedTurn) or verified.generated.retrieved != retrieved:
+        raise ExecutionFailure(code="invalid_verification_output", stage="output")
+    boundary = _assert_frozen_boundary(input, retrieved)
+    answer_payload, verification_payload, _, _ = _verified_payloads(verified)
+    return SafeRunResult(
+        answer_text=verified.answer_text,
+        answer_payload=answer_payload,
+        evidence_payload=_evidence_payload(input, retrieved, boundary),
+        verification_payload=verification_payload,
+    )
+
+
 class LegalChatRunExecutor:
     """Execute the staged assistant without publishing an unverified draft.
 
@@ -607,7 +630,7 @@ class LegalChatRunExecutor:
                 self._seen_assistants.add(assistant)
 
             stage = "history_restore"
-            _restore_completed_history(assistant, input)
+            restore_completed_history(assistant, input)
 
             stage = "preparation"
             prepared = assistant.prepare_question(input.question)
@@ -618,7 +641,7 @@ class LegalChatRunExecutor:
                 raise ExecutionFailure(
                     code="invalid_retrieval_output", stage="retrieval"
                 )
-            boundary = _assert_frozen_boundary(input, retrieved)
+            _assert_frozen_boundary(input, retrieved)
 
             stage = "retrieval_event"
             _emit(
@@ -643,12 +666,11 @@ class LegalChatRunExecutor:
                 raise ExecutionFailure(
                     code="invalid_verification_output", stage="verification"
                 )
-            (
-                answer_payload,
-                verification_payload,
-                passed,
-                fallback_used,
-            ) = _verified_payloads(verified)
+            result = safe_run_result_from_verified(input, retrieved, verified)
+            passed = bool(result.verification_payload["passed"])
+            fallback_used = bool(
+                result.verification_payload.get("fallback_used", False)
+            )
 
             stage = "verification_event"
             _emit(
@@ -658,13 +680,7 @@ class LegalChatRunExecutor:
             )
 
             stage = "output"
-            evidence_payload = _evidence_payload(input, retrieved, boundary)
-            return SafeRunResult(
-                answer_text=verified.answer_text,
-                answer_payload=answer_payload,
-                evidence_payload=evidence_payload,
-                verification_payload=verification_payload,
-            )
+            return result
         except Exception as error:
             _raise_execution_error(error, stage=stage)
             raise AssertionError("unreachable")  # pragma: no cover
@@ -761,4 +777,6 @@ __all__ = [
     "SafePayload",
     "SafeRunResult",
     "SafeStageCallback",
+    "safe_run_result_from_verified",
+    "restore_completed_history",
 ]

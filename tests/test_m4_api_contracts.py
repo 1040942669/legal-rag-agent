@@ -238,7 +238,7 @@ def test_service_settings_use_defaults_without_environment(
     settings = ServiceSettings.from_env()
 
     assert settings == ServiceSettings()
-    assert settings.graph_version == "m4-linear-v1"
+    assert settings.graph_version == "m5-bounded-v1"
 
 
 def test_service_settings_parse_environment_values(

@@ -154,7 +154,7 @@ class RunSupervisor:
         claimed = self.service.claim_next_run(self.worker_id, self.lease_seconds)
         if claimed is None:
             return False
-        self._execute_claimed(claimed.run_id)
+        self._execute_claimed(claimed)
         return True
 
     def _loop(self) -> None:
@@ -187,21 +187,57 @@ class RunSupervisor:
             if len(recovered) < DEFAULT_STALE_RECOVERY_BATCH:
                 return
 
-    def _execute_claimed(self, run_id: str) -> None:
+    def _execute_claimed(self, claimed) -> None:
+        run_id = claimed.run_id
+        lease_epoch = getattr(claimed, "lease_epoch", None)
         try:
-            frozen = self.service.load_execution_input(run_id, self.worker_id)
-            execution_input = frozen.to_execution_input()
-            result = self._execute_with_timeout(run_id, execution_input)
-            self.service.publish_success(run_id, self.worker_id, result)
+            if lease_epoch is None:
+                frozen = self.service.load_execution_input(run_id, self.worker_id)
+            else:
+                frozen = self.service.load_execution_input(
+                    run_id,
+                    self.worker_id,
+                    lease_epoch=lease_epoch,
+                )
+            graph_execute = getattr(self.executor, "execute_claimed", None)
+            if callable(graph_execute):
+                self._execute_with_timeout(
+                    run_id,
+                    frozen,
+                    lease_epoch=lease_epoch,
+                    graph_execute=graph_execute,
+                )
+            else:
+                execution_input = frozen.to_execution_input()
+                result = self._execute_with_timeout(
+                    run_id,
+                    execution_input,
+                    lease_epoch=lease_epoch,
+                )
+                if lease_epoch is None:
+                    self.service.publish_success(run_id, self.worker_id, result)
+                else:
+                    self.service.publish_success(
+                        run_id,
+                        self.worker_id,
+                        result,
+                        lease_epoch=lease_epoch,
+                    )
         except FutureTimeout:
             self._safe_fail(
                 run_id,
                 "model_timeout",
                 {"stage": "execution", "retryable": True},
+                lease_epoch=lease_epoch,
             )
         except ExecutionFailure as exc:
             error_code = "model_timeout" if exc.code == "execution_timeout" else exc.code
-            self._safe_fail(run_id, error_code, exc.to_safe_dict())
+            self._safe_fail(
+                run_id,
+                error_code,
+                exc.to_safe_dict(),
+                lease_epoch=lease_epoch,
+            )
         except (WorkerLeaseLostError, InvalidRunStateError, ResourceNotFoundError):
             # Cancellation, stale recovery, or another terminal transition won
             # the database fence.  A late provider result is intentionally dropped.
@@ -215,9 +251,17 @@ class RunSupervisor:
                 run_id,
                 "execution_failed",
                 {"stage": "supervisor", "retryable": False},
+                lease_epoch=lease_epoch,
             )
 
-    def _execute_with_timeout(self, run_id: str, execution_input):
+    def _execute_with_timeout(
+        self,
+        run_id: str,
+        execution_input,
+        *,
+        lease_epoch: int | None = None,
+        graph_execute=None,
+    ):
         done = threading.Event()
         active = threading.Event()
         active.set()
@@ -225,10 +269,18 @@ class RunSupervisor:
 
         def invoke() -> None:
             try:
-                outcome["result"] = self.executor.execute(
-                    execution_input,
-                    self._stage_callback(run_id, active),
-                )
+                callback = self._stage_callback(run_id, active, lease_epoch)
+                if graph_execute is None:
+                    outcome["result"] = self.executor.execute(
+                        execution_input,
+                        callback,
+                    )
+                else:
+                    outcome["result"] = graph_execute(
+                        execution_input,
+                        self.worker_id,
+                        callback,
+                    )
             except Exception as exc:  # transported to the supervisor thread.
                 outcome["error"] = exc
             finally:
@@ -243,6 +295,7 @@ class RunSupervisor:
         self._execution_active = active
         thread.start()
         deadline = time.monotonic() + self.execution_timeout_seconds
+        heartbeat_at = time.monotonic() + max(0.1, self.lease_seconds / 3)
         while not done.wait(timeout=0.05):
             if self._stop.is_set():
                 active.clear()
@@ -256,6 +309,14 @@ class RunSupervisor:
                 self._execution_thread = None
                 self._execution_active = None
                 raise FutureTimeout()
+            if lease_epoch is not None and time.monotonic() >= heartbeat_at:
+                self.service.heartbeat_run(
+                    run_id,
+                    self.worker_id,
+                    lease_epoch,
+                    self.lease_seconds,
+                )
+                heartbeat_at = time.monotonic() + max(0.1, self.lease_seconds / 3)
         active.clear()
         self._execution_thread = None
         self._execution_active = None
@@ -264,16 +325,30 @@ class RunSupervisor:
             raise error
         return outcome["result"]
 
-    def _stage_callback(self, run_id: str, active: threading.Event):
+    def _stage_callback(
+        self,
+        run_id: str,
+        active: threading.Event,
+        lease_epoch: int | None = None,
+    ):
         def append(event_type, safe_payload) -> None:
             if not active.is_set():
                 raise WorkerLeaseLostError("execution delivery deadline passed")
-            self.service.append_stage_event(
-                run_id,
-                event_type,
-                safe_payload,
-                worker_id=self.worker_id,
-            )
+            if lease_epoch is None:
+                self.service.append_stage_event(
+                    run_id,
+                    event_type,
+                    safe_payload,
+                    worker_id=self.worker_id,
+                )
+            else:
+                self.service.append_stage_event(
+                    run_id,
+                    event_type,
+                    safe_payload,
+                    worker_id=self.worker_id,
+                    lease_epoch=lease_epoch,
+                )
 
         return append
 
@@ -282,14 +357,30 @@ class RunSupervisor:
             thread for thread in self._quarantined_threads if thread.is_alive()
         ]
 
-    def _safe_fail(self, run_id: str, error_code: str, payload) -> None:
+    def _safe_fail(
+        self,
+        run_id: str,
+        error_code: str,
+        payload,
+        *,
+        lease_epoch: int | None = None,
+    ) -> None:
         try:
-            self.service.fail_run(
-                run_id,
-                self.worker_id,
-                error_code,
-                payload,
-            )
+            if lease_epoch is None:
+                self.service.fail_run(
+                    run_id,
+                    self.worker_id,
+                    error_code,
+                    payload,
+                )
+            else:
+                self.service.fail_run(
+                    run_id,
+                    self.worker_id,
+                    error_code,
+                    payload,
+                    lease_epoch=lease_epoch,
+                )
         except (WorkerLeaseLostError, InvalidRunStateError, ResourceNotFoundError):
             return
 

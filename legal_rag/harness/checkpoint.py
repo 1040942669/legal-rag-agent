@@ -150,6 +150,22 @@ def checkpoint_namespace(
     return f"m5:{graph_version}:{schema_version}:lease-{lease_epoch}"
 
 
+def checkpoint_thread_id(*, run_id: str, namespace: str) -> str:
+    """Return an epoch-isolated LangGraph thread identifier.
+
+    LangGraph reserves the root ``checkpoint_ns`` as an empty string and uses
+    non-empty namespaces for nested graphs.  The lease namespace therefore
+    lives in the saver thread identifier, while the application checkpoint
+    projection retains the explicit logical namespace.
+    """
+
+    if not isinstance(run_id, str) or not run_id:
+        raise ValueError("run_id must be non-empty")
+    if not isinstance(namespace, str) or not namespace:
+        raise ValueError("namespace must be non-empty")
+    return f"{run_id}:{namespace}"
+
+
 class FencedPostgresSaver(PostgresSaver):
     """Project saver writes through a business lease/epoch trust boundary.
 
@@ -173,6 +189,14 @@ class FencedPostgresSaver(PostgresSaver):
         self._worker_id = worker_id
         self._lease_epoch = lease_epoch
         self._namespace = namespace
+        self._thread_id = checkpoint_thread_id(
+            run_id=run_id,
+            namespace=namespace,
+        )
+
+    @property
+    def thread_id(self) -> str:
+        return self._thread_id
 
     def put(
         self,
@@ -233,10 +257,10 @@ class FencedPostgresSaver(PostgresSaver):
         configurable = config.get("configurable")
         if not isinstance(configurable, Mapping):
             raise RuntimeError("LangGraph configurable state is missing")
-        if configurable.get("thread_id") != self._run_id:
+        if configurable.get("thread_id") != self._thread_id:
             raise RuntimeError("LangGraph thread_id crossed the run boundary")
-        if configurable.get("checkpoint_ns", "") != self._namespace:
-            raise RuntimeError("LangGraph checkpoint namespace crossed the lease epoch")
+        if configurable.get("checkpoint_ns", "") != "":
+            raise RuntimeError("LangGraph root checkpoint namespace is invalid")
 
 
 def _checkpoint_state(checkpoint: Mapping[str, Any]) -> HarnessState | None:
@@ -244,11 +268,20 @@ def _checkpoint_state(checkpoint: Mapping[str, Any]) -> HarnessState | None:
     if not isinstance(channel_values, Mapping):
         return None
     candidate: Any
-    if "run_id" in channel_values:
-        candidate = dict(channel_values)
+    if "payload" in channel_values:
+        payload = channel_values["payload"]
+        candidate = dict(payload) if isinstance(payload, Mapping) else None
+    elif "run_id" in channel_values:
+        state_fields = HarnessState.__required_keys__
+        if not state_fields.issubset(channel_values):
+            return None
+        candidate = {field: channel_values[field] for field in state_fields}
     else:
         start = channel_values.get("__start__")
-        candidate = dict(start) if isinstance(start, Mapping) else None
+        if isinstance(start, Mapping) and isinstance(start.get("payload"), Mapping):
+            candidate = dict(start["payload"])
+        else:
+            candidate = dict(start) if isinstance(start, Mapping) else None
     if candidate is None:
         return None
     return validate_harness_state(candidate)
@@ -264,6 +297,7 @@ __all__ = [
     "assert_postgres_checkpointer_ready",
     "checkpoint_namespace",
     "checkpoint_pool",
+    "checkpoint_thread_id",
     "postgres_conninfo",
     "require_persistent_checkpointer",
     "setup_postgres_checkpointer",

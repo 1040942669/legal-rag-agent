@@ -324,7 +324,7 @@ def _application(
         service=fake_service,
         authenticator=authenticator,
         supervisor=supervisor,
-        settings=settings,
+        settings=settings or ServiceSettings(graph_version="m4-linear-v1"),
         start_supervisor=False,
     )
     return app, fake_service, supervisor
