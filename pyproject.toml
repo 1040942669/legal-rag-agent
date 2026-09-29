@@ -1,6 +1,6 @@
 [project]
 name = "legal-rag-assistant"
-version = "0.6.0"
+version = "0.7.0"
 description = "A reproducible RAG assistant for versioned Chinese law text snapshots."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -20,6 +20,7 @@ dependencies = [
 [project.scripts]
 legal-rag = "legal_rag.cli:main"
 legal-rag-api = "legal_rag.api.command:main"
+legal-rag-jobs = "legal_rag.jobs.command:main"
 
 [project.optional-dependencies]
 database = [
@@ -38,6 +39,13 @@ service = [
     "pydantic>=2.10,<3",
     "sqlalchemy>=2.0,<3",
     "uvicorn>=0.34,<1",
+]
+jobs = [
+    "alembic>=1.15,<2",
+    "celery[redis]>=5.6,<5.7",
+    "pgvector>=0.5,<0.6",
+    "psycopg[binary]>=3.2,<4",
+    "sqlalchemy>=2.0,<3",
 ]
 
 [tool.uv]

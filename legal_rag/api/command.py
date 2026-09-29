@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import os
 from datetime import timedelta
+from pathlib import Path
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Run the optional M5 Legal RAG HTTP service.",
+        description="Run the optional Legal RAG HTTP service.",
     )
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8000)
@@ -38,6 +40,9 @@ def main(argv: list[str] | None = None) -> int:
     from legal_rag.services.run_service import RunService
     from legal_rag.services.service_retrieval import PostgresAssistantFactory
     from legal_rag.services.supervisor import RunSupervisor
+    from legal_rag.jobs.registry import JobRegistry
+    from legal_rag.jobs.store import JobStore
+    from legal_rag.observability.config import observer_from_environment
     from legal_rag.storage.database import create_database_engine
     from legal_rag.storage.migrations import upgrade_database
 
@@ -87,12 +92,21 @@ def main(argv: list[str] | None = None) -> int:
         execution_timeout_seconds=settings.executor_timeout_seconds,
         poll_seconds=settings.supervisor_poll_seconds,
     )
+    registry_path = os.environ.get("LEGAL_RAG_JOB_REGISTRY_PATH", "").strip()
+    if registry_path and not Path(registry_path).is_absolute():
+        raise SystemExit("LEGAL_RAG_JOB_REGISTRY_PATH must be absolute")
+    job_registry = JobRegistry.from_json_file(registry_path) if registry_path else None
+    job_store = JobStore(engine) if job_registry is not None else None
+    job_observer = observer_from_environment()
     app = create_app(
         service=service,
         authenticator=authenticator,
         supervisor=supervisor,
         settings=settings,
         close_engine=True,
+        job_store=job_store,
+        job_registry=job_registry,
+        job_observer=job_observer,
     )
     uvicorn.run(
         app,

@@ -17,6 +17,7 @@ from sqlalchemy import (
     Table,
     Text,
     UniqueConstraint,
+    false,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -1140,6 +1141,173 @@ run_events = Table(
 )
 
 Index("ix_run_events_created", run_events.c.run_id, run_events.c.created_at)
+
+
+jobs = Table(
+    "jobs",
+    metadata,
+    Column("job_id", String(36), primary_key=True),
+    Column("owner_id", String(128), nullable=False),
+    Column("kind", String(16), nullable=False),
+    Column("request_ref", String(128), nullable=False),
+    Column("request_hash", String(64), nullable=False),
+    Column("idempotency_key", String(255), nullable=True),
+    Column("status", String(16), nullable=False),
+    Column("stage", String(64), nullable=False),
+    Column("total", Integer, nullable=False),
+    Column("completed", Integer, nullable=False, server_default="0"),
+    Column("failed", Integer, nullable=False, server_default="0"),
+    Column("cancel_requested", Boolean, nullable=False, server_default=false()),
+    Column("lease_owner", String(128), nullable=True),
+    Column("lease_epoch", BigInteger, nullable=False, server_default="0"),
+    Column("claim_count", Integer, nullable=False, server_default="0"),
+    Column("lease_expires_at", DateTime(timezone=True), nullable=True),
+    Column("error_code", String(64), nullable=True),
+    Column("recovery_queued_at", DateTime(timezone=True), nullable=True),
+    Column(
+        "created_at", DateTime(timezone=True), nullable=False, server_default=func.now()
+    ),
+    Column(
+        "updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()
+    ),
+    Column("started_at", DateTime(timezone=True), nullable=True),
+    Column("finished_at", DateTime(timezone=True), nullable=True),
+    CheckConstraint("btrim(owner_id) <> ''", name="ck_jobs_owner"),
+    CheckConstraint("kind IN ('evaluation', 'ingestion')", name="ck_jobs_kind"),
+    CheckConstraint(
+        "request_ref ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$'",
+        name="ck_jobs_request_ref",
+    ),
+    CheckConstraint("request_hash ~ '^[0-9a-f]{64}$'", name="ck_jobs_request_hash"),
+    CheckConstraint(
+        "status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')",
+        name="ck_jobs_status",
+    ),
+    CheckConstraint("stage ~ '^[a-z][a-z0-9_]{0,63}$'", name="ck_jobs_stage"),
+    CheckConstraint(
+        "total >= 0 AND completed >= 0 AND failed >= 0 AND completed + failed <= total",
+        name="ck_jobs_progress",
+    ),
+    CheckConstraint("lease_epoch >= 0", name="ck_jobs_lease_epoch"),
+    CheckConstraint("claim_count >= 0", name="ck_jobs_claim_count"),
+    CheckConstraint(
+        "(status = 'running' AND lease_owner IS NOT NULL "
+        "AND lease_expires_at IS NOT NULL) OR "
+        "(status <> 'running' AND lease_owner IS NULL "
+        "AND lease_expires_at IS NULL)",
+        name="ck_jobs_lease_pair",
+    ),
+    CheckConstraint(
+        "(status IN ('queued', 'running') AND finished_at IS NULL) OR "
+        "(status IN ('succeeded', 'failed', 'cancelled') AND finished_at IS NOT NULL)",
+        name="ck_jobs_finished_at",
+    ),
+    UniqueConstraint(
+        "owner_id", "kind", "idempotency_key", name="uq_jobs_owner_kind_idempotency"
+    ),
+)
+
+Index("ix_jobs_owner_created", jobs.c.owner_id, jobs.c.created_at)
+Index("ix_jobs_recovery", jobs.c.status, jobs.c.lease_expires_at)
+
+
+job_outbox = Table(
+    "job_outbox",
+    metadata,
+    Column("outbox_id", String(36), primary_key=True),
+    Column(
+        "job_id",
+        String(36),
+        ForeignKey("jobs.job_id", ondelete="CASCADE"),
+        nullable=False,
+    ),
+    Column("schema_version", Integer, nullable=False),
+    Column("status", String(16), nullable=False),
+    Column("claim_owner", String(128), nullable=True),
+    Column("claim_epoch", BigInteger, nullable=False, server_default="0"),
+    Column("claim_expires_at", DateTime(timezone=True), nullable=True),
+    Column("delivery_attempts", Integer, nullable=False, server_default="0"),
+    Column(
+        "next_attempt_at",
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    ),
+    Column("last_error_code", String(64), nullable=True),
+    Column(
+        "created_at", DateTime(timezone=True), nullable=False, server_default=func.now()
+    ),
+    Column("delivered_at", DateTime(timezone=True), nullable=True),
+    CheckConstraint("schema_version = 1", name="ck_job_outbox_schema_version"),
+    CheckConstraint("status IN ('pending', 'delivered')", name="ck_job_outbox_status"),
+    CheckConstraint(
+        "claim_epoch >= 0 AND delivery_attempts >= 0", name="ck_job_outbox_counters"
+    ),
+    CheckConstraint(
+        "(claim_owner IS NULL) = (claim_expires_at IS NULL)",
+        name="ck_job_outbox_claim_pair",
+    ),
+    CheckConstraint(
+        "(status = 'pending' AND delivered_at IS NULL) OR "
+        "(status = 'delivered' AND delivered_at IS NOT NULL)",
+        name="ck_job_outbox_delivered_at",
+    ),
+)
+
+Index(
+    "ix_job_outbox_due",
+    job_outbox.c.status,
+    job_outbox.c.next_attempt_at,
+    job_outbox.c.created_at,
+)
+Index("ix_job_outbox_job_created", job_outbox.c.job_id, job_outbox.c.created_at)
+Index(
+    "uq_job_outbox_pending_per_job",
+    job_outbox.c.job_id,
+    unique=True,
+    postgresql_where=job_outbox.c.status == "pending",
+)
+
+
+job_items = Table(
+    "job_items",
+    metadata,
+    Column(
+        "job_id",
+        String(36),
+        ForeignKey("jobs.job_id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("item_key", String(64), primary_key=True),
+    Column("status", String(16), nullable=False),
+    Column("attempt_count", Integer, nullable=False),
+    Column("max_attempts", Integer, nullable=False),
+    Column("lease_epoch", BigInteger, nullable=False),
+    Column("result_ref", String(255), nullable=True),
+    Column("error_code", String(64), nullable=True),
+    Column(
+        "created_at", DateTime(timezone=True), nullable=False, server_default=func.now()
+    ),
+    Column(
+        "updated_at", DateTime(timezone=True), nullable=False, server_default=func.now()
+    ),
+    CheckConstraint("item_key ~ '^[0-9a-f]{64}$'", name="ck_job_items_key"),
+    CheckConstraint(
+        "status IN ('pending', 'running', 'succeeded', 'failed')",
+        name="ck_job_items_status",
+    ),
+    CheckConstraint(
+        "max_attempts BETWEEN 1 AND 10 AND attempt_count BETWEEN 1 AND max_attempts",
+        name="ck_job_items_attempts",
+    ),
+    CheckConstraint("lease_epoch > 0", name="ck_job_items_lease_epoch"),
+    CheckConstraint(
+        "(status = 'succeeded') = (result_ref IS NOT NULL)",
+        name="ck_job_items_result_ref",
+    ),
+)
+
+Index("ix_job_items_status", job_items.c.job_id, job_items.c.status)
 
 
 EMBEDDING_DIMENSION_TRIGGER_SQL = """
