@@ -5,7 +5,7 @@
 ## 当前事实
 
 - M6 `v0.7.0` 正在 `codex/m6-async-jobs` 开发；基线是已核验 `origin/master` `76a038936ddfd900f98ad8709fedcc50c07063d3`。该提交合并了 M5 finalization PR #24，[master CI 36504995613](https://github.com/1040942669/legal-rag-agent/actions/runs/36504995613) 三项全部成功。M5 `v0.6.0` 仍已发布，Tag 不移动，也不为 M5 新增回执。
-- M6 跟踪 [Issue #25](https://github.com/1040942669/legal-rag-agent/issues/25) 和 GitHub [Milestone 7](https://github.com/1040942669/legal-rag-agent/milestone/7)。[Draft PR #26](https://github.com/1040942669/legal-rag-agent/pull/26) 当前已 push 的首轮精确 head 是 `f1b44baaa61e6c6d9be83b58bf4105ca260382f8`；更早三个子任务提交为 `93508a5`、`71f6328`、`8bc4eeb`。M6 尚无 Tag 或 Release。
+- M6 跟踪 [Issue #25](https://github.com/1040942669/legal-rag-agent/issues/25) 和 GitHub [Milestone 7](https://github.com/1040942669/legal-rag-agent/milestone/7)。[Draft PR #26](https://github.com/1040942669/legal-rag-agent/pull/26) 首轮 head 为 `f1b44baaa61e6c6d9be83b58bf4105ca260382f8`；M5 wheel 修正及首轮 CI 证据已通过 `c0b8a33dcb16e644511d7c1d64d908ba85f3befc` push。其后的交接文字提交 SHA 无法自引用。M6 尚无 Tag 或 Release。
 - 本次授权：在门禁和仓库 review/保护规则满足时可 commit、push、创建 PR、正常合并并发布；不能强推或绕过 review。默认禁用 live/paid model，不上传凭证、私人资料、未授权语料。
 
 ## 实施中的 M6 文件与边界
@@ -27,7 +27,7 @@
 
 ## 下一条可执行动作
 
-提交并 push 已核对的 M5 wheel 版本参数修正和首轮 CI 事实，等待 PR #26 新 head 四路 CI 全绿；随后按 `MASTER_PLAN.md` §13 的 review、普通 merge、精确 master CI、Tag、Release、独立回执顺序推进。若 CI、review、schema 或测试任一门禁不满足，停在真实状态，不造发布声明。M7 不在本次范围。
+等待 PR #26 含 M5 wheel 修正的新精确 head 四路 CI 全绿；随后按 `MASTER_PLAN.md` §13 的 review、普通 merge、精确 master CI、Tag、Release、独立回执顺序推进。若 CI、review、schema 或测试任一门禁不满足，停在真实状态，不造发布声明。M7 不在本次范围。
 
 ---
 

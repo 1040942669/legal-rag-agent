@@ -7,8 +7,8 @@
     "observed_default_branch": "master",
     "observed_baseline_commit": "61f1065fc6d5678d0d57114e2e361294d04906b4",
     "observed_on": "2026-09-29",
-    "workspace_head": "f1b44baaa61e6c6d9be83b58bf4105ca260382f8",
-    "workspace_head_note": "First pushed M6 documentation candidate and exact-head CI reference before the M5 wheel version-parameter fix. M6 was based on verified origin/master 76a038936ddfd900f98ad8709fedcc50c07063d3 after PR #24 and master CI 36504995613. This JSON cannot self-reference its own final commit SHA.",
+    "workspace_head": "c0b8a33dcb16e644511d7c1d64d908ba85f3befc",
+    "workspace_head_note": "Last pushed M6 wheel-fix commit before this current handoff update; M6 was based on verified origin/master 76a038936ddfd900f98ad8709fedcc50c07063d3 after PR #24 and master CI 36504995613. This JSON cannot self-reference its own final commit SHA.",
     "workspace_branch": "codex/m6-async-jobs",
     "workspace_dirty": false,
     "remote_tags_checked": true
@@ -792,5 +792,5 @@
       "blockers": []
     }
   ],
-  "next_action": "Push the reviewed M5 wheel version-parameter fix and first CI evidence, then require all four jobs on the new exact PR head before normal merge and master CI. M5 v0.6.0 remains immutable."
+  "next_action": "Require all four jobs on the new exact PR head after the pushed M5 wheel fix before normal merge and master CI. M5 v0.6.0 remains immutable."
 }
