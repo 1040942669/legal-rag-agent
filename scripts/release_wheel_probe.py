@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify release wheels for M4 or M5 without importing the source checkout."""
+"""Verify release wheels for M4 through M6 without importing the source checkout."""
 
 from __future__ import annotations
 
@@ -8,8 +8,11 @@ import importlib.util
 import json
 import os
 import re
+import subprocess
 import sys
+import sysconfig
 import tempfile
+import venv
 import zipfile
 from email import policy
 from email.parser import BytesParser
@@ -27,7 +30,7 @@ _m4 = importlib.util.module_from_spec(_M4_SPEC)
 _M4_SPEC.loader.exec_module(_m4)
 
 
-DEFAULT_VERSIONS: Final = {"M4": "0.5.0", "M5": "0.6.0"}
+DEFAULT_VERSIONS: Final = {"M4": "0.5.0", "M5": "0.6.0", "M6": "0.7.0"}
 M5_REQUIRED_RUNTIME_FILES: Final = frozenset(
     {
         "legal_rag/harness/__init__.py",
@@ -59,6 +62,38 @@ M5_SMOKE_MODULES: Final = (
     "legal_rag.harness.runner",
     "legal_rag.harness.state",
     "legal_rag.harness.tools",
+)
+M6_REQUIRED_RUNTIME_FILES: Final = frozenset(
+    {
+        "legal_rag/jobs/__init__.py",
+        "legal_rag/jobs/command.py",
+        "legal_rag/jobs/dispatcher.py",
+        "legal_rag/jobs/handlers.py",
+        "legal_rag/jobs/registry.py",
+        "legal_rag/jobs/store.py",
+        "legal_rag/jobs/worker.py",
+        "legal_rag/observability/__init__.py",
+        "legal_rag/observability/config.py",
+        "legal_rag/observability/events.py",
+        "legal_rag/observability/langfuse.py",
+        "legal_rag/storage/alembic/versions/0007_m6_jobs_outbox.py",
+    }
+)
+M6_JOBS_EXTRA_DEPENDENCIES: Final = frozenset(
+    {"alembic", "celery", "pgvector", "psycopg", "sqlalchemy"}
+)
+M6_SMOKE_MODULES: Final = (
+    "legal_rag.api.app",
+    "legal_rag.jobs.command",
+    "legal_rag.jobs.dispatcher",
+    "legal_rag.jobs.handlers",
+    "legal_rag.jobs.registry",
+    "legal_rag.jobs.store",
+    "legal_rag.jobs.worker",
+    "legal_rag.observability.config",
+    "legal_rag.observability.events",
+    "legal_rag.observability.langfuse",
+    "legal_rag.storage.alembic.versions.0007_m6_jobs_outbox",
 )
 _EXTRA_ONLY_MARKER = re.compile(
     r'(?:extra\s*==\s*["\'](?P<right>[A-Za-z0-9][A-Za-z0-9._-]*)["\']|'
@@ -184,6 +219,121 @@ def _require_m5_service_dependencies(metadata: Any) -> None:
         )
 
 
+def _require_m6_runtime_files(names: set[str]) -> None:
+    if not M6_REQUIRED_RUNTIME_FILES.issubset(names):
+        raise ProbeFailure(
+            "m6_required_runtime_file_missing",
+            "The wheel is missing one or more required M6 runtime files.",
+        )
+
+
+def _require_m6_jobs_entry_point(wheel_path: Path) -> None:
+    try:
+        with zipfile.ZipFile(wheel_path) as archive:
+            entry_points = [
+                name for name in archive.namelist()
+                if name.endswith(".dist-info/entry_points.txt")
+            ]
+            if len(entry_points) != 1:
+                raise ProbeFailure(
+                    "invalid_entry_points",
+                    "The wheel must contain exactly one console-script metadata file.",
+                )
+            raw = _m4._read_small_member(
+                archive,
+                entry_points[0],
+                missing_code="entry_points_missing",
+            )
+    except ProbeFailure:
+        raise
+    except (OSError, RuntimeError, zipfile.BadZipFile) as exc:
+        raise ProbeFailure(
+            "invalid_wheel_archive",
+            "The candidate is not a readable wheel archive.",
+        ) from exc
+    scripts = _m4._parse_console_scripts(raw)
+    if scripts.get("legal-rag-jobs") != "legal_rag.jobs.command:main":
+        raise ProbeFailure(
+            "m6_jobs_console_script_missing",
+            "The wheel does not expose the required M6 jobs command.",
+        )
+
+
+def _require_m6_jobs_dependencies(metadata: Any) -> None:
+    try:
+        from packaging.requirements import InvalidRequirement, Requirement
+    except ImportError as exc:  # pragma: no cover - locked CI provides it
+        raise ProbeFailure(
+            "requirement_parser_unavailable",
+            "The M6 dependency marker parser is unavailable.",
+        ) from exc
+
+    provided_extras = {
+        _canonical_name(value)
+        for value in metadata.get_all("Provides-Extra", failobj=[])
+    }
+    if "jobs" not in provided_extras:
+        raise ProbeFailure(
+            "m6_jobs_extra_missing",
+            "The wheel metadata does not declare the optional jobs extra.",
+        )
+
+    jobs_bound: set[str] = set()
+    for raw_requirement in metadata.get_all("Requires-Dist", failobj=[]):
+        try:
+            requirement = Requirement(raw_requirement)
+        except InvalidRequirement as exc:
+            raise ProbeFailure(
+                "invalid_requirement_metadata",
+                "The wheel contains an invalid dependency declaration.",
+            ) from exc
+        dependency = _canonical_name(requirement.name)
+        if dependency not in M6_JOBS_EXTRA_DEPENDENCIES:
+            continue
+        marker = requirement.marker
+        try:
+            base_enabled = marker.evaluate({"extra": ""}) if marker is not None else True
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ProbeFailure(
+                "invalid_requirement_metadata",
+                "The wheel contains an invalid dependency declaration.",
+            ) from exc
+        if base_enabled:
+            raise ProbeFailure(
+                "unconditional_m6_jobs_dependency",
+                "An M6 jobs dependency is present in the base dependency set.",
+            )
+        extra_match = _EXTRA_ONLY_MARKER.fullmatch(str(marker))
+        if extra_match is None:
+            raise ProbeFailure(
+                "noncanonical_m6_jobs_dependency_marker",
+                "An M6 jobs dependency must be bound only to a declared extra.",
+            )
+        marker_extra = _canonical_name(
+            extra_match.group("right") or extra_match.group("left")
+        )
+        if marker_extra not in provided_extras:
+            raise ProbeFailure(
+                "undeclared_m6_dependency_extra",
+                "An M6 dependency is bound to an undeclared optional extra.",
+            )
+        if marker_extra == "jobs":
+            if dependency == "celery" and "redis" not in {
+                _canonical_name(extra) for extra in requirement.extras
+            }:
+                raise ProbeFailure(
+                    "m6_celery_redis_extra_missing",
+                    "The jobs extra must request Celery's Redis transport.",
+                )
+            jobs_bound.add(dependency)
+
+    if jobs_bound != M6_JOBS_EXTRA_DEPENDENCIES:
+        raise ProbeFailure(
+            "m6_jobs_extra_dependency_missing",
+            "The jobs extra is missing an M6 runtime dependency.",
+        )
+
+
 def _smoke_m5_modules_with_locked_runtime(
     wheel_path: Path,
     *,
@@ -290,6 +440,141 @@ def _smoke_m5_modules_with_locked_runtime(
     }
 
 
+def _smoke_m6_installed_wheel(
+    wheel_path: Path,
+    *,
+    expected_version: str,
+    timeout_seconds: int,
+    temp_root: Path | None,
+) -> dict[str, Any]:
+    """Install the M6 wheel outside the checkout and exercise its jobs runtime."""
+
+    if not 10 <= timeout_seconds <= 600:
+        raise ProbeFailure(
+            "invalid_smoke_timeout",
+            "The smoke-test timeout must be between 10 and 600 seconds.",
+        )
+    source_root = Path(__file__).resolve().parents[1]
+    if temp_root is not None:
+        try:
+            resolved_temp_root = temp_root.expanduser().resolve(strict=True)
+        except OSError as exc:
+            raise ProbeFailure(
+                "invalid_temp_root", "The requested temporary root is unavailable."
+            ) from exc
+        if not resolved_temp_root.is_dir():
+            raise ProbeFailure(
+                "invalid_temp_root", "The requested temporary root is unavailable."
+            )
+    else:
+        resolved_temp_root = None
+
+    try:
+        temporary = tempfile.TemporaryDirectory(
+            prefix="m6-wheel-runtime-probe-", dir=resolved_temp_root
+        )
+    except OSError as exc:
+        raise ProbeFailure(
+            "temp_runtime_creation_failed",
+            "The temporary M6 runtime environment could not be created.",
+        ) from exc
+
+    with temporary:
+        workspace = Path(temporary.name).resolve()
+        if _m4._is_within(workspace, source_root):
+            raise ProbeFailure(
+                "temp_runtime_inside_source",
+                "The M6 runtime smoke environment must be outside the source checkout.",
+            )
+        venv_path = workspace / "venv"
+        try:
+            venv.EnvBuilder(
+                with_pip=True, clear=True, system_site_packages=False
+            ).create(venv_path)
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
+            raise ProbeFailure(
+                "temp_runtime_creation_failed",
+                "The temporary M6 runtime environment could not be created.",
+            ) from exc
+
+        scripts_dir = venv_path / ("Scripts" if os.name == "nt" else "bin")
+        python = scripts_dir / ("python.exe" if os.name == "nt" else "python")
+        jobs_cli = scripts_dir / ("legal-rag-jobs.exe" if os.name == "nt" else "legal-rag-jobs")
+        environment = _m4._sanitized_child_environment(scripts_dir)
+        environment.update(
+            {
+                "ALLOW_LIVE_MODEL_CALLS": "false",
+                "HF_HUB_OFFLINE": "1",
+                "LEGAL_RAG_DISABLE_DOTENV": "1",
+                "NO_PROXY": "*",
+                "TRANSFORMERS_OFFLINE": "1",
+                "no_proxy": "*",
+            }
+        )
+        _m4._run_quiet(
+            (
+                str(python), "-m", "pip", "install", "--no-index", "--no-deps",
+                "--force-reinstall", str(wheel_path),
+            ),
+            cwd=workspace,
+            environment=environment,
+            timeout_seconds=timeout_seconds,
+            error_code="m6_offline_wheel_install_failed",
+            safe_message="The M6 wheel could not be installed offline.",
+        )
+
+        locked_runtime_site = Path(sysconfig.get_path("purelib")).resolve()
+        if not locked_runtime_site.is_dir():
+            raise ProbeFailure(
+                "locked_runtime_unavailable",
+                "The locked M6 probe runtime is unavailable.",
+            )
+        imports = ";".join(
+            f"m=importlib.import_module({module_name!r});"
+            "pathlib.Path(m.__file__).resolve().relative_to(r)"
+            for module_name in M6_SMOKE_MODULES
+        )
+        provenance_code = (
+            "import importlib,importlib.metadata as md,pathlib,sys;"
+            "r=pathlib.Path(sys.prefix).resolve();"
+            f"sys.path.append({str(locked_runtime_site)!r});"
+            f"assert md.version('legal-rag-assistant') == {expected_version!r};"
+            f"{imports};"
+            "from alembic.script import ScriptDirectory;"
+            "from legal_rag.storage.migrations import alembic_config;"
+            "assert ScriptDirectory.from_config(alembic_config()).get_current_head() "
+            "== '0007_m6_jobs_outbox'"
+        )
+        _m4._run_quiet(
+            (str(python), "-I", "-c", provenance_code),
+            cwd=workspace,
+            environment=environment,
+            timeout_seconds=timeout_seconds,
+            error_code="m6_runtime_module_smoke_failed",
+            safe_message="The installed M6 modules or migration could not be loaded.",
+        )
+        _m4._run_quiet(
+            (str(jobs_cli), "--help"),
+            cwd=workspace,
+            environment=environment,
+            timeout_seconds=timeout_seconds,
+            error_code="m6_jobs_cli_smoke_failed",
+            safe_message="The installed jobs CLI --help smoke test failed.",
+            require_help=True,
+        )
+
+    return {
+        "status": "passed",
+        "candidate_package_source": "installed_wheel",
+        "dependency_source": "locked_probe_runtime",
+        "module_import_count": len(M6_SMOKE_MODULES),
+        "api_module_imported": True,
+        "jobs_cli_help": "passed",
+        "migration_head": "0007_m6_jobs_outbox",
+        "source_checkout_isolated": True,
+    }
+
+
 def probe_release_wheel(
     wheel_path: str | os.PathLike[str],
     *,
@@ -299,7 +584,7 @@ def probe_release_wheel(
     timeout_seconds: int = 120,
     temp_root: str | os.PathLike[str] | None = None,
 ) -> dict[str, Any]:
-    """Probe an M4 or M5 release wheel and return a sanitized receipt."""
+    """Probe an M4, M5, or M6 release wheel and return a sanitized receipt."""
 
     normalized_profile = profile.strip().upper()
     if normalized_profile not in DEFAULT_VERSIONS:
@@ -319,7 +604,7 @@ def probe_release_wheel(
     )
     receipt["release_profile"] = normalized_profile
 
-    if normalized_profile == "M5":
+    if normalized_profile in {"M5", "M6"}:
         metadata, names = _m5_metadata_and_names(path)
         _require_m5_runtime_files(names)
         _require_m5_service_dependencies(metadata)
@@ -333,6 +618,24 @@ def probe_release_wheel(
         receipt["m5_service_extra_dependency_count"] = len(
             M5_PROFILE_SERVICE_EXTRA_DEPENDENCIES
         )
+        if normalized_profile == "M6":
+            _require_m6_runtime_files(names)
+            _require_m6_jobs_entry_point(path)
+            _require_m6_jobs_dependencies(metadata)
+            receipt["checks"].update(
+                {
+                    "m6_runtime_files": "passed",
+                    "m6_jobs_entry_point": "passed",
+                    "m6_jobs_dependencies_optional": "passed",
+                }
+            )
+            receipt["console_scripts"] = sorted(
+                {*receipt["console_scripts"], "legal-rag-jobs"}
+            )
+            receipt["m6_required_runtime_file_count"] = len(M6_REQUIRED_RUNTIME_FILES)
+            receipt["m6_jobs_extra_dependency_count"] = len(
+                M6_JOBS_EXTRA_DEPENDENCIES
+            )
 
     if smoke:
         receipt["smoke"] = _m4._smoke_in_temporary_venv(
@@ -341,7 +644,7 @@ def probe_release_wheel(
             timeout_seconds=timeout_seconds,
             temp_root=Path(temp_root) if temp_root is not None else None,
         )
-        if normalized_profile == "M5":
+        if normalized_profile in {"M5", "M6"}:
             receipt["smoke"]["m5_runtime_modules"] = (
                 _smoke_m5_modules_with_locked_runtime(
                     path,
@@ -349,6 +652,15 @@ def probe_release_wheel(
                     temp_root=Path(temp_root) if temp_root is not None else None,
                 )
             )
+            if normalized_profile == "M6":
+                receipt["smoke"]["m6_installed_runtime"] = (
+                    _smoke_m6_installed_wheel(
+                        path,
+                        expected_version=version,
+                        timeout_seconds=timeout_seconds,
+                        temp_root=Path(temp_root) if temp_root is not None else None,
+                    )
+                )
     return receipt
 
 

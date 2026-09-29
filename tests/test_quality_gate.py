@@ -1727,14 +1727,17 @@ def test_ci_has_an_exact_head_provider_free_m5_fault_job() -> None:
         in workflow
     )
 
-    fault_suite = workflow.index("- name: Run the independent M5 fault-injection suite")
-    junit_guard = workflow.index("- name: Reject skipped or xfailed M5 suite tests")
-    recovery_demo = workflow.index("- name: Run the one-command M5 recovery demo")
-    restart_prepare = workflow.rindex(
+    m5_workflow = workflow.split("  m5-fault-injection:", maxsplit=1)[1].split(
+        "  m6-worker-integration:", maxsplit=1
+    )[0]
+    fault_suite = m5_workflow.index("- name: Run the independent M5 fault-injection suite")
+    junit_guard = m5_workflow.index("- name: Reject skipped or xfailed M5 suite tests")
+    recovery_demo = m5_workflow.index("- name: Run the one-command M5 recovery demo")
+    restart_prepare = m5_workflow.rindex(
         "- name: Prepare persistent state for the cumulative PostgreSQL restart check"
     )
-    wheel_probe = workflow.index("- name: Run the isolated M5 release-wheel probe")
-    cumulative_gate = workflow.index(
+    wheel_probe = m5_workflow.index("- name: Run the isolated M5 release-wheel probe")
+    cumulative_gate = m5_workflow.index(
         "- name: Run the M5 cumulative fault-injection quality gate"
     )
     assert (
@@ -1745,10 +1748,10 @@ def test_ci_has_an_exact_head_provider_free_m5_fault_job() -> None:
         < wheel_probe
         < cumulative_gate
     )
-    fault_suite_step = workflow[fault_suite:junit_guard]
+    fault_suite_step = m5_workflow[fault_suite:junit_guard]
     assert "xfail_strict=true" in fault_suite_step
     assert "--junitxml" in fault_suite_step
-    junit_guard_step = workflow[junit_guard:recovery_demo]
+    junit_guard_step = m5_workflow[junit_guard:recovery_demo]
     assert "_junit_counts" in junit_guard_step
     assert '("failures", "errors", "skipped")' in junit_guard_step
 

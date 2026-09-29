@@ -438,3 +438,229 @@ jobs:
             ${{ runner.temp }}/m5-wheel/*.whl
           if-no-files-found: error
           retention-days: 14
+
+  m6-worker-integration:
+    name: m6 worker / PostgreSQL 18 + Redis 7.4
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      ALLOW_LIVE_MODEL_CALLS: "false"
+      DO_NOT_TRACK: "1"
+      HF_DATASETS_OFFLINE: "1"
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      HF_HUB_OFFLINE: "1"
+      LEGAL_RAG_DATABASE_URL: "postgresql+psycopg://m6_test@127.0.0.1:5432/legal_rag_m3_test_m6"
+      LEGAL_RAG_DISABLE_DOTENV: "1"
+      LEGAL_RAG_EXPECTED_PGVECTOR_VERSION: "0.8.6"
+      LEGAL_RAG_INTEGRATION_TEST: "1"
+      LEGAL_RAG_REDIS_URL: "redis://127.0.0.1:6379/15"
+      NO_PROXY: "*"
+      PYTHONDONTWRITEBYTECODE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.6-pg18@sha256:2ba9ca5f2e7daa0f0e7723cba1ee9167bab54efd3640516a44ac1a928dd67e7a
+        env:
+          POSTGRES_DB: legal_rag_m3_test_m6
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_USER: m6_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U m6_test -d legal_rag_m3_test_m6"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+      redis:
+        image: redis:7.4.5-alpine@sha256:bb186d083732f669da90be8b0f975a37812b15e913465bb14d845db72a4e3e08
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+
+    steps:
+      - name: Check out the pull request head commit
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Check out the pushed commit
+        if: github.event_name == 'push'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12.13"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4 # v10.1.0
+        with:
+          version: "0.10.10"
+          enable-cache: false
+
+      - name: Verify the lock file
+        run: uv lock --check
+
+      - name: Install locked service, jobs, and test dependencies
+        run: uv sync --frozen --group dev --extra service --extra jobs
+
+      - name: Verify the M6 environment in uv offline mode
+        run: uv sync --check --offline --frozen --group dev --extra service --extra jobs
+
+      - name: Verify the jobs command and real Redis connection
+        run: |
+          uv run --offline --frozen --no-sync legal-rag-jobs --help
+          uv run --offline --frozen --no-sync python -c 'import os; from redis import Redis; assert Redis.from_url(os.environ["LEGAL_RAG_REDIS_URL"], socket_timeout=3).ping()'
+
+      - name: Run the independent real broker and worker suite
+        env:
+          LEGAL_RAG_M6_CANDIDATE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          LEGAL_RAG_M6_RECEIPT: ${{ runner.temp }}/m6-worker-receipt.json
+        run: >-
+          uv run --offline --frozen --no-sync pytest -q
+          -o xfail_strict=true
+          integration_tests/test_m6_worker_real.py
+          integration_tests/test_m6_job_store_db.py
+          integration_tests/test_m6_handlers_db.py
+          tests/test_m6_observability.py
+          tests/test_m6_observability_config.py
+          --junitxml="${RUNNER_TEMP}/m6-worker-junit.xml"
+
+      - name: Reject skipped, xfailed, or absent M6 broker tests
+        env:
+          M6_WORKER_JUNIT: ${{ runner.temp }}/m6-worker-junit.xml
+        run: >-
+          uv run --offline --frozen --no-sync python -c
+          'import os; from pathlib import Path; from scripts.quality_gate import _junit_counts;
+          counts = _junit_counts(Path(os.environ["M6_WORKER_JUNIT"]));
+          valid = counts["tests"] > 0 and not any(counts[name] for name in ("failures", "errors", "skipped"));
+          raise SystemExit(0 if valid else f"mandatory M6 suite JUnit is not clean: {counts}")'
+
+      - name: Require a non-empty M6 real worker receipt
+        run: test -s "${RUNNER_TEMP}/m6-worker-receipt.json"
+
+      - name: Validate the exact-head M6 worker receipt
+        env:
+          M6_CANDIDATE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          M6_WORKER_RECEIPT: ${{ runner.temp }}/m6-worker-receipt.json
+        run: >-
+          uv run --offline --frozen --no-sync python -c
+          'import os; from pathlib import Path; from scripts.quality_gate import validate_m6_worker_receipt_file;
+          errors = validate_m6_worker_receipt_file(Path(os.environ["M6_WORKER_RECEIPT"]), expected_sha=os.environ["M6_CANDIDATE_SHA"]);
+          raise SystemExit(0 if not errors else "; ".join(errors))'
+
+      - name: Run the independent M5 fault suite for cumulative evidence
+        env:
+          LEGAL_RAG_M5_CANDIDATE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+          LEGAL_RAG_M5_FAULT_RECEIPT: ${{ runner.temp }}/m5-fault-receipt.json
+        run: >-
+          uv run --offline --frozen --no-sync pytest -q
+          -o xfail_strict=true
+          integration_tests/test_m5_fault_recovery.py
+          integration_tests/test_m5_budget_and_errors.py
+          integration_tests/test_m5_concurrent_resume.py
+          integration_tests/test_m5_checkpoint_compatibility.py
+          integration_tests/test_m5_followup_runs.py
+          integration_tests/test_m5_prompt_injection.py
+          integration_tests/test_m5_schema.py
+          tests/test_m5_configuration.py
+          tests/test_m5_graph_runtime.py
+          tests/test_m5_recovery_demo.py
+          tests/test_m5_retry_policy.py
+          tests/test_m5_state_contract.py
+          tests/test_m5_tool_security.py
+          --junitxml="${RUNNER_TEMP}/m5-cumulative-junit.xml"
+
+      - name: Reject skipped, xfailed, or absent cumulative M5 tests
+        env:
+          M5_CUMULATIVE_JUNIT: ${{ runner.temp }}/m5-cumulative-junit.xml
+        run: >-
+          uv run --offline --frozen --no-sync python -c
+          'import os; from pathlib import Path; from scripts.quality_gate import _junit_counts;
+          counts = _junit_counts(Path(os.environ["M5_CUMULATIVE_JUNIT"]));
+          valid = counts["tests"] > 0 and not any(counts[name] for name in ("failures", "errors", "skipped"));
+          raise SystemExit(0 if valid else f"mandatory M5 suite JUnit is not clean: {counts}")'
+
+      - name: Require a non-empty cumulative M5 receipt
+        run: test -s "${RUNNER_TEMP}/m5-fault-receipt.json"
+
+      - name: Prepare persistent state for the cumulative PostgreSQL restart check
+        run: >-
+          uv run --offline --frozen --no-sync python scripts/m3_restart_probe.py prepare
+          --receipt "${RUNNER_TEMP}/m3-restart-receipt.json"
+
+      - name: Restart the PostgreSQL service container
+        env:
+          POSTGRES_SERVICE_CONTAINER_ID: ${{ job.services.postgres.id }}
+        run: |
+          test -n "${POSTGRES_SERVICE_CONTAINER_ID}"
+          docker restart "${POSTGRES_SERVICE_CONTAINER_ID}"
+          for attempt in {1..30}; do
+            if docker exec "${POSTGRES_SERVICE_CONTAINER_ID}" pg_isready -U m6_test -d legal_rag_m3_test_m6; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs "${POSTGRES_SERVICE_CONTAINER_ID}"
+          exit 1
+
+      - name: Verify persistent state from a new process after restart
+        run: >-
+          uv run --offline --frozen --no-sync python scripts/m3_restart_probe.py verify
+          --receipt "${RUNNER_TEMP}/m3-restart-receipt.json"
+          > "${RUNNER_TEMP}/m3-restart-verification.json"
+
+      - name: Build the M6 candidate wheel
+        run: uv build --wheel --out-dir "${RUNNER_TEMP}/m6-wheel"
+
+      - name: Run the isolated M6 release-wheel probe
+        run: |
+          set -euo pipefail
+          mapfile -t candidate_wheels < <(find "${RUNNER_TEMP}/m6-wheel" -maxdepth 1 -type f -name '*.whl' -print)
+          test "${#candidate_wheels[@]}" -eq 1
+          candidate_version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          uv run --offline --frozen --no-sync python scripts/release_wheel_probe.py "${candidate_wheels[0]}" \
+            --profile M6 \
+            --expected-version "${candidate_version}" \
+            --smoke \
+            --timeout-seconds 180 \
+            --temp-root "${RUNNER_TEMP}" \
+            > "${RUNNER_TEMP}/m6-wheel-probe-receipt.json" 2>&1
+
+      - name: Run the M6 cumulative real broker quality gate
+        run: >-
+          uv run --offline --frozen --no-sync python scripts/quality_gate.py
+          --milestone M6
+          --mode fault-injection
+          --restart-receipt "${RUNNER_TEMP}/m3-restart-receipt.json"
+          --fault-receipt "${RUNNER_TEMP}/m5-fault-receipt.json"
+          --m6-receipt "${RUNNER_TEMP}/m6-worker-receipt.json"
+          --output "${RUNNER_TEMP}/m6-quality-gate.json"
+
+      - name: Upload the M6 real broker evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: m6-worker-${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/m6-worker-junit.xml
+            ${{ runner.temp }}/m6-worker-receipt.json
+            ${{ runner.temp }}/m5-cumulative-junit.xml
+            ${{ runner.temp }}/m5-fault-receipt.json
+            ${{ runner.temp }}/m3-restart-receipt.json
+            ${{ runner.temp }}/m3-restart-verification.json
+            ${{ runner.temp }}/m6-wheel-probe-receipt.json
+            ${{ runner.temp }}/m6-quality-gate.json
+            ${{ runner.temp }}/m6-wheel/*.whl
+          if-no-files-found: warn
+          retention-days: 14
