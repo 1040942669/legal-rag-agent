@@ -10,7 +10,8 @@
 - 精确 release-target master CI：[run 36498443123](https://github.com/1040942669/legal-rag-agent/actions/runs/36498443123)，3/3 jobs success。
 - annotated Tag：`v0.6.0`，Tag object `c0ef0721ab49da0d7840b76e741a52e35b8941d2`，peeled target 精确为 `832acaafaf5633e76daed7a62a73755187fca51e`。
 - GitHub Release：[v0.6.0 - Durable Harness Recovery](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.6.0)，于 `2026-09-28T23:41:41Z` 发布，非 draft、非 prerelease，附件 0。
-- 当前回执分支：`codex/m5-release-receipt`，基线为上述不可变软件 release target。`docs/refactor/receipts/M5.json` 已记录软件发布事实，但 receipt PR、其 exact-head CI、merge 和 merge 后 master CI 仍待真实发生后补录。
+- 当前回执分支：`codex/m5-release-receipt`，基线为上述不可变软件 release target。
+- 独立回执 PR：[PR #23](https://github.com/1040942669/legal-rag-agent/pull/23)。第一份 receipt candidate `3eead1deb511325c91d47b31f9c39f2868607b07` 的 [CI run 36500603258](https://github.com/1040942669/legal-rag-agent/actions/runs/36500603258) 已 3/3 jobs success；对应三组 artifact digest 和内部文件 SHA-256 已写回 `docs/refactor/receipts/M5.json`。下一份提交将成为 receipt final-head 候选并重新触发完整 CI。
 - 跟踪项：[Issue #21](https://github.com/1040942669/legal-rag-agent/issues/21) 与 [Milestone 6](https://github.com/1040942669/legal-rag-agent/milestone/6) 保持 open。只有 receipt merge 后精确 master CI 成功，才可依次关闭。
 - 本里程碑没有真实或付费模型调用，没有生产部署，没有强推、admin merge、auto-merge、review 绕过或保护规则绕过。
 - M6 未开始；M5 完成后必须停止。
@@ -148,8 +149,8 @@ Checkpoint 无法撤回外部请求，也无法证明 provider exactly-once。M5
 
 ## 当前必须完成的回执链
 
-1. 校验本分支 JSON、Markdown 链接、diff 和候选文档事实，commit 并 push `codex/m5-release-receipt`。
-2. 创建独立 receipt PR，不写 `Closes #21`，等待精确 final head 的三个 CI jobs 全部成功。
+1. 提交并 push 已核验的 first-candidate CI 与 artifact 数据，使新提交成为 PR #23 的 receipt final-head 候选。
+2. 等待该精确 final head 的三个 CI jobs 全部成功，不写 `Closes #21`。
 3. 使用普通 merge commit 与 `--match-head-commit` 合并，不使用 admin、auto、squash 或 rebase。
 4. 等待 receipt merge commit 在 `master` 上的精确三路 CI 全部成功并下载、散列 artifacts。
 5. 只有此时关闭 Issue #21；确认 Milestone 6 `open_issues=0` 后再关闭 Milestone。
