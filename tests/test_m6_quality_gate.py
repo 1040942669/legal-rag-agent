@@ -66,9 +66,12 @@ def test_m6_gate_has_58_cumulative_mandatory_ids_and_real_worker_selectors() -> 
 
 
 def test_m6_receipt_accepts_only_exact_head_real_components_and_all_scenarios() -> None:
-    assert gate.validate_m6_worker_receipt_payload(
-        _valid_receipt("f" * 40), expected_sha="f" * 40
-    ) == []
+    assert (
+        gate.validate_m6_worker_receipt_payload(
+            _valid_receipt("f" * 40), expected_sha="f" * 40
+        )
+        == []
+    )
 
 
 def test_m6_receipt_rejects_wrong_head_fake_broker_and_missing_scenario() -> None:
@@ -79,9 +82,7 @@ def test_m6_receipt_rejects_wrong_head_fake_broker_and_missing_scenario() -> Non
     broker["real_worker_process"] = False
     broker["backend"] = "fake"
     scenarios.pop("M6-T03")
-    errors = gate.validate_m6_worker_receipt_payload(
-        payload, expected_sha="b" * 40
-    )
+    errors = gate.validate_m6_worker_receipt_payload(payload, expected_sha="b" * 40)
     assert "M6 worker receipt candidate_sha does not match checked-out HEAD" in errors
     assert "M6 worker receipt must prove a real worker process" in errors
     assert "M6 worker receipt broker backend must be redis" in errors
@@ -99,28 +100,32 @@ def test_m6_receipt_rejects_incomplete_kill_evidence_and_sensitive_fields() -> N
     evidence["resume_pid"] = evidence["first_pid"]
     evidence["completed_items_not_recomputed"] = False
     evidence["question"] = "private question"
-    errors = gate.validate_m6_worker_receipt_payload(
-        payload, expected_sha="a" * 40
-    )
+    errors = gate.validate_m6_worker_receipt_payload(payload, expected_sha="a" * 40)
     assert "M6 worker receipt M6-T03 must prove distinct worker PIDs" in errors
     assert any("completed_items_not_recomputed is invalid" in error for error in errors)
     assert "M6 worker receipt contains a forbidden sensitive-content field" in errors
 
 
-def test_m6_receipt_file_rejects_duplicate_keys_and_missing_file(tmp_path: Path) -> None:
+def test_m6_receipt_file_rejects_duplicate_keys_and_missing_file(
+    tmp_path: Path,
+) -> None:
     missing = tmp_path / "missing.json"
-    assert gate.validate_m6_worker_receipt_file(
-        missing, expected_sha="a" * 40
-    ) == ["M6 worker receipt is unavailable"]
+    assert gate.validate_m6_worker_receipt_file(missing, expected_sha="a" * 40) == [
+        "M6 worker receipt is unavailable"
+    ]
     bad = tmp_path / "duplicate.json"
     bad.write_text('{"schema_version":1,"schema_version":1}\n', encoding="utf-8")
-    assert gate.validate_m6_worker_receipt_file(
-        bad, expected_sha="a" * 40
-    ) == ["M6 worker receipt is not valid bounded UTF-8 JSON"]
+    assert gate.validate_m6_worker_receipt_file(bad, expected_sha="a" * 40) == [
+        "M6 worker receipt is not valid bounded UTF-8 JSON"
+    ]
 
 
-def test_m6_preflight_requires_live_broker_config_and_receipt(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(gate, "_m5_fault_injection_preflight_errors", lambda *args, **kwargs: [])
+def test_m6_preflight_requires_live_broker_config_and_receipt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        gate, "_m5_fault_injection_preflight_errors", lambda *args, **kwargs: []
+    )
     monkeypatch.setattr(gate, "_m6_selector_contract_errors", lambda *args: [])
     errors = gate._m6_fault_injection_preflight_errors(
         _ROOT,
@@ -155,7 +160,9 @@ def test_m6_gate_fails_closed_before_commands_when_receipt_missing(
 def test_m6_cumulative_report_requires_every_prior_and_new_check(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(gate, "_m6_fault_injection_preflight_errors", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        gate, "_m6_fault_injection_preflight_errors", lambda *args, **kwargs: []
+    )
     stage_ids = (
         gate.MANDATORY_M0_CHECK_IDS,
         set(gate.M1_TEST_SELECTORS),
@@ -222,6 +229,33 @@ def test_m6_request_mode_and_sanitized_redis_environment() -> None:
     assert clean["ALLOW_LIVE_MODEL_CALLS"] == "false"
 
 
+def test_m6_gate_requires_activation_fence_and_bounded_redrive_regressions() -> None:
+    assert {
+        "test_queued_job_without_worker_has_bounded_automatic_redelivery",
+        "test_queued_recovery_backs_off_between_successful_publications",
+    }.issubset(
+        {selector.rsplit("::", 1)[-1] for selector in gate.M6_TEST_SELECTORS["M6-T01"]}
+    )
+    assert any(
+        selector.endswith(
+            "::test_expired_running_job_has_same_bound_and_remains_claimable"
+        )
+        for selector in gate.M6_TEST_SELECTORS["M6-T03"]
+    )
+    assert any(
+        selector.endswith("::test_pending_broker_retry_does_not_spend_recovery_budget")
+        for selector in gate.M6_TEST_SELECTORS["M6-T04"]
+    )
+    assert {
+        "test_m6_db_stale_activation_cannot_move_pointer_after_takeover",
+        "test_m6_db_cancel_before_activation_preserves_pointer",
+        "test_m6_db_activation_and_cancel_serialize_on_job_lock",
+        "test_m6_db_terminal_failure_rolls_back_catalog_activation",
+    }.issubset(
+        {selector.rsplit("::", 1)[-1] for selector in gate.M6_TEST_SELECTORS["M6-T05"]}
+    )
+
+
 def test_m6_workflow_has_exact_head_real_postgres_redis_and_receipts() -> None:
     workflow = (_ROOT / ".github" / "workflows" / "quality-gate.yml").read_text(
         encoding="utf-8"
@@ -234,6 +268,7 @@ def test_m6_workflow_has_exact_head_real_postgres_redis_and_receipts() -> None:
     assert "pgvector/pgvector:" in m6
     assert "redis:" in m6
     assert "integration_tests/test_m6_worker_real.py" in m6
+    assert "integration_tests/test_m6_outbox_bounded_recovery_db.py" in m6
     assert "LEGAL_RAG_M6_RECEIPT:" in m6
     assert "LEGAL_RAG_M6_CANDIDATE_SHA:" in m6
     assert "m6-worker-junit.xml" in m6
@@ -254,7 +289,9 @@ def test_m6_workflow_has_exact_head_real_postgres_redis_and_receipts() -> None:
         < m6.index("- name: Require a non-empty M6 real worker receipt")
         < m6.index("- name: Validate the exact-head M6 worker receipt")
         < m6.index("- name: Run the independent M5 fault suite for cumulative evidence")
-        < m6.index("- name: Prepare persistent state for the cumulative PostgreSQL restart check")
+        < m6.index(
+            "- name: Prepare persistent state for the cumulative PostgreSQL restart check"
+        )
         < m6.index("- name: Build the M6 candidate wheel")
         < m6.index("- name: Run the isolated M6 release-wheel probe")
         < m6.index("- name: Run the M6 cumulative real broker quality gate")
@@ -264,6 +301,4 @@ def test_m6_workflow_has_exact_head_real_postgres_redis_and_receipts() -> None:
 def test_m6_receipt_json_roundtrip_is_utf8_and_closed(tmp_path: Path) -> None:
     path = tmp_path / "m6-worker-receipt.json"
     path.write_text(json.dumps(_valid_receipt(), ensure_ascii=False), encoding="utf-8")
-    assert gate.validate_m6_worker_receipt_file(
-        path, expected_sha="a" * 40
-    ) == []
+    assert gate.validate_m6_worker_receipt_file(path, expected_sha="a" * 40) == []

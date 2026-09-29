@@ -12,6 +12,7 @@ import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Callable
 
 from sqlalchemy import Connection, Engine, text
 
@@ -382,27 +383,43 @@ class JobStore:
             return result.rowcount == 1
 
     def requeue_expired_jobs(
-        self, *, limit: int = 100, min_interval_seconds: int = 30
+        self,
+        *,
+        limit: int = 100,
+        min_interval_seconds: int = 30,
+        max_interval_seconds: int = 3600,
+        max_auto_deliveries: int = 5,
     ) -> list[str]:
-        """Create another durable delivery for work that may have been lost.
+        """Bound automatic redelivery of work that may have been lost.
 
         An early duplicate broker delivery can arrive while the old lease is
         still active. The worker may safely ignore it; this scan later creates
         a fresh message after lease expiry. It also recovers a queued job when
         its last broker delivery was ACKed without any worker claiming it.
+        A delivered message may still be waiting in the broker, so repeated
+        redelivery backs off and eventually stops with a visible warning.
         """
         _count("limit", limit, minimum=1, maximum=1000)
         _count("min_interval_seconds", min_interval_seconds, minimum=1, maximum=3600)
+        _count("max_interval_seconds", max_interval_seconds, minimum=1, maximum=86400)
+        _count("max_auto_deliveries", max_auto_deliveries, minimum=1, maximum=100)
+        if max_interval_seconds < min_interval_seconds:
+            raise JobContractError("max_interval_seconds must cover the minimum")
         with self.engine.begin() as connection:
             rows = (
                 connection.execute(
                     text(
-                        "SELECT j.job_id FROM jobs j WHERE "
-                        "((j.status='running' AND j.lease_expires_at <= clock_timestamp()) "
-                        "OR (j.status='queued' AND "
-                        "(SELECT max(o.delivered_at) FROM job_outbox o "
-                        "WHERE o.job_id=j.job_id AND o.status='delivered') <= "
-                        "clock_timestamp()-make_interval(secs=>:min_interval_seconds))) "
+                        "SELECT j.job_id,j.status,d.issued FROM jobs j "
+                        "CROSS JOIN LATERAL (SELECT count(*)::int AS issued, "
+                        "max(o.delivered_at) AS last_delivered_at FROM job_outbox o "
+                        "WHERE o.job_id=j.job_id) d WHERE "
+                        "(j.status='queued' OR (j.status='running' AND "
+                        "j.lease_expires_at <= clock_timestamp())) "
+                        "AND j.error_code IS DISTINCT FROM 'delivery_unconfirmed' "
+                        "AND (j.status='running' AND j.recovery_queued_at IS NULL "
+                        "OR d.last_delivered_at <= clock_timestamp()-make_interval("
+                        "secs=>LEAST(:max_interval_seconds,:min_interval_seconds * "
+                        "(1 << LEAST(GREATEST(d.issued-1,0),10))))) "
                         "AND (j.recovery_queued_at IS NULL OR j.recovery_queued_at <= "
                         "clock_timestamp()-make_interval(secs=>:min_interval_seconds)) "
                         "AND NOT EXISTS (SELECT 1 FROM job_outbox o WHERE o.job_id=j.job_id "
@@ -410,7 +427,11 @@ class JobStore:
                         "ORDER BY j.created_at,j.job_id "
                         "LIMIT :limit FOR UPDATE OF j SKIP LOCKED"
                     ),
-                    {"limit": limit, "min_interval_seconds": min_interval_seconds},
+                    {
+                        "limit": limit,
+                        "min_interval_seconds": min_interval_seconds,
+                        "max_interval_seconds": max_interval_seconds,
+                    },
                 )
                 .mappings()
                 .all()
@@ -418,6 +439,16 @@ class JobStore:
             queued: list[str] = []
             for row in rows:
                 job_id = row["job_id"]
+                if row["issued"] >= max_auto_deliveries:
+                    connection.execute(
+                        text(
+                            "UPDATE jobs SET status='queued',lease_owner=NULL,"
+                            "lease_expires_at=NULL,error_code='delivery_unconfirmed',"
+                            "updated_at=clock_timestamp() WHERE job_id=:job_id"
+                        ),
+                        {"job_id": job_id},
+                    )
+                    continue
                 connection.execute(
                     text(
                         "UPDATE jobs SET recovery_queued_at=clock_timestamp(), "
@@ -496,7 +527,9 @@ class JobStore:
                     "lease_epoch=lease_epoch+1,claim_count=claim_count+1, "
                     "lease_expires_at=clock_timestamp()+make_interval(secs=>:lease_seconds), "
                     "started_at=COALESCE(started_at,clock_timestamp()), "
-                    "recovery_queued_at=NULL,updated_at=clock_timestamp() "
+                    "recovery_queued_at=NULL,"
+                    "error_code=CASE WHEN error_code='delivery_unconfirmed' "
+                    "THEN NULL ELSE error_code END,updated_at=clock_timestamp() "
                     "WHERE job_id=:job_id"
                 ),
                 {
@@ -961,5 +994,74 @@ class JobStore:
                     "updated_at=clock_timestamp() WHERE job_id=:job_id"
                 ),
                 {"job_id": job_id, "status": status, "error_code": error_code},
+            )
+            return self._read_job(connection, job_id)
+
+    def activate_ingestion_job(
+        self,
+        job_id: str,
+        worker_id: str,
+        lease_epoch: int,
+        item_key: str,
+        *,
+        request_hash: str,
+        activate: Callable[[Connection], str],
+    ) -> JobRecord | None:
+        """Commit catalog activation and the final item/job state under one lease.
+
+        The callback must use the supplied connection for every catalog read and
+        write. Locking the job row first fences takeover and cancellation until
+        the catalog pointer and terminal job state commit or roll back together.
+        """
+
+        _hash("item_key", item_key)
+        _hash("request_hash", request_hash)
+        with self.engine.begin() as connection:
+            job = self._locked_active_job(connection, job_id, worker_id, lease_epoch)
+            if job is None or job["cancel_requested"]:
+                return None
+            if (
+                job["kind"] != "ingestion"
+                or job["request_hash"] != request_hash
+                or job["stage"] != "activated"
+                or job["total"] != len(_INGESTION_STAGES)
+                or job["completed"] != job["total"] - 1
+                or job["failed"] != 0
+            ):
+                raise JobConflictError("ingestion activation prerequisites are not met")
+            item = (
+                connection.execute(
+                    text(
+                        "SELECT status,lease_epoch FROM job_items "
+                        "WHERE job_id=:job_id AND item_key=:item_key FOR UPDATE"
+                    ),
+                    {"job_id": job_id, "item_key": item_key},
+                )
+                .mappings()
+                .first()
+            )
+            if (
+                item is None
+                or item["status"] != "running"
+                or item["lease_epoch"] != lease_epoch
+            ):
+                raise JobConflictError("ingestion activation item is not claimed")
+            result_ref = _result_ref(activate(connection))
+            connection.execute(
+                text(
+                    "UPDATE job_items SET status='succeeded',result_ref=:result_ref,"
+                    "error_code=NULL,updated_at=clock_timestamp() "
+                    "WHERE job_id=:job_id AND item_key=:item_key"
+                ),
+                {"job_id": job_id, "item_key": item_key, "result_ref": result_ref},
+            )
+            connection.execute(
+                text(
+                    "UPDATE jobs SET status='succeeded',completed=completed+1,"
+                    "error_code=NULL,lease_owner=NULL,lease_expires_at=NULL,"
+                    "finished_at=clock_timestamp(),updated_at=clock_timestamp() "
+                    "WHERE job_id=:job_id"
+                ),
+                {"job_id": job_id},
             )
             return self._read_job(connection, job_id)

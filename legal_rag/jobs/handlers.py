@@ -439,7 +439,9 @@ def _stage_item(
         raise JobPermanentError(code) from None
 
 
-def _activation_ref(engine: Any, *, job: Any, registration: Any) -> str:
+def _activation_ref(
+    engine: Any, *, job: Any, registration: Any, connection: Any
+) -> str:
     from legal_rag.storage.catalog import (
         CatalogUnavailableError,
         PostgresLegalCatalogRepository,
@@ -452,7 +454,10 @@ def _activation_ref(engine: Any, *, job: Any, registration: Any) -> str:
     before_revision: int | None = None
     while True:
         page = catalog.list_activation_history(
-            registration.scope_id, before_revision=before_revision, limit=100
+            registration.scope_id,
+            before_revision=before_revision,
+            limit=100,
+            connection=connection,
         )
         for event in page:
             if (
@@ -464,7 +469,9 @@ def _activation_ref(engine: Any, *, job: Any, registration: Any) -> str:
             break
         before_revision = page[-1].revision
     try:
-        current = catalog.get_active_snapshot(registration.scope_id)
+        current = catalog.get_active_snapshot(
+            registration.scope_id, connection=connection
+        )
     except CatalogUnavailableError:
         current = None
     if current is not None and current.snapshot_id == registration.snapshot_id:
@@ -478,6 +485,7 @@ def _activation_ref(engine: Any, *, job: Any, registration: Any) -> str:
         required_profile_id=registration.profile_id,
         actor=job.job_id,
         reason="m6_ingestion_job",
+        connection=connection,
     )
     return _digest({"activation_id": result.event.activation_id})
 
@@ -610,17 +618,70 @@ def run_ingestion_job(
         check_active=check_active,
         observer=observer,
     )
-    _stage_item(
-        store,
-        job,
-        registration,
-        stage="activated",
-        worker_id=worker_id,
-        lease_epoch=lease_epoch,
-        action=lambda: _activation_ref(engine, job=job, registration=registration),
-        check_active=check_active,
-        observer=observer,
+    check_active()
+    _required_write(
+        store.set_stage(job.job_id, worker_id, lease_epoch, "activated"),
+        "activated stage",
     )
+    item_key = _item_key(
+        job_id=job.job_id,
+        kind="ingestion",
+        identity=f"{registration.snapshot_id}:{registration.profile_id}:activated",
+        config_hash=registration.fingerprint,
+    )
+    claim = store.claim_item(
+        job.job_id, worker_id, lease_epoch, item_key, max_attempts=3
+    )
+    if not claim.acquired:
+        if claim.status == "cancelled":
+            raise JobCancelled()
+        if claim.status == "lease_lost":
+            raise JobLeaseLost("job lease lost before activation")
+        raise JobPermanentError("ingestion_stage_inconsistent")
+    try:
+        finished = store.activate_ingestion_job(
+            job.job_id,
+            worker_id,
+            lease_epoch,
+            item_key,
+            request_hash=registration.fingerprint,
+            activate=lambda connection: _activation_ref(
+                engine, job=job, registration=registration, connection=connection
+            ),
+        )
+        if finished is None:
+            check_active()
+            raise JobLeaseLost("job lease lost before activation")
+        _observe(
+            observer,
+            store,
+            job,
+            name="ingestion.step",
+            status="succeeded",
+            node="activated",
+            tool="ingestion",
+        )
+        _observe(
+            observer,
+            store,
+            job,
+            name="job.progress",
+            status="succeeded",
+            node="activated",
+            tool="worker",
+        )
+    except (JobLeaseLost, JobCancelled):
+        raise
+    except Exception as exc:  # noqa: BLE001 - source text and DSNs stay out of job rows.
+        code = (
+            exc.error_code
+            if isinstance(exc, JobPermanentError)
+            else "ingestion_activated_failed"
+        )
+        store.fail_item(
+            job.job_id, worker_id, lease_epoch, item_key, code, retryable=False
+        )
+        raise JobPermanentError(code) from None
     return "succeeded"
 
 
@@ -757,10 +818,19 @@ def process_job(
                 )
             else:
                 raise JobPermanentError("unsupported_job_kind")
-            heartbeat.check()
-            finished = store.finish_job(
-                job_id, worker_id, lease.lease_epoch, status=result
-            )
+            if lease.kind == "ingestion":
+                finished = store.get_job_internal(job_id)
+                if (
+                    finished is None
+                    or finished.status != "succeeded"
+                    or finished.lease_epoch != lease.lease_epoch
+                ):
+                    raise JobLeaseLost("job lease lost before activation commit")
+            else:
+                heartbeat.check()
+                finished = store.finish_job(
+                    job_id, worker_id, lease.lease_epoch, status=result
+                )
             if finished is None:
                 raise JobLeaseLost("job lease lost before terminal status")
             _observe(
