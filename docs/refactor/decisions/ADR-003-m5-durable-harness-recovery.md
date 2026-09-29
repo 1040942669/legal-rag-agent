@@ -1,14 +1,14 @@
 # ADR-003: M5 durable harness, budget ledger, and explicit recovery
 
-- Status: Accepted and shipped in `v0.6.0`; independent release receipt pending
+- Status: Accepted, shipped in `v0.6.0`, independently receipted, and fully released
 - Date: 2026-09-29
 - Affected milestone and planned version: M5 / `v0.6.0`
 - Base: `061ffcbd75a5305d1bbf61b02dd4a1eef6d37bac`
 - Final software head: `aa737e8d1f77214277c0544ce069d36c2b2161ff`
 - Release target: `832acaafaf5633e76daed7a62a73755187fca51e`
-- Tracking: [Issue #21](https://github.com/1040942669/legal-rag-agent/issues/21), [Milestone 6](https://github.com/1040942669/legal-rag-agent/milestone/6), merged [PR #22](https://github.com/1040942669/legal-rag-agent/pull/22)
+- Tracking: [Issue #21](https://github.com/1040942669/legal-rag-agent/issues/21), GitHub [Milestone 6](https://github.com/1040942669/legal-rag-agent/milestone/6) for M5, merged software [PR #22](https://github.com/1040942669/legal-rag-agent/pull/22), and merged receipt [PR #23](https://github.com/1040942669/legal-rag-agent/pull/23)
 
-This ADR records the architecture shipped by PR #22 and the published `v0.6.0` software release. Exact PR-head and release-target master CI, the annotated Tag, and the non-draft GitHub Release are verified. The independent receipt PR and Issue/Milestone governance closure remain pending, so the milestone state is `released_receipt_pending`, not fully `released`.
+This ADR records the architecture shipped by PR #22 and the published `v0.6.0` software release. Exact PR-head and release-target master CI, the annotated Tag, and the non-draft GitHub Release are verified. Independent receipt PR #23 also passed exact final-head and merge-target master CI before Issue #21 and Milestone 6 were closed, so the milestone state is fully `released`.
 
 ## Context
 
@@ -185,6 +185,9 @@ Release validation is recorded in `reports/refactor/M5.md` and `docs/refactor/re
 - real PostgreSQL 18, pgvector 0.8.6, persistent PostgreSQL checkpointer, service restart, and migration head `0006_m5_harness_recovery`;
 - one-command recovery demo and isolated M5 wheel probe: passed;
 - annotated `v0.6.0` Tag object `c0ef0721...` peeled to the verified release target;
+- independent receipt PR #23 final head `9dd6ec3...`: exact-head CI run 36501403167, all three jobs successful;
+- receipt PR #23 normally merged at `2026-09-29T00:13:59Z` as target `3436e9a...`: master CI run 36502063863, all three jobs successful;
+- Issue #21 closed at `2026-09-29T00:23:07Z` and Milestone 6 closed at `2026-09-29T00:23:22Z` after the receipt merge-target CI;
 - live or paid model, remote embedding, reranker, and judge calls: 0.
 
 An earlier run on `7ba6ae8...` exposed and preserved a legacy M4 fixture readiness regression. The repair pinned that legacy fixture to `m4-linear-v1` without weakening M5 fail-closed production readiness. The final PR-head and release-target runs passed the repaired M4 path.
@@ -229,7 +232,15 @@ The software release boundary is complete:
 - annotated `v0.6.0` and a non-draft, non-prerelease GitHub Release exist and are remotely verified;
 - `docs/refactor/receipts/M5.json` records the software release facts and immutable artifact hashes.
 
-The governance boundary is not complete. The independent receipt PR, its exact-head and merge-target master CI, Issue #21 closure, Milestone 6 closure, and non-recursive finalization must still occur in order. Until then, this ADR may be cited as evidence that the `v0.6.0` software was released, but not that the full M5 receipt and governance chain is closed.
+The governance boundary is also complete:
+
+- independent receipt PR #23 final head passed all three exact-head jobs;
+- PR #23 was normally merged as `3436e9ad41c7455aa5f31117ab7ece3f4ea847c1`, without admin, auto, squash, rebase, or force behavior;
+- that exact receipt merge target passed all three master jobs;
+- Issue #21 and Milestone 6 were then closed in order;
+- the documentation-only finalization is non-recursive, does not add product behavior, and does not move `v0.6.0` from the software release target.
+
+M5 is therefore fully `released`. After the finalization PR itself passes exact-head CI, is normally merged, and its exact merge target passes master CI, execution stops with M6 still `not_started`.
 
 ## Sources
 

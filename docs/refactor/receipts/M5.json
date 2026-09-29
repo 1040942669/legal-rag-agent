@@ -47,20 +47,91 @@
       "wheel_size_bytes": 391138
     }
   },
-  "receipt_final_sha": null,
-  "receipt_final_ci_url": null,
-  "receipt_final_ci_artifacts": null,
-  "receipt_merge_sha": null,
-  "receipt_pr_merged_at": null,
-  "receipt_master_ci_url": null,
-  "receipt_master_ci_sha": null,
-  "receipt_master_ci_artifacts": null,
+  "receipt_final_sha": "9dd6ec3867f05dd207ec15657861028f138167fc",
+  "receipt_final_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36501403167",
+  "receipt_final_ci_event": "pull_request",
+  "receipt_final_ci_status": "success",
+  "receipt_final_ci_jobs_succeeded": 3,
+  "receipt_final_ci_jobs_total": 3,
+  "receipt_final_ci_artifacts": {
+    "offline": {
+      "name": "m2-quality-gate-9dd6ec3867f05dd207ec15657861028f138167fc-1",
+      "digest": "sha256:8af81ba947dcf0f2ea7dc98eb4611c6acc97e84aabd10b8830a3b902e368e845",
+      "gate_json_sha256": "32ffb92ce5f3bdd57f4fe9c2cc7fefcd90026564baf048e43044c7356b3770f1"
+    },
+    "m4_service": {
+      "name": "m4-service-9dd6ec3867f05dd207ec15657861028f138167fc-1",
+      "digest": "sha256:ff9aeadef3be9a8b8f4aca993b4058f26126d171a80c06394983deb93f5e2202",
+      "gate_json_sha256": "2c3ce32ebf57e7d9ad476dea208fed47793a092ddf77755b6127e7df35b7ede4",
+      "junit_sha256": "3aa848b5e2e33aa1aa029a7ecc6fe13be143a0aa038111e2378af3bdc0bdb8f4",
+      "restart_prepare_sha256": "d73322c3cbacf8dd918b4b10f1c5d67f94abf0dd57cd26087f9949786d7cbc65",
+      "restart_verify_sha256": "ec6ac80394e51a655fe697fd0851b9e84f5a357c6998ada4b823381d36f4fcd5",
+      "process_restart_receipt_sha256": "61a8cb25840ed78694992b16ed3ba7baa80b98c86f5b847eadf6782bfbbec2bc",
+      "wheel_probe_receipt_sha256": "17014f335ddf54340f775667ce15b45b0bd8cd30e925d3118ad1c93acfe479f9",
+      "wheel_sha256": "30ec0685edd2405c5719bba496c31765cf660fb98a70b24c9863b4907e7620ee",
+      "wheel_size_bytes": 391138
+    },
+    "m5_fault": {
+      "name": "m5-fault-9dd6ec3867f05dd207ec15657861028f138167fc-1",
+      "digest": "sha256:89f164949bd30288b12f93469de2035bcf93033ebd67a1c8414990528ddeff37",
+      "fault_receipt_sha256": "5ae6aaf5a6fc1cba544794bfdc47e9b720e2670f0d280fbf3a446de2622310a8",
+      "gate_json_sha256": "a843b3751758cad03c217d20b9f25cd6c671edf9f8c02c2f32c893bcd1f843ad",
+      "junit_sha256": "5c64ce359394ddb5600782392f5946e2f23e2c36ef52341fc75ceaa098179f0c",
+      "recovery_demo_sha256": "c5e76dd4811e68bc54556457883ffd08a92345b514994aee51f247f2cf8f56eb",
+      "restart_prepare_sha256": "3297260ddce850b2500a6ad8c0cb5174a44bacdf769664ba8243f97ebd15f07b",
+      "restart_verify_sha256": "887f93d3931cdfd3892d08f37a8add590ffd2d84c334cd8e224a54398dea71ba",
+      "wheel_probe_receipt_sha256": "28e1a7a472ede9f8df8524d42a6f61d47589ffbed910c139fe7d8cbdccdf80cd",
+      "wheel_sha256": "2abbf9f44c4fda781faa90bac4781d5bc588161a42fc79d889e6541977f33398",
+      "wheel_size_bytes": 391138
+    }
+  },
+  "receipt_merge_sha": "3436e9ad41c7455aa5f31117ab7ece3f4ea847c1",
+  "receipt_pr_merged_at": "2026-09-29T00:13:59Z",
+  "receipt_master_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36502063863",
+  "receipt_master_ci_sha": "3436e9ad41c7455aa5f31117ab7ece3f4ea847c1",
+  "receipt_master_ci_event": "push",
+  "receipt_master_ci_branch": "master",
+  "receipt_master_ci_status": "success",
+  "receipt_master_ci_jobs_succeeded": 3,
+  "receipt_master_ci_jobs_total": 3,
+  "receipt_master_ci_artifacts": {
+    "offline": {
+      "name": "m2-quality-gate-3436e9ad41c7455aa5f31117ab7ece3f4ea847c1-1",
+      "digest": "sha256:c55adfdad0d6cc47ea8921d9a7676990dbac23b89c823e16b1383435cfe3a129",
+      "gate_json_sha256": "731999a2824fbcdcb145c5416f2d8a5c46af6327e93ff1761a5ca6b53a5e6356"
+    },
+    "m4_service": {
+      "name": "m4-service-3436e9ad41c7455aa5f31117ab7ece3f4ea847c1-1",
+      "digest": "sha256:3d70c2fe5ea2b919f8e818475af45e5e2d3b5daafd55b41f21d316287b3d743d",
+      "gate_json_sha256": "b7780dba67d10572f144b98f0b3a101c4d51febf8a55b6e7996399e56a17ab26",
+      "junit_sha256": "29229e9bf1d863660a41804c5288bf6745fa27be31ca089cd5ec3202f39ca514",
+      "restart_prepare_sha256": "8795a625e71b6776e7a455fa1dd1c9493954ead5249079a6552bd6ed36ae370f",
+      "restart_verify_sha256": "ca4491383ff1c2481531e9ec029b974d876a40b9276c016b38714828ed6f8202",
+      "process_restart_receipt_sha256": "7775c154cc2c4f28d7ee590ecd039c5865e19e98a89d8b902a908d9cdc7e814b",
+      "wheel_probe_receipt_sha256": "a7b5e9a86b9cc8887e36bd465d9e25b515ba4e9f95bee4541150d888a190de18",
+      "wheel_sha256": "04c5fcf5c519d79e235da411af6e2dda60d699ddb7272e4c6c08cc02e4470e69",
+      "wheel_size_bytes": 391138
+    },
+    "m5_fault": {
+      "name": "m5-fault-3436e9ad41c7455aa5f31117ab7ece3f4ea847c1-1",
+      "digest": "sha256:cdeceb76af01fcb6453a3fc9b6f702ad2670d9bffef3ec5ac6b0074b85e9fcd6",
+      "fault_receipt_sha256": "db1a34786e03f207f82f385c71afb044a7b81bc8dfdeec1f20a6fbd79623cf64",
+      "gate_json_sha256": "0253b9fd7fd9bef026ea1a61172239e16edb0b646e224ed5977ce3efd3c114e9",
+      "junit_sha256": "1523abadf5730020dc563ed5d22502aab4c7e11836dd37b25f61ed64e0a196bb",
+      "recovery_demo_sha256": "b40116c47f8e0d78fb5e092ed7cab52987c162d8ccbb0510157069ab237a99d0",
+      "restart_prepare_sha256": "431df00c5fe54cb84e40ec4b6302315714470e2b1af76a101002bf48d1875525",
+      "restart_verify_sha256": "17af766596d81a999b22ca2cd714da8671a7dd4e456647c1e48b8f58d2242035",
+      "wheel_probe_receipt_sha256": "9cf4c720c409295864f47978bbfe5ef3b47e579b175205fc5a0696cf5397d3c2",
+      "wheel_sha256": "7e338776c2f24ac3eb3cf730c7fd0a4d79879349401dd7a8cd9c9641b73ca854",
+      "wheel_size_bytes": 391138
+    }
+  },
   "issue_url": "https://github.com/1040942669/legal-rag-agent/issues/21",
-  "issue_state": "open",
-  "issue_closed_at": null,
+  "issue_state": "closed",
+  "issue_closed_at": "2026-09-29T00:23:07Z",
   "milestone_url": "https://github.com/1040942669/legal-rag-agent/milestone/6",
-  "milestone_state": "open",
-  "milestone_closed_at": null,
+  "milestone_state": "closed",
+  "milestone_closed_at": "2026-09-29T00:23:22Z",
   "final_pr_head_sha": "aa737e8d1f77214277c0544ce069d36c2b2161ff",
   "release_target_sha": "832acaafaf5633e76daed7a62a73755187fca51e",
   "tag_name": "v0.6.0",
@@ -142,8 +213,8 @@
   "release_is_immutable": false,
   "release_asset_count": 0,
   "published_at": "2026-09-28T23:41:41Z",
-  "verified_at": "2026-09-28T23:42:54Z",
-  "verification_method": "GitHub Release API and CLI confirmed the published non-draft and non-prerelease release. GitHub Git Data API confirmed the annotated tag object and peeled target. GitHub Actions confirmed successful exact-head PR and exact release-target master runs with three jobs. Downloaded artifacts were hashed locally.",
+  "verified_at": "2026-09-29T00:23:22Z",
+  "verification_method": "GitHub Release API and CLI confirmed the published non-draft and non-prerelease release. GitHub Git Data API confirmed the annotated tag object and peeled target. GitHub Actions confirmed successful exact-head software and receipt PR runs plus exact release-target and receipt-merge-target master runs, each with three jobs. The receipt PR used a normal merge. Downloaded artifacts were hashed locally. GitHub issue and milestone APIs confirmed Issue #21 and Milestone 6 closed only after the receipt merge-target CI succeeded.",
   "acceptance_report": "reports/refactor/M5.md",
   "package_evidence": {
     "version": "0.6.0",
@@ -232,6 +303,6 @@
     "The same source produced different wheel SHA-256 values in separate CI jobs because the wheel build is not reproducible byte-for-byte; each job-specific artifact is recorded and the release-target M5 artifact is authoritative.",
     "GitHub Actions emitted a non-blocking Node.js 20 deprecation warning for actions/upload-artifact while forcing Node.js 24."
   ],
-  "receipt_status": "verified_release_receipt_pending_merge",
-  "note": "The software PR, exact final-head CI, normal merge, exact release-target master CI, annotated tag and GitHub Release are verified. Independent receipt PR #23 exists and its first receipt candidate 3eead1d passed all three exact-head jobs; the receipt final head, normal merge, post-merge master CI, Issue #21 closure, Milestone 6 closure and documentation-only final state remain pending. The v0.6.0 tag is fixed at the software release target and must not be moved."
+  "receipt_status": "verified",
+  "note": "The software PR, exact final-head CI, normal merge, exact release-target master CI, annotated tag and GitHub Release are verified. Independent receipt PR #23 final head 9dd6ec3 passed all three exact-head jobs, was normally merged as 3436e9a, and that exact receipt merge target passed all three master jobs. Issue #21 and Milestone 6 were then closed in order. This documentation-only finalization records those completed facts without recursively creating another release receipt. The v0.6.0 tag remains fixed at the software release target and must not be moved."
 }
