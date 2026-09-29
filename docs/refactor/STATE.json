@@ -7,8 +7,8 @@
     "observed_default_branch": "master",
     "observed_baseline_commit": "61f1065fc6d5678d0d57114e2e361294d04906b4",
     "observed_on": "2026-09-29",
-    "workspace_head": "28517b6f323253baf638ba60c887d10630dd0bf1",
-    "workspace_head_note": "M6 software PR #26 was normally squash-merged at this exact master commit, passed four release-target master CI jobs, and has an annotated v0.7.0 Tag and published Release. This independent receipt branch starts from that verified origin/master; its documentation candidate cannot self-reference its own commit SHA and still requires exact-head CI, normal merge and master CI. The M6 software branch was based on verified origin/master 76a038936ddfd900f98ad8709fedcc50c07063d3 after M5 PR #24 and master CI 36504995613.",
+    "workspace_head": "09bc3713c901e9ea11f48cda0fdb6b3ec441ae2b",
+    "workspace_head_note": "This is the first independent M6 receipt PR #27 candidate, based on verified software release target 28517b6f323253baf638ba60c887d10630dd0bf1. Exact-head CI 36558052677 passed all four jobs. The subsequent documentation update cannot self-reference its own final head and requires fresh exact-head CI, normal merge and master CI. The M6 software branch was based on verified origin/master 76a038936ddfd900f98ad8709fedcc50c07063d3 after M5 PR #24 and master CI 36504995613.",
     "workspace_branch": "codex/m6-release-receipt",
     "workspace_dirty": false,
     "remote_tags_checked": true
@@ -745,8 +745,10 @@
       "branch": "codex/m6-async-jobs",
       "receipt_branch": "codex/m6-release-receipt",
       "receipt_path": "docs/refactor/receipts/M6.json",
-      "receipt_status": "pending_independent_receipt_pr_and_ci",
-      "receipt_pr_url": null,
+      "receipt_status": "pending_final_receipt_head_ci_and_merge",
+      "receipt_pr_url": "https://github.com/1040942669/legal-rag-agent/pull/27",
+      "receipt_candidate_sha": "09bc3713c901e9ea11f48cda0fdb6b3ec441ae2b",
+      "receipt_candidate_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36558052677",
       "receipt_merge_sha": null,
       "issue_state": "open",
       "milestone_state": "open",
@@ -812,6 +814,14 @@
         "release_target_m6_gate": "58/58 mandatory passed, 0 failed, exit 0",
         "release_target_m6_wheel": "0.7.0 isolated install and smoke passed",
         "release_target_live_model_calls": false,
+        "receipt_candidate_ci_status": "passed_on_exact_first_receipt_candidate",
+        "receipt_candidate_ci_sha": "09bc3713c901e9ea11f48cda0fdb6b3ec441ae2b",
+        "receipt_candidate_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36558052677",
+        "receipt_candidate_ci_jobs": "4/4 success: offline, M4 service, M5 fault injection, M6 worker",
+        "receipt_candidate_ci_offline_artifact_digest": "sha256:3fac02f9c64d4ac27df50e7ec0e6284fe95b70803b92568efd41e4fb85769683",
+        "receipt_candidate_ci_m4_artifact_digest": "sha256:0873e6956e29e8fd57422865bcb49494a6dd7c713a987fe34be8d0e72129297d",
+        "receipt_candidate_ci_m5_artifact_digest": "sha256:7afa7060868770689f7a26bc31c99a1856d3108b46ee18317dab604777cb6471",
+        "receipt_candidate_ci_m6_artifact_digest": "sha256:3baa81bdd9a8a5669a72598d25398b7b5dc83ce2ff374c1781ccf313555b53dc",
         "post_fence_local_postgresql_regression": "44 passed in 19.78s",
         "post_fence_local_ci_order_m6_database": "24 passed in 5.94s after targeted-claim hygiene test",
         "post_fence_local_targeted_unit": "110 passed in 1.07s",
@@ -819,7 +829,7 @@
         "post_fence_local_m0_gate": "7/7 mandatory passed, second run 109356 ms; before targeted-claim hygiene test"
       },
       "release_requirements_remaining": [
-        "Independent documentation receipt PR must pass all four exact-head CI jobs and be normally merged after current review/protection checks",
+        "Final documentation receipt PR head must pass all four exact-head CI jobs and be normally merged after current review/protection checks",
         "Exact receipt merge-target master CI must pass before closing Issue #25 and Milestone 7 and finalizing governance facts"
       ],
       "blockers": []
@@ -849,5 +859,5 @@
       "blockers": []
     }
   ],
-  "next_action": "Prepare the independent M6 documentation receipt from verified software release target 28517b6f323253baf638ba60c887d10630dd0bf1; verify its exact final PR head with all four CI jobs, check review/protection rules and normally merge, then verify exact receipt merge-target master CI. Only then close Issue #25 and Milestone 7 and record governance finalization. Do not recreate or move v0.7.0, alter M5 v0.6.0, or start M7."
+  "next_action": "Receipt PR #27 first candidate 09bc3713c901e9ea11f48cda0fdb6b3ec441ae2b passed exact-head CI 36558052677 on all four jobs. Verify this evidence update's new final PR head with four CI jobs, check review/protection rules and normally merge, and verify exact receipt merge-target master CI. Only then close Issue #25 and Milestone 7 and record governance finalization. Do not recreate or move v0.7.0, alter M5 v0.6.0, or start M7."
 }

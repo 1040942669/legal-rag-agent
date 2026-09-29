@@ -15,9 +15,54 @@
   "candidate_sha": "b9400ab289618707a53ee6b14f6ac1cee4af2ee1",
   "candidate_sha_role": "software_pr_head",
   "receipt_branch": "codex/m6-release-receipt",
-  "receipt_pr_url": null,
-  "receipt_candidate_sha": null,
-  "receipt_candidate_ci_url": null,
+  "receipt_pr_url": "https://github.com/1040942669/legal-rag-agent/pull/27",
+  "receipt_pr_is_draft_on_first_candidate": true,
+  "receipt_candidate_sha": "09bc3713c901e9ea11f48cda0fdb6b3ec441ae2b",
+  "receipt_candidate_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36558052677",
+  "receipt_candidate_ci_event": "pull_request",
+  "receipt_candidate_ci_status": "success",
+  "receipt_candidate_ci_jobs_succeeded": 4,
+  "receipt_candidate_ci_jobs_total": 4,
+  "receipt_candidate_ci_artifacts": {
+    "offline": {
+      "id": 11029526093,
+      "name": "m2-quality-gate-09bc3713c901e9ea11f48cda0fdb6b3ec441ae2b-1",
+      "digest": "sha256:3fac02f9c64d4ac27df50e7ec0e6284fe95b70803b92568efd41e4fb85769683"
+    },
+    "m4_service": {
+      "id": 11029411643,
+      "name": "m4-service-09bc3713c901e9ea11f48cda0fdb6b3ec441ae2b-1",
+      "digest": "sha256:0873e6956e29e8fd57422865bcb49494a6dd7c713a987fe34be8d0e72129297d"
+    },
+    "m5_fault": {
+      "id": 11029067218,
+      "name": "m5-fault-09bc3713c901e9ea11f48cda0fdb6b3ec441ae2b-1",
+      "digest": "sha256:7afa7060868770689f7a26bc31c99a1856d3108b46ee18317dab604777cb6471"
+    },
+    "m6_worker": {
+      "id": 11028958092,
+      "name": "m6-worker-09bc3713c901e9ea11f48cda0fdb6b3ec441ae2b-1",
+      "digest": "sha256:3baa81bdd9a8a5669a72598d25398b7b5dc83ce2ff374c1781ccf313555b53dc",
+      "worker_junit_sha256": "5a3614ba0351f863cb29bd5ecc81928700498fb210fced48381bd9cf25d0b36a",
+      "worker_receipt_sha256": "64016502eb19590471b71d0a8399ee259c4131318f4b9ab69b64b981bee2ba37",
+      "gate_json_sha256": "2cce8fe13505a13eae38a70c8149c21c6578d4fabe8236e4fbe51574d57d7f4d",
+      "wheel_probe_receipt_sha256": "d8db27b6730928e253f876d83bff317314c71c38fd6c455c653c7f76234e2103",
+      "wheel_sha256": "92a72aa9d01f1558e8d42b13fd0ccb35a44122928611746a0953a7e3cc5a43b1",
+      "wheel_size_bytes": 429714,
+      "worker_junit_tests": 41,
+      "worker_junit_failures": 0,
+      "worker_junit_errors": 0,
+      "worker_junit_skipped": 0,
+      "gate_mandatory_passed": 58,
+      "gate_mandatory_total": 58,
+      "gate_exit_code": 0,
+      "gate_duration_ms": 478882,
+      "worker_receipt_status": "passed",
+      "real_worker_scenarios_passed": ["M6-T01", "M6-T02", "M6-T03", "M6-T04", "M6-T05", "M6-T07"],
+      "live_model_calls": false,
+      "isolated_wheel_smoke": "passed"
+    }
+  },
   "receipt_final_sha": null,
   "receipt_final_ci_url": null,
   "receipt_merge_sha": null,
@@ -114,7 +159,7 @@
   "release_asset_count": 0,
   "published_at": "2026-09-29T10:39:52Z",
   "verified_at": "2026-09-29T10:43:42Z",
-  "verification_method": "GitHub CLI and Release API confirmed the published non-draft, non-prerelease release. Git remote refs and Git Data API confirmed the annotated tag object and exact peeled commit. GitHub Actions API confirmed successful exact-head PR and exact release-target master runs, each with four jobs. Artifact digests came from GitHub Actions; downloaded M6 worker reports and wheel files were hashed locally. Independent receipt PR and governance closure remain pending.",
+  "verification_method": "GitHub CLI and Release API confirmed the published non-draft, non-prerelease release. Git remote refs and Git Data API confirmed the annotated tag object and exact peeled commit. GitHub Actions API confirmed successful exact-head software PR, exact release-target master, and first independent receipt PR candidate runs, each with four jobs. Artifact digests came from GitHub Actions; downloaded M6 worker reports and wheel files were hashed locally. Final receipt PR head/merge, receipt merge-target master CI, and governance closure remain pending.",
   "acceptance_report": "reports/refactor/M6.md",
   "package_evidence": {
     "version": "0.7.0",
@@ -177,6 +222,6 @@
     "Langfuse remote export is opt-in and was not sent to a live service. Provider-free fixtures are not live-model quality, current-law coverage, legal correctness, production identity, capacity, or disaster-recovery evidence.",
     "Alembic 0007 downgrade rejects nonempty M6 job history. Preserve PostgreSQL state and use a planned forward repair for valuable jobs; deleting Redis or database volumes is not rollback evidence."
   ],
-  "receipt_status": "pending_independent_receipt_pr_and_ci",
-  "note": "The v0.7.0 software release is verified at the exact release-target commit. This document-only receipt candidate must still pass exact-head CI, merge under repository rules, pass receipt merge-target master CI, and close Issue #25 and Milestone 7 in order. Those future objects are null or open here. Do not move the v0.7.0 tag or create another release."
+  "receipt_status": "pending_final_receipt_head_ci_and_merge",
+  "note": "The v0.7.0 software release and the first independent receipt PR #27 candidate are verified. This documentation update changes the PR head, so its own exact-head four-job CI must pass before normal merge. The receipt merge-target master CI and subsequent Issue #25/Milestone 7 closure also remain pending. Those future objects are null or open here. Do not move the v0.7.0 tag or create another release."
 }
