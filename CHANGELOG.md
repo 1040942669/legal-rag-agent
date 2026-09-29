@@ -4,7 +4,7 @@
 
 ## [Unreleased]
 
-M5 `v0.6.0` 已发布并完成独立发布回执与治理关闭；finalization PR #24 也已合并并通过精确 master CI。M6 `v0.7.0` 的 `a7f4bc5...` 精确 head 四路 CI 曾全绿，但随后补充激活租约 fence 与有界 outbox 恢复；这些新修正的最终候选 CI、Tag 与 Release 尚未完成。M7 未开始。
+M5 `v0.6.0` 已发布并完成独立发布回执与治理关闭；finalization PR #24 也已合并并通过精确 master CI。M6 `v0.7.0` 代码冻结 head `ed0c980...` 已在修正激活租约 fence 与有界 outbox 恢复后通过四路精确 CI，状态为 `ready_for_release`，不是已合并或发布。最终文档 head 的 CI、review、merge、master CI、Tag、Release 和独立回执仍待完成。M7 未开始。
 
 ## [0.7.0] - Unreleased (M6 candidate)
 
@@ -15,7 +15,7 @@ M5 `v0.6.0` 已发布并完成独立发布回执与治理关闭；finalization P
 - 导入最终激活与 job 租约核验、item 完成和成功终态同事务提交；默认最多自动创建 5 条 outbox 记录并指数退避，耗尽后显示 `delivery_unconfirmed`；同一未确认 pending 记录仍可重试发送。
 - Linux/WSL2 Celery prefork worker 与 outbox dispatcher；消息只有 job ID 与 schema version，worker 不接收 HTTP 提供的路径或私人文本。
 - 本地 typed observation，以及默认关闭、需显式数据流确认且严格脱敏的可选 Langfuse OTLP exporter。
-- M6-T01 至 M6-T07 验收入口和 M0-M6 累计门禁；修正前的真实 broker/worker 与 58/58 检查通过，新安全修正仍须在最终候选上重跑四路 CI。
+- M6-T01 至 M6-T07 验收入口和 M0-M6 累计门禁；包含安全修正的 `ed0c980...` 精确 head 四路 CI 成功，真实 broker/worker JUnit 41/0/0/0、累计门禁 58/58、0.7.0 wheel 隔离 smoke 成功且无 live model 调用。后续文档提交仍须按最终 PR head 重新跑 CI。
 
 ### Security and limits
 
