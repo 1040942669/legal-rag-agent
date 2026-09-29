@@ -4,7 +4,7 @@
 
 ## [Unreleased]
 
-M5 `v0.6.0` 已发布并完成独立发布回执与治理关闭；finalization PR #24 也已合并并通过精确 master CI。M6 `v0.7.0` 正在开发，尚未完成真实 broker/worker、候选 CI、Tag 或 Release 门禁；M7 未开始。
+M5 `v0.6.0` 已发布并完成独立发布回执与治理关闭；finalization PR #24 也已合并并通过精确 master CI。M6 `v0.7.0` 首轮精确 head 的真实 broker/worker suite 与 58/58 累计门禁通过，但四路 CI 因 M5 wheel 旧版本参数仅 3/4；修正后的最终候选 CI、Tag 与 Release 尚未完成。M7 未开始。
 
 ## [0.7.0] - Unreleased (M6 candidate)
 
@@ -14,7 +14,7 @@ M5 `v0.6.0` 已发布并完成独立发布回执与治理关闭；finalization P
 - Alembic `0007_m6_jobs_outbox` 的 job、item ledger、transactional outbox、lease epoch/有限重领、取消和重复投递对账；Redis 仅作为 Celery broker。
 - Linux/WSL2 Celery prefork worker 与 outbox dispatcher；消息只有 job ID 与 schema version，worker 不接收 HTTP 提供的路径或私人文本。
 - 本地 typed observation，以及默认关闭、需显式数据流确认且严格脱敏的可选 Langfuse OTLP exporter。
-- M6-T01 至 M6-T07 真实 broker/worker 验收入口和 M0-M6 累计门禁，候选尚待最终证据。
+- M6-T01 至 M6-T07 验收入口和 M0-M6 累计门禁；首轮真实 broker/worker 与 58/58 检查通过，最终候选四路 CI 尚待重跑。
 
 ### Security and limits
 

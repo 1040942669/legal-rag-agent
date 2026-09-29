@@ -7,8 +7,8 @@
     "observed_default_branch": "master",
     "observed_baseline_commit": "61f1065fc6d5678d0d57114e2e361294d04906b4",
     "observed_on": "2026-09-29",
-    "workspace_head": "8bc4eeb36940d7f7e11899fc9bc3933f3409d75d",
-    "workspace_head_note": "Last completed M6 code/gate commit before this documentation candidate; M6 was based on verified origin/master 76a038936ddfd900f98ad8709fedcc50c07063d3 after PR #24 and master CI 36504995613. Documentation commit SHA is recorded externally to avoid self-reference.",
+    "workspace_head": "f1b44baaa61e6c6d9be83b58bf4105ca260382f8",
+    "workspace_head_note": "First pushed M6 documentation candidate and exact-head CI reference before the M5 wheel version-parameter fix. M6 was based on verified origin/master 76a038936ddfd900f98ad8709fedcc50c07063d3 after PR #24 and master CI 36504995613. This JSON cannot self-reference its own final commit SHA.",
     "workspace_branch": "codex/m6-async-jobs",
     "workspace_dirty": false,
     "remote_tags_checked": true
@@ -752,14 +752,19 @@
       "release_url": null,
       "remote_release_verified": false,
       "tests": {
-        "status": "not_run",
-        "passed": null,
-        "failed": null,
-        "skipped": null,
-        "report_path": "reports/refactor/M6.md"
+        "status": "partial",
+        "passed": 58,
+        "failed": 0,
+        "skipped": 0,
+        "report_path": "reports/refactor/M6.md",
+        "first_exact_head_ci_sha": "f1b44baaa61e6c6d9be83b58bf4105ca260382f8",
+        "first_exact_head_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36544268358",
+        "first_exact_head_ci_status": "three_of_four_jobs_success_m5_wheel_version_mismatch",
+        "first_exact_head_m6_worker_junit": "32/0/0/0",
+        "first_exact_head_m6_gate": "58/58"
       },
       "blockers": [
-        "Real Redis/Celery worker-loss and duplicate-delivery suite, cumulative M0-M6 gate, exact-head CI, review and release checks remain pending."
+        "M5 compatibility wheel job failed on first 0.7.0 candidate because CI expected 0.6.0; fix must pass all four jobs on the final exact PR head before review, merge and release."
       ]
     },
     {
@@ -787,5 +792,5 @@
       "blockers": []
     }
   ],
-  "next_action": "Implement M6-T01 through M6-T07 on codex/m6-async-jobs from verified origin/master 76a0389; run the real broker/worker and cumulative gates before any release claim. M5 v0.6.0 remains immutable."
+  "next_action": "Push the reviewed M5 wheel version-parameter fix and first CI evidence, then require all four jobs on the new exact PR head before normal merge and master CI. M5 v0.6.0 remains immutable."
 }

@@ -405,9 +405,10 @@ jobs:
           set -euo pipefail
           mapfile -t candidate_wheels < <(find "${RUNNER_TEMP}/m5-wheel" -maxdepth 1 -type f -name '*.whl' -print)
           test "${#candidate_wheels[@]}" -eq 1
+          candidate_version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
           uv run --offline --frozen --no-sync python scripts/release_wheel_probe.py "${candidate_wheels[0]}" \
             --profile M5 \
-            --expected-version 0.6.0 \
+            --expected-version "${candidate_version}" \
             --smoke \
             --timeout-seconds 180 \
             --temp-root "${RUNNER_TEMP}" \
