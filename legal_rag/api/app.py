@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import re
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -44,11 +46,20 @@ from legal_rag.harness.checkpoint import (
     assert_postgres_checkpointer_ready,
 )
 from legal_rag.harness.state import HARNESS_GRAPH_VERSION
+from legal_rag.jobs.registry import JobRegistry
+from legal_rag.jobs.store import JobConflictError, JobContractError, JobRecord, JobStore
+from legal_rag.observability import Observation, ObservationContext, Observer
+from legal_rag.observability.config import close_observer
 from legal_rag.storage.schema import active_snapshot_pointers, embedding_imports
 
 from .auth import AuthenticationError, ServicePrincipal, TokenAuthenticator
 from .schemas import (
     CancelRunResponse,
+    CancelJobResponse,
+    EvaluationCreateRequest,
+    IngestionCreateRequest,
+    JobAcceptedResponse,
+    JobResponse,
     MessagePageResponse,
     MessageResponse,
     RunAcceptedResponse,
@@ -60,6 +71,7 @@ from .schemas import (
 from .settings import ServiceSettings
 
 M5_ALEMBIC_HEAD = "0006_m5_harness_recovery"
+M6_ALEMBIC_HEAD = "0007_m6_jobs_outbox"
 # Kept as an import-compatible alias for M4 clients and tests.
 M4_ALEMBIC_HEAD = M5_ALEMBIC_HEAD
 STREAM_END_RUN_STATUSES = frozenset(
@@ -83,6 +95,7 @@ TERMINAL_EVENT_TYPES = frozenset(
     }
 )
 URL_CREDENTIAL_NAMES = frozenset({"token", "access_token", "authorization"})
+JOB_IDEMPOTENCY_KEY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}\Z")
 
 
 def _error(status_code: int, code: str, message: str) -> JSONResponse:
@@ -131,6 +144,45 @@ def _run_response(record: RunRecord) -> RunResponse:
     )
 
 
+def _job_owner_id(principal: ServicePrincipal) -> str:
+    identity = json.dumps(
+        {
+            "user_id": principal.user_id,
+            "scope_id": principal.scope_id,
+            "profile_id": principal.profile_id,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    )
+    return hashlib.sha256(identity.encode("ascii")).hexdigest()
+
+
+def _job_response(record: JobRecord) -> JobResponse:
+    return JobResponse(
+        job_id=record.job_id,
+        kind=record.kind,
+        status=record.status,
+        total=record.total,
+        completed=record.completed,
+        failed=record.failed,
+        pending=record.pending,
+        stage=record.stage,
+        outbox_status=record.outbox_status,
+        outbox_error_code=record.outbox_error_code,
+        cancel_requested=record.cancel_requested,
+        error_code=record.error_code,
+        created_at=record.created_at,
+        started_at=record.started_at,
+        finished_at=record.finished_at,
+        queue_wait_ms=(
+            max(0.0, (record.started_at - record.created_at).total_seconds() * 1000)
+            if record.started_at is not None
+            else None
+        ),
+    )
+
+
 def _parse_sse_cursor(last_event_id: str | None, after: str | None) -> int:
     raw = last_event_id if last_event_id is not None else after
     if raw is None:
@@ -163,6 +215,9 @@ def create_app(
     settings: ServiceSettings | None = None,
     start_supervisor: bool = True,
     close_engine: bool = False,
+    job_store: JobStore | None = None,
+    job_registry: JobRegistry | None = None,
+    job_observer: Observer | None = None,
 ) -> FastAPI:
     resolved_settings = settings or ServiceSettings()
 
@@ -176,6 +231,8 @@ def create_app(
             supervisor_stopped = True
             if start_supervisor:
                 supervisor_stopped = await run_in_threadpool(supervisor.stop)
+            if job_observer is not None:
+                await run_in_threadpool(close_observer, job_observer)
             if close_engine and supervisor_stopped:
                 await run_in_threadpool(service.engine.dispose)
             elif not supervisor_stopped:
@@ -186,8 +243,8 @@ def create_app(
                 app.state.shutdown_incomplete = True
 
     app = FastAPI(
-        title="Legal RAG M5 Service",
-        version="0.6.0",
+        title="Legal RAG Service",
+        version="0.7.0",
         lifespan=lifespan,
         docs_url=None,
         redoc_url=None,
@@ -197,6 +254,9 @@ def create_app(
     app.state.authenticator = authenticator
     app.state.supervisor = supervisor
     app.state.settings = resolved_settings
+    app.state.job_store = job_store
+    app.state.job_registry = job_registry
+    app.state.job_observer = job_observer
 
     bearer_scheme = HTTPBearer(
         auto_error=False,
@@ -320,6 +380,18 @@ def create_app(
             422, "invalid_request", "the request violates the service contract"
         )
 
+    @app.exception_handler(JobConflictError)
+    async def job_conflict_handler(request: Request, exc: JobConflictError):
+        del request, exc
+        return _error(
+            409, "job_idempotency_conflict", "the job key binds a different request"
+        )
+
+    @app.exception_handler(JobContractError)
+    async def job_contract_handler(request: Request, exc: JobContractError):
+        del request, exc
+        return _error(422, "invalid_job_request", "the job request is invalid")
+
     @app.exception_handler(SQLAlchemyError)
     async def database_error_handler(request: Request, exc):
         del request, exc
@@ -348,7 +420,7 @@ def create_app(
             migration = connection.scalar(
                 text("SELECT version_num FROM alembic_version")
             )
-            if migration != M5_ALEMBIC_HEAD:
+            if migration != M6_ALEMBIC_HEAD:
                 return False
             for principal in authenticator.principals:
                 configured = connection.scalar(
@@ -390,6 +462,161 @@ def create_app(
         if not ready:
             return _error(503, "service_not_ready", "the service is not ready")
         return {"status": "ready"}
+
+    def require_job_store() -> JobStore:
+        if job_store is None:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "job_service_unavailable",
+                    "message": "job service is unavailable",
+                },
+            )
+        return job_store
+
+    def require_job_registry() -> JobRegistry:
+        if job_registry is None:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "job_registry_unavailable",
+                    "message": "job registry is unavailable",
+                },
+            )
+        return job_registry
+
+    async def submit_job(
+        *,
+        kind: str,
+        reference: str,
+        principal: ServicePrincipal,
+        idempotency_key: str | None,
+    ) -> JobAcceptedResponse:
+        if (
+            idempotency_key is None
+            or JOB_IDEMPOTENCY_KEY.fullmatch(idempotency_key) is None
+        ):
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "code": "invalid_idempotency_key",
+                    "message": "Idempotency-Key is required and invalid",
+                },
+            )
+        registry = require_job_registry()
+        if kind == "evaluation":
+            entry = registry.evaluation(
+                reference, scope_id=principal.scope_id, profile_id=principal.profile_id
+            )
+        else:
+            entry = registry.ingestion(
+                reference, scope_id=principal.scope_id, profile_id=principal.profile_id
+            )
+        if entry is None:
+            raise HTTPException(status_code=404)
+        store = require_job_store()
+        record = await run_in_threadpool(
+            store.create_job,
+            owner_id=_job_owner_id(principal),
+            kind=kind,
+            request_ref=entry.reference,
+            request_hash=entry.fingerprint,
+            total=entry.total,
+            idempotency_key=idempotency_key,
+        )
+        if job_observer is not None:
+            try:
+                job_observer.record(
+                    Observation(
+                        context=ObservationContext(
+                            trace_id=record.job_id, job_id=record.job_id
+                        ),
+                        name="job.queued",
+                        status="queued",
+                        counts={
+                            "total": record.total,
+                            "completed": record.completed,
+                            "failed": record.failed,
+                            "pending": record.pending,
+                        },
+                    )
+                )
+            except Exception:
+                # Optional telemetry must never change durable acceptance.
+                pass
+        return JobAcceptedResponse(
+            job_id=record.job_id,
+            status=record.status,
+            status_url=f"/api/v1/jobs/{record.job_id}",
+        )
+
+    @app.post(
+        "/api/v1/evaluations",
+        response_model=JobAcceptedResponse,
+        status_code=202,
+        name="create_evaluation",
+    )
+    async def create_evaluation_route(
+        body: EvaluationCreateRequest,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        principal: ServicePrincipal = Depends(principal_dependency),
+    ) -> JobAcceptedResponse:
+        return await submit_job(
+            kind="evaluation",
+            reference=body.experiment_id,
+            principal=principal,
+            idempotency_key=idempotency_key,
+        )
+
+    @app.post(
+        "/api/v1/ingestions",
+        response_model=JobAcceptedResponse,
+        status_code=202,
+        name="create_ingestion",
+    )
+    async def create_ingestion_route(
+        body: IngestionCreateRequest,
+        idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+        principal: ServicePrincipal = Depends(principal_dependency),
+    ) -> JobAcceptedResponse:
+        return await submit_job(
+            kind="ingestion",
+            reference=body.artifact_ref,
+            principal=principal,
+            idempotency_key=idempotency_key,
+        )
+
+    @app.get("/api/v1/jobs/{job_id}", response_model=JobResponse, name="get_job")
+    async def get_job_route(
+        job_id: str,
+        principal: ServicePrincipal = Depends(principal_dependency),
+    ) -> JobResponse:
+        record = await run_in_threadpool(
+            require_job_store().get_job, job_id, _job_owner_id(principal)
+        )
+        if record is None:
+            raise HTTPException(status_code=404)
+        return _job_response(record)
+
+    @app.post(
+        "/api/v1/jobs/{job_id}/cancel",
+        response_model=CancelJobResponse,
+        name="cancel_job",
+    )
+    async def cancel_job_route(
+        job_id: str,
+        principal: ServicePrincipal = Depends(principal_dependency),
+    ) -> CancelJobResponse:
+        record = await run_in_threadpool(
+            require_job_store().request_cancel, job_id, _job_owner_id(principal)
+        )
+        if record is None:
+            raise HTTPException(status_code=404)
+        return CancelJobResponse(
+            job_id=record.job_id,
+            status=record.status,
+            cancel_requested=record.cancel_requested,
+        )
 
     @app.post(
         "/api/v1/sessions",
@@ -617,4 +844,4 @@ def create_app(
     return app
 
 
-__all__ = ["M4_ALEMBIC_HEAD", "M5_ALEMBIC_HEAD", "create_app"]
+__all__ = ["M4_ALEMBIC_HEAD", "M5_ALEMBIC_HEAD", "M6_ALEMBIC_HEAD", "create_app"]

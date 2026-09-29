@@ -119,6 +119,45 @@ class CancelRunResponse(StrictModel):
     provider_revoked: Literal[False] = False
 
 
+class EvaluationCreateRequest(StrictModel):
+    experiment_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
+
+class IngestionCreateRequest(StrictModel):
+    artifact_ref: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
+
+class JobAcceptedResponse(StrictModel):
+    job_id: str
+    status: str
+    status_url: str
+
+
+class JobResponse(StrictModel):
+    job_id: str
+    kind: Literal["evaluation", "ingestion"]
+    status: Literal["queued", "running", "succeeded", "failed", "cancelled"]
+    total: int
+    completed: int
+    failed: int
+    pending: int
+    stage: str
+    outbox_status: str | None
+    outbox_error_code: str | None
+    cancel_requested: bool
+    error_code: str | None
+    created_at: datetime
+    started_at: datetime | None
+    finished_at: datetime | None
+    queue_wait_ms: float | None
+
+
+class CancelJobResponse(StrictModel):
+    job_id: str
+    status: str
+    cancel_requested: bool
+
+
 class ErrorDetail(StrictModel):
     code: str
     message: str

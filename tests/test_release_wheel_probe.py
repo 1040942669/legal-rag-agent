@@ -26,9 +26,10 @@ def _metadata(
     dependency_marker: str | None = None,
     marker_overrides: dict[str, str] | None = None,
     duplicate_extra_dependency: str | None = None,
+    celery_redis_extra: bool = True,
 ) -> str:
     dependencies = set(release_probe._m4.SERVICE_EXTRA_DEPENDENCIES)
-    if profile == "M5":
+    if profile in {"M5", "M6"}:
         dependencies.update(release_probe.M5_SERVICE_EXTRA_DEPENDENCIES)
     lines = [
         "Metadata-Version: 2.4",
@@ -36,6 +37,8 @@ def _metadata(
         f"Version: {version}",
         "Provides-Extra: service",
     ]
+    if profile == "M6":
+        lines.append("Provides-Extra: jobs")
     if duplicate_extra_dependency is not None:
         lines.extend(
             [
@@ -57,6 +60,19 @@ def _metadata(
             )
             requirement += f"; {marker}"
         lines.append(f"Requires-Dist: {requirement}")
+    if profile == "M6":
+        for dependency in sorted(release_probe.M6_JOBS_EXTRA_DEPENDENCIES):
+            if dependency == omit_dependency:
+                continue
+            name = (
+                "celery[redis]"
+                if dependency == "celery" and celery_redis_extra
+                else dependency
+            )
+            requirement = f"{name}>=1"
+            if dependency != unconditional_dependency:
+                requirement += '; extra == "jobs"'
+            lines.append(f"Requires-Dist: {requirement}")
     return "\n".join(lines) + "\n\n"
 
 
@@ -71,10 +87,14 @@ def _write_wheel(
     dependency_marker: str | None = None,
     marker_overrides: dict[str, str] | None = None,
     duplicate_extra_dependency: str | None = None,
+    celery_redis_extra: bool = True,
+    jobs_entry_point: str = "legal_rag.jobs.command:main",
 ) -> Path:
     required = set(release_probe._m4.REQUIRED_RUNTIME_FILES)
-    if profile == "M5":
+    if profile in {"M5", "M6"}:
         required.update(release_probe.M5_REQUIRED_RUNTIME_FILES)
+    if profile == "M6":
+        required.update(release_probe.M6_REQUIRED_RUNTIME_FILES)
     if omit_file is not None:
         required.discard(omit_file)
     dist_info = f"legal_rag_assistant-{version}.dist-info"
@@ -91,11 +111,16 @@ def _write_wheel(
                 dependency_marker=dependency_marker,
                 marker_overrides=marker_overrides,
                 duplicate_extra_dependency=duplicate_extra_dependency,
+                celery_redis_extra=celery_redis_extra,
             ),
             f"{dist_info}/entry_points.txt": (
                 "[console_scripts]\n"
                 "legal-rag = legal_rag.cli:main\n"
                 "legal-rag-api = legal_rag.api.command:main\n"
+                + (
+                    f"legal-rag-jobs = {jobs_entry_point}\n"
+                    if profile == "M6" else ""
+                )
             ),
             f"{dist_info}/WHEEL": (
                 "Wheel-Version: 1.0\n"
@@ -132,6 +157,88 @@ def test_m5_profile_verifies_runtime_and_optional_dependencies(tmp_path: Path) -
     assert receipt["m5_service_extra_dependency_count"] == len(
         release_probe.M5_PROFILE_SERVICE_EXTRA_DEPENDENCIES
     )
+
+
+def test_m6_profile_verifies_jobs_runtime_entry_point_and_optional_extra(
+    tmp_path: Path,
+) -> None:
+    wheel = _write_wheel(
+        tmp_path / "legal_rag_assistant-0.7.0-py3-none-any.whl",
+        version="0.7.0",
+        profile="M6",
+    )
+    receipt = release_probe.probe_release_wheel(wheel, profile="M6")
+    assert receipt["status"] == "passed"
+    assert receipt["release_profile"] == "M6"
+    assert receipt["distribution"]["version"] == "0.7.0"
+    assert receipt["checks"]["m5_runtime_files"] == "passed"
+    assert receipt["checks"]["m6_runtime_files"] == "passed"
+    assert receipt["checks"]["m6_jobs_entry_point"] == "passed"
+    assert receipt["checks"]["m6_jobs_dependencies_optional"] == "passed"
+    assert "legal-rag-jobs" in receipt["console_scripts"]
+    assert receipt["m6_required_runtime_file_count"] == len(
+        release_probe.M6_REQUIRED_RUNTIME_FILES
+    )
+
+
+@pytest.mark.parametrize(
+    ("omit_file", "jobs_entry_point", "omit_dependency", "celery_redis_extra", "expected_code"),
+    [
+        (
+            "legal_rag/jobs/worker.py", "legal_rag.jobs.command:main", None, True,
+            "m6_required_runtime_file_missing",
+        ),
+        (
+            "legal_rag/storage/alembic/versions/0007_m6_jobs_outbox.py",
+            "legal_rag.jobs.command:main", None, True,
+            "m6_required_runtime_file_missing",
+        ),
+        (
+            None, "legal_rag.jobs.command:wrong", None, True,
+            "m6_jobs_console_script_missing",
+        ),
+        (
+            None, "legal_rag.jobs.command:main", "celery", True,
+            "m6_jobs_extra_dependency_missing",
+        ),
+        (
+            None, "legal_rag.jobs.command:main", None, False,
+            "m6_celery_redis_extra_missing",
+        ),
+    ],
+)
+def test_m6_profile_rejects_missing_worker_contracts(
+    tmp_path: Path,
+    omit_file: str | None,
+    jobs_entry_point: str,
+    omit_dependency: str | None,
+    celery_redis_extra: bool,
+    expected_code: str,
+) -> None:
+    wheel = _write_wheel(
+        tmp_path / "legal_rag_assistant-0.7.0-py3-none-any.whl",
+        version="0.7.0",
+        profile="M6",
+        omit_file=omit_file,
+        jobs_entry_point=jobs_entry_point,
+        omit_dependency=omit_dependency,
+        celery_redis_extra=celery_redis_extra,
+    )
+    with pytest.raises(release_probe.ProbeFailure) as raised:
+        release_probe.probe_release_wheel(wheel, profile="M6")
+    assert raised.value.code == expected_code
+
+
+def test_m6_jobs_dependency_cannot_be_unconditional(tmp_path: Path) -> None:
+    wheel = _write_wheel(
+        tmp_path / "legal_rag_assistant-0.7.0-py3-none-any.whl",
+        version="0.7.0",
+        profile="M6",
+        unconditional_dependency="celery",
+    )
+    with pytest.raises(release_probe.ProbeFailure) as raised:
+        release_probe.probe_release_wheel(wheel, profile="M6")
+    assert raised.value.code == "unconditional_m6_jobs_dependency"
 
 
 def test_m4_profile_preserves_the_existing_0_5_0_contract(tmp_path: Path) -> None:
@@ -335,6 +442,46 @@ def test_m5_smoke_requests_installed_harness_imports(
     assert receipt["smoke"]["m5_runtime_modules"]["module_import_count"] == len(
         release_probe.M5_SMOKE_MODULES
     )
+
+
+def test_m6_smoke_requests_installed_api_jobs_and_migration_proof(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wheel = _write_wheel(
+        tmp_path / "legal_rag_assistant-0.7.0-py3-none-any.whl",
+        version="0.7.0",
+        profile="M6",
+    )
+    calls: list[str] = []
+
+    def base_smoke(*args: Any, **kwargs: Any) -> dict[str, object]:
+        calls.append("api")
+        return {"requested": True, "status": "passed", "service_cli_help": "passed"}
+
+    def m5_smoke(*args: Any, **kwargs: Any) -> dict[str, object]:
+        calls.append("m5")
+        return {"status": "passed"}
+
+    def m6_smoke(*args: Any, **kwargs: Any) -> dict[str, object]:
+        assert kwargs["expected_version"] == "0.7.0"
+        calls.append("m6")
+        return {
+            "status": "passed",
+            "jobs_cli_help": "passed",
+            "migration_head": "0007_m6_jobs_outbox",
+        }
+
+    monkeypatch.setattr(release_probe._m4, "_smoke_in_temporary_venv", base_smoke)
+    monkeypatch.setattr(release_probe, "_smoke_m5_modules_with_locked_runtime", m5_smoke)
+    monkeypatch.setattr(release_probe, "_smoke_m6_installed_wheel", m6_smoke)
+    receipt = release_probe.probe_release_wheel(wheel, profile="M6", smoke=True)
+    assert calls == ["api", "m5", "m6"]
+    assert receipt["smoke"]["m6_installed_runtime"] == {
+        "status": "passed",
+        "jobs_cli_help": "passed",
+        "migration_head": "0007_m6_jobs_outbox",
+    }
 
 
 def test_m5_runtime_smoke_imports_from_extracted_wheel_not_checkout(

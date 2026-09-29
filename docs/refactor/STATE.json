@@ -7,14 +7,14 @@
     "observed_default_branch": "master",
     "observed_baseline_commit": "61f1065fc6d5678d0d57114e2e361294d04906b4",
     "observed_on": "2026-09-29",
-    "workspace_head": "3436e9ad41c7455aa5f31117ab7ece3f4ea847c1",
-    "workspace_head_note": "Verified clean M5 receipt merge target used as the base of the documentation-only finalization branch. This field intentionally records the non-self-referential base rather than the later finalization commit. Finalization is non-recursive and does not move the immutable v0.6.0 software tag.",
-    "workspace_branch": "codex/m5-release-finalize",
+    "workspace_head": "ed0c980c8f6a5bf126c10d8876e49342f4403444",
+    "workspace_head_note": "Code-frozen M6 PR head with four successful exact-head CI jobs; the subsequent documentation-only candidate cannot self-reference its own commit SHA and requires a fresh exact-head CI. M6 was based on verified origin/master 76a038936ddfd900f98ad8709fedcc50c07063d3 after PR #24 and master CI 36504995613.",
+    "workspace_branch": "codex/m6-async-jobs",
     "workspace_dirty": false,
     "remote_tags_checked": true
   },
-  "execution_status": "released",
-  "active_milestone": "M5",
+  "execution_status": "ready_for_release",
+  "active_milestone": "M6",
   "last_verified_release": {
     "milestone_id": "M5",
     "version": "v0.6.0",
@@ -30,7 +30,7 @@
     "allow_live_model_calls": false,
     "allow_production_deployment": false,
     "allow_force_push": false,
-    "remote_write_scope": "Only as explicitly authorized by the user in the project session"
+    "remote_write_scope": "M6 commit, push, PR, normal merge and v0.7.0 release are authorized only when required gates and repository rules pass; no force push or review bypass"
   },
   "stage_status_values": [
     "not_started",
@@ -740,24 +740,64 @@
       "id": "M6",
       "name": "任务与观测",
       "planned_version": "v0.7.0",
-      "required": false,
-      "status": "not_started",
-      "branch": null,
-      "issue_url": null,
-      "milestone_url": null,
-      "pr_url": null,
-      "candidate_sha": null,
+      "required": true,
+      "status": "ready_for_release",
+      "branch": "codex/m6-async-jobs",
+      "issue_url": "https://github.com/1040942669/legal-rag-agent/issues/25",
+      "milestone_url": "https://github.com/1040942669/legal-rag-agent/milestone/7",
+      "pr_url": "https://github.com/1040942669/legal-rag-agent/pull/26",
+      "candidate_sha": "ed0c980c8f6a5bf126c10d8876e49342f4403444",
+      "candidate_sha_role": "code_frozen_pr_head_before_documentation_candidate",
       "release_target_sha": null,
       "tag": null,
       "release_url": null,
       "remote_release_verified": false,
       "tests": {
-        "status": "not_run",
-        "passed": null,
-        "failed": null,
-        "skipped": null,
-        "report_path": null
+        "status": "passed",
+        "passed": 58,
+        "failed": 0,
+        "skipped": 0,
+        "report_path": "reports/refactor/M6.md",
+        "first_exact_head_ci_sha": "f1b44baaa61e6c6d9be83b58bf4105ca260382f8",
+        "first_exact_head_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36544268358",
+        "first_exact_head_ci_status": "three_of_four_jobs_success_m5_wheel_version_mismatch",
+        "first_exact_head_m6_worker_junit": "32/0/0/0",
+        "first_exact_head_m6_gate": "58/58",
+        "pre_fence_ci_sha": "a7f4bc55168e833ee58aface1874a66d319ad7b6",
+        "pre_fence_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36546785727",
+        "pre_fence_ci_status": "four_of_four_jobs_success_before_activation_fence_and_bounded_redrive",
+        "pre_fence_m6_worker_junit": "32/0/0/0",
+        "pre_fence_m6_gate": "58/58",
+        "code_frozen_ci_sha": "ed0c980c8f6a5bf126c10d8876e49342f4403444",
+        "code_frozen_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36550803746",
+        "code_frozen_ci_status": "four_of_four_jobs_success_on_exact_pr_head",
+        "code_frozen_ci_jobs": {
+          "offline": "success",
+          "m4-service-integration": "success",
+          "m5-fault-injection": "success",
+          "m6-worker-integration": "success"
+        },
+        "code_frozen_m6_artifact_id": 11025178041,
+        "code_frozen_m6_worker_junit": "41/0/0/0",
+        "code_frozen_m6_gate": "58/58",
+        "code_frozen_m6_wheel": "0.7.0 isolated install and smoke passed",
+        "code_frozen_live_model_calls": false,
+        "code_frozen_fault_scenarios": "M6-T01 through M6-T05 and M6-T07 passed with real PostgreSQL/Redis/Celery; M6-T06 passed in provider-free unit gate",
+        "code_frozen_local_m0_gate": "7/7 mandatory passed, 103264 ms, exit 0",
+        "code_frozen_local_offline": "977 passed, 157 subtests, JUnit 1134/0/0/0; links, STATE and 243 Git-candidate secret-shape checks passed",
+        "final_documentation_head_ci_status": "pending",
+        "post_fence_local_postgresql_regression": "44 passed in 19.78s",
+        "post_fence_local_ci_order_m6_database": "24 passed in 5.94s after targeted-claim hygiene test",
+        "post_fence_local_targeted_unit": "110 passed in 1.07s",
+        "post_fence_local_offline": "977 passed, 157 subtests, JUnit 1134/0/0/0; before targeted-claim hygiene test",
+        "post_fence_local_m0_gate": "7/7 mandatory passed, second run 109356 ms; before targeted-claim hygiene test"
       },
+      "release_requirements_remaining": [
+        "Final documentation-only PR head must pass all four exact-head CI jobs",
+        "Review and repository protection rules must permit normal merge",
+        "Actual merge target must pass required master CI before annotated v0.7.0 Tag and GitHub Release",
+        "Publish an independent documentation receipt after remote release verification"
+      ],
       "blockers": []
     },
     {
@@ -785,5 +825,5 @@
       "blockers": []
     }
   ],
-  "next_action": "Complete the documentation-only M5 finalization PR with exact-head CI, a normal merge, and exact merge-target master CI, then stop. Do not create a recursive receipt, move v0.6.0, or start M6."
+  "next_action": "Verify the final documentation-only PR head with four exact-head CI jobs, then check review/protection rules before normal merge. After required master CI, create and verify the annotated v0.7.0 Tag and GitHub Release, then publish an independent receipt. M5 v0.6.0 remains immutable."
 }

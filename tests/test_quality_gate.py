@@ -1715,7 +1715,6 @@ def test_ci_has_an_exact_head_provider_free_m5_fault_job() -> None:
     assert "m5-recovery-demo-receipt.json" in workflow
     assert "scripts/release_wheel_probe.py" in workflow
     assert "--profile M5" in workflow
-    assert "--expected-version 0.6.0" in workflow
     assert 'm5-wheel-probe-receipt.json" 2>&1' in workflow
     assert "--milestone M5" in workflow
     assert "--mode fault-injection" in workflow
@@ -1727,14 +1726,19 @@ def test_ci_has_an_exact_head_provider_free_m5_fault_job() -> None:
         in workflow
     )
 
-    fault_suite = workflow.index("- name: Run the independent M5 fault-injection suite")
-    junit_guard = workflow.index("- name: Reject skipped or xfailed M5 suite tests")
-    recovery_demo = workflow.index("- name: Run the one-command M5 recovery demo")
-    restart_prepare = workflow.rindex(
+    m5_workflow = workflow.split("  m5-fault-injection:", maxsplit=1)[1].split(
+        "  m6-worker-integration:", maxsplit=1
+    )[0]
+    assert 'candidate_version="$(python -c' in m5_workflow
+    assert '--expected-version "${candidate_version}"' in m5_workflow
+    fault_suite = m5_workflow.index("- name: Run the independent M5 fault-injection suite")
+    junit_guard = m5_workflow.index("- name: Reject skipped or xfailed M5 suite tests")
+    recovery_demo = m5_workflow.index("- name: Run the one-command M5 recovery demo")
+    restart_prepare = m5_workflow.rindex(
         "- name: Prepare persistent state for the cumulative PostgreSQL restart check"
     )
-    wheel_probe = workflow.index("- name: Run the isolated M5 release-wheel probe")
-    cumulative_gate = workflow.index(
+    wheel_probe = m5_workflow.index("- name: Run the isolated M5 release-wheel probe")
+    cumulative_gate = m5_workflow.index(
         "- name: Run the M5 cumulative fault-injection quality gate"
     )
     assert (
@@ -1745,10 +1749,10 @@ def test_ci_has_an_exact_head_provider_free_m5_fault_job() -> None:
         < wheel_probe
         < cumulative_gate
     )
-    fault_suite_step = workflow[fault_suite:junit_guard]
+    fault_suite_step = m5_workflow[fault_suite:junit_guard]
     assert "xfail_strict=true" in fault_suite_step
     assert "--junitxml" in fault_suite_step
-    junit_guard_step = workflow[junit_guard:recovery_demo]
+    junit_guard_step = m5_workflow[junit_guard:recovery_demo]
     assert "_junit_counts" in junit_guard_step
     assert '("failures", "errors", "skipped")' in junit_guard_step
 

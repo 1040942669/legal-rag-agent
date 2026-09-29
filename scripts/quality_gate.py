@@ -33,6 +33,7 @@ SUPPORTED_REQUESTS: dict[str, frozenset[str]] = {
     "M3": frozenset({"integration"}),
     "M4": frozenset({"integration"}),
     "M5": frozenset({"fault-injection"}),
+    "M6": frozenset({"fault-injection"}),
 }
 SUPPORTED_MILESTONES = frozenset(SUPPORTED_REQUESTS)
 SUPPORTED_MODES = frozenset(
@@ -46,6 +47,7 @@ MILESTONE_PREREQUISITES: dict[str, tuple[str, ...]] = {
     "M3": ("M0", "M1", "M2"),
     "M4": ("M0", "M1", "M2", "M3"),
     "M5": ("M0", "M1", "M2", "M3", "M4"),
+    "M6": ("M0", "M1", "M2", "M3", "M4", "M5"),
 }
 
 MANDATORY_M0_CHECK_IDS = frozenset(
@@ -293,6 +295,97 @@ MANDATORY_M5_CHECK_IDS = frozenset(
     }
 )
 
+M6_TEST_SELECTORS: dict[str, tuple[str, ...]] = {
+    "M6-T01": (
+        "integration_tests/test_m6_job_store_db.py::test_job_and_outbox_commit_together_then_dispatch_after_restart",
+        "integration_tests/test_m6_job_store_db.py::test_outbox_redelivers_if_process_dies_after_send_before_mark",
+        "integration_tests/test_m6_job_store_db.py::test_delivered_queued_job_is_redelivered_if_never_claimed",
+        "integration_tests/test_m6_outbox_bounded_recovery_db.py::test_queued_job_without_worker_has_bounded_automatic_redelivery",
+        "integration_tests/test_m6_outbox_bounded_recovery_db.py::test_queued_recovery_backs_off_between_successful_publications",
+        "integration_tests/test_m6_worker_real.py::test_m6_t01_outbox_recovery",
+    ),
+    "M6-T02": (
+        "integration_tests/test_m6_job_store_db.py::test_duplicate_delivery_and_worker_takeover_do_not_double_count_items",
+        "integration_tests/test_m6_job_store_db.py::test_failed_item_retry_and_verified_artifact_reconciliation",
+        "integration_tests/test_m6_handlers_db.py::test_m6_db_ingestion_activates_once_and_duplicate_delivery_reuses_rows",
+        "integration_tests/test_m6_worker_real.py::test_m6_t02_duplicate_delivery",
+    ),
+    "M6-T03": (
+        "integration_tests/test_m6_job_store_db.py::test_worker_loss_before_first_item_has_durable_claim_cap",
+        "integration_tests/test_m6_outbox_bounded_recovery_db.py::test_expired_running_job_has_same_bound_and_remains_claimable",
+        "integration_tests/test_m6_worker_real.py::test_m6_t03_kill_resume",
+    ),
+    "M6-T04": (
+        "integration_tests/test_m6_job_store_db.py::test_broker_error_is_visible_and_expired_worker_is_requeued",
+        "integration_tests/test_m6_outbox_bounded_recovery_db.py::test_pending_broker_retry_does_not_spend_recovery_budget",
+        "integration_tests/test_m6_worker_real.py::test_m6_t04_broker_disconnect",
+    ),
+    "M6-T05": (
+        "integration_tests/test_m6_job_store_db.py::test_ingestion_stage_is_monotonic_and_fenced",
+        "integration_tests/test_m6_handlers_db.py::test_m6_db_index_build_failure_preserves_active_snapshot",
+        "integration_tests/test_m6_handlers_db.py::test_m6_db_stale_activation_cannot_move_pointer_after_takeover",
+        "integration_tests/test_m6_handlers_db.py::test_m6_db_cancel_before_activation_preserves_pointer",
+        "integration_tests/test_m6_handlers_db.py::test_m6_db_activation_and_cancel_serialize_on_job_lock",
+        "integration_tests/test_m6_handlers_db.py::test_m6_db_terminal_failure_rolls_back_catalog_activation",
+        "integration_tests/test_m6_worker_real.py::test_m6_t05_index_failure",
+    ),
+    "M6-T06": (
+        "tests/test_m6_observability.py::test_langfuse_payload_allowlist_redacts_text_secrets_and_identifiers",
+        "tests/test_m6_observability.py::test_export_failure_does_not_block_or_raise_on_main_path",
+        "tests/test_m6_observability.py::test_transport_receives_only_redacted_otlp_json",
+        "tests/test_m6_observability_config.py::test_observer_is_off_by_default",
+        "tests/test_m6_observability_config.py::test_remote_export_requires_explicit_ack",
+        "tests/test_m6_api_jobs.py::test_m6_observer_failure_cannot_undo_accepted_job",
+    ),
+    "M6-T07": (
+        "integration_tests/test_m6_worker_real.py::test_m6_t07_parallel_progress",
+    ),
+}
+
+MANDATORY_M6_CHECK_IDS = frozenset({*MANDATORY_M5_CHECK_IDS, *M6_TEST_SELECTORS})
+
+M6_WORKER_RECEIPT_SCHEMA_VERSION = 1
+MAX_M6_WORKER_RECEIPT_BYTES = 1024 * 1024
+_M6_RECEIPT_REAL_SCENARIOS = frozenset(M6_TEST_SELECTORS) - {"M6-T06"}
+_M6_REAL_TEST_SELECTORS = {
+    test_id: [
+        selector
+        for selector in selectors
+        if selector.startswith("integration_tests/test_m6_worker_real.py::")
+    ]
+    for test_id, selectors in M6_TEST_SELECTORS.items()
+    if test_id in _M6_RECEIPT_REAL_SCENARIOS
+}
+_M6_RECEIPT_REQUIRED_EVIDENCE: dict[str, Mapping[str, Any]] = {
+    "M6-T01": {
+        "committed_before_publish": True,
+        "recovery_dispatch_observed": True,
+    },
+    "M6-T02": {
+        "duplicate_delivery_observed": True,
+        "unique_business_result": True,
+    },
+    "M6-T03": {
+        "worker_killed": True,
+        "redelivery_observed": True,
+        "completed_items_not_recomputed": True,
+    },
+    "M6-T04": {
+        "redis_disconnect_observed": True,
+        "job_state_explainable": True,
+        "persisted_records_unchanged": True,
+    },
+    "M6-T05": {
+        "index_failure_observed": True,
+        "active_snapshot_unchanged": True,
+    },
+    "M6-T07": {
+        "slow_task_observed": True,
+        "new_job_progress_observed": True,
+        "queue_wait_recorded": True,
+    },
+}
+
 M5_FAULT_RECEIPT_SCHEMA_VERSION = 1
 MAX_M5_FAULT_RECEIPT_BYTES = 1024 * 1024
 MAX_M5_FAULT_RECEIPT_NESTING = 64
@@ -369,6 +462,8 @@ _INTEGRATION_ENVIRONMENT_NAMES = frozenset(
         "LEGAL_RAG_DATABASE_URL",
         "LEGAL_RAG_EXPECTED_PGVECTOR_VERSION",
         "LEGAL_RAG_INTEGRATION_TEST",
+        "LEGAL_RAG_REDIS_URL",
+        "LEGAL_RAG_JOB_REGISTRY_PATH",
     }
 )
 _DATABASE_BACKED_MODES = frozenset({"integration", "fault-injection"})
@@ -1717,6 +1812,58 @@ def _m5_selector_contract_errors(repo_root: Path) -> list[str]:
     return errors
 
 
+def _m6_selector_contract_errors(repo_root: Path) -> list[str]:
+    """Require every M6 ID to target a real top-level pytest function."""
+
+    errors: list[str] = []
+    seen: set[str] = set()
+    parsed_nodes: dict[Path, set[str]] = {}
+    try:
+        resolved_root = repo_root.resolve(strict=True)
+    except OSError:
+        return ["M6 selector repository root is unavailable"]
+
+    for test_id, selectors in M6_TEST_SELECTORS.items():
+        for selector in selectors:
+            if selector in seen:
+                errors.append(f"M6 selector is assigned more than once: {selector}")
+                continue
+            seen.add(selector)
+            parts = selector.split("::")
+            if len(parts) != 2 or re.fullmatch(r"test_[A-Za-z0-9_]+", parts[1]) is None:
+                errors.append(f"{test_id} has an invalid pytest selector: {selector}")
+                continue
+            relative_path, node_name = parts
+            candidate = (resolved_root / relative_path).resolve(strict=False)
+            if not candidate.is_relative_to(resolved_root):
+                errors.append(f"{test_id} selector escapes the repository: {selector}")
+                continue
+            if not candidate.is_file():
+                errors.append(
+                    f"{test_id} selector file is unavailable: {relative_path}"
+                )
+                continue
+            if candidate not in parsed_nodes:
+                try:
+                    if candidate.stat().st_size > MAX_SCANNED_FILE_BYTES:
+                        raise ValueError("test module exceeds the scan limit")
+                    module = ast.parse(candidate.read_text(encoding="utf-8"))
+                except (OSError, UnicodeError, SyntaxError, ValueError):
+                    errors.append(
+                        f"M6 selector file cannot be safely parsed: {relative_path}"
+                    )
+                    parsed_nodes[candidate] = set()
+                    continue
+                parsed_nodes[candidate] = {
+                    node.name
+                    for node in module.body
+                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                }
+            if node_name not in parsed_nodes[candidate]:
+                errors.append(f"{test_id} selector node is unavailable: {selector}")
+    return errors
+
+
 def _json_object_without_duplicate_keys(
     pairs: Sequence[tuple[str, Any]],
 ) -> dict[str, Any]:
@@ -2003,6 +2150,203 @@ def validate_m5_fault_receipt_file(
         return ["M5 fault receipt is not valid bounded UTF-8 JSON"]
 
 
+def validate_m6_worker_receipt_payload(
+    payload: Any,
+    *,
+    expected_sha: str,
+) -> list[str]:
+    """Validate sanitized real-broker evidence for the exact checked-out commit."""
+
+    if not isinstance(payload, dict):
+        return ["M6 worker receipt root must be an object"]
+    if _receipt_exceeds_nesting_limit(payload):
+        return ["M6 worker receipt exceeds the maximum allowed nesting depth"]
+
+    errors: list[str] = []
+    if _unexpected_fields(
+        payload,
+        frozenset(
+            {
+                "schema_version",
+                "milestone",
+                "candidate_sha",
+                "status",
+                "live_model_calls",
+                "database",
+                "broker",
+                "scenarios",
+                "redaction",
+            }
+        ),
+    ):
+        errors.append("M6 worker receipt has unexpected top-level fields")
+    schema_version = payload.get("schema_version")
+    if (
+        not isinstance(schema_version, int)
+        or isinstance(schema_version, bool)
+        or schema_version != M6_WORKER_RECEIPT_SCHEMA_VERSION
+    ):
+        errors.append("M6 worker receipt schema_version must equal 1")
+    if payload.get("milestone") != "M6":
+        errors.append("M6 worker receipt milestone must equal M6")
+    if payload.get("status") != "passed":
+        errors.append("M6 worker receipt status must equal passed")
+    if payload.get("live_model_calls") is not False:
+        errors.append("M6 worker receipt must prove live_model_calls is false")
+    candidate_sha = payload.get("candidate_sha")
+    if (
+        not isinstance(candidate_sha, str)
+        or re.fullmatch(r"[0-9a-fA-F]{40}", candidate_sha) is None
+    ):
+        errors.append("M6 worker receipt candidate_sha must be a commit SHA")
+    elif candidate_sha.casefold() != expected_sha.casefold():
+        errors.append("M6 worker receipt candidate_sha does not match checked-out HEAD")
+
+    database = payload.get("database")
+    if not isinstance(database, dict):
+        errors.append("M6 worker receipt database must be an object")
+    else:
+        if _unexpected_fields(database, frozenset({"backend", "migration_head"})):
+            errors.append("M6 worker receipt database has unexpected fields")
+        if database.get("backend") != "postgresql":
+            errors.append("M6 worker receipt database backend must be postgresql")
+        if database.get("migration_head") != "0007_m6_jobs_outbox":
+            errors.append("M6 worker receipt must identify the 0007 migration head")
+
+    broker = payload.get("broker")
+    if not isinstance(broker, dict):
+        errors.append("M6 worker receipt broker must be an object")
+    else:
+        if _unexpected_fields(
+            broker,
+            frozenset({"backend", "worker_backend", "real_worker_process"}),
+        ):
+            errors.append("M6 worker receipt broker has unexpected fields")
+        if broker.get("backend") != "redis":
+            errors.append("M6 worker receipt broker backend must be redis")
+        if broker.get("worker_backend") != "celery":
+            errors.append("M6 worker receipt worker backend must be celery")
+        if broker.get("real_worker_process") is not True:
+            errors.append("M6 worker receipt must prove a real worker process")
+
+    scenarios = payload.get("scenarios")
+    if not isinstance(scenarios, dict):
+        errors.append("M6 worker receipt scenarios must be an object")
+    else:
+        missing = sorted(_M6_RECEIPT_REAL_SCENARIOS - set(scenarios))
+        unexpected = sorted(set(scenarios) - _M6_RECEIPT_REAL_SCENARIOS)
+        if missing:
+            errors.append(
+                "M6 worker receipt is missing scenarios: " + ", ".join(missing)
+            )
+        if unexpected:
+            errors.append(
+                "M6 worker receipt has unexpected scenarios: " + ", ".join(unexpected)
+            )
+        for test_id in sorted(_M6_RECEIPT_REAL_SCENARIOS & set(scenarios)):
+            scenario = scenarios[test_id]
+            if not isinstance(scenario, dict):
+                errors.append(f"M6 worker receipt {test_id} must be an object")
+                continue
+            if _unexpected_fields(scenario, _M5_RECEIPT_SCENARIO_FIELDS):
+                errors.append(f"M6 worker receipt {test_id} has unexpected fields")
+            if scenario.get("status") != "passed":
+                errors.append(f"M6 worker receipt {test_id}.status must equal passed")
+            if scenario.get("test_selectors") != _M6_REAL_TEST_SELECTORS[test_id]:
+                errors.append(
+                    f"M6 worker receipt {test_id}.test_selectors do not match the gate"
+                )
+            evidence = scenario.get("evidence")
+            if not isinstance(evidence, dict):
+                errors.append(f"M6 worker receipt {test_id}.evidence must be an object")
+                continue
+            allowed = set(_M6_RECEIPT_REQUIRED_EVIDENCE[test_id])
+            if test_id == "M6-T03":
+                allowed.update({"first_pid", "resume_pid"})
+            if set(evidence) - allowed:
+                errors.append(
+                    f"M6 worker receipt {test_id}.evidence has unexpected fields"
+                )
+            for field, expected in _M6_RECEIPT_REQUIRED_EVIDENCE[test_id].items():
+                if not _matches_receipt_expectation(evidence.get(field), expected):
+                    errors.append(
+                        f"M6 worker receipt {test_id}.evidence.{field} is invalid"
+                    )
+            if test_id == "M6-T03":
+                first_pid = evidence.get("first_pid")
+                resume_pid = evidence.get("resume_pid")
+                if not (
+                    isinstance(first_pid, int)
+                    and not isinstance(first_pid, bool)
+                    and first_pid > 0
+                    and isinstance(resume_pid, int)
+                    and not isinstance(resume_pid, bool)
+                    and resume_pid > 0
+                    and first_pid != resume_pid
+                ):
+                    errors.append(
+                        "M6 worker receipt M6-T03 must prove distinct worker PIDs"
+                    )
+
+    redaction = payload.get("redaction")
+    required_redaction = frozenset(
+        {
+            "contains_credentials",
+            "contains_private_text",
+            "contains_database_url",
+            "contains_redis_url",
+        }
+    )
+    if not isinstance(redaction, dict):
+        errors.append("M6 worker receipt redaction must be an object")
+    else:
+        if _unexpected_fields(redaction, required_redaction):
+            errors.append("M6 worker receipt redaction has unexpected fields")
+        for field in required_redaction:
+            if redaction.get(field) is not False:
+                errors.append(f"M6 worker receipt redaction.{field} must be false")
+
+    if _receipt_has_forbidden_key(payload):
+        errors.append("M6 worker receipt contains a forbidden sensitive-content field")
+    if _receipt_has_sensitive_value(payload):
+        errors.append("M6 worker receipt contains a sensitive-looking value")
+    return errors
+
+
+def validate_m6_worker_receipt_file(
+    receipt_path: Path,
+    *,
+    expected_sha: str,
+) -> list[str]:
+    """Load a bounded M6 receipt; reject duplicate keys and non-finite values."""
+
+    try:
+        if receipt_path.is_symlink() or not receipt_path.is_file():
+            return ["M6 worker receipt is unavailable"]
+        if receipt_path.stat().st_size > MAX_M6_WORKER_RECEIPT_BYTES:
+            return ["M6 worker receipt exceeds the maximum allowed size"]
+        payload = json.loads(
+            receipt_path.read_text(encoding="utf-8"),
+            object_pairs_hook=_json_object_without_duplicate_keys,
+            parse_constant=lambda value: (_ for _ in ()).throw(
+                ValueError(f"invalid JSON constant: {value}")
+            ),
+        )
+    except (
+        OSError,
+        UnicodeError,
+        json.JSONDecodeError,
+        ValueError,
+        RecursionError,
+        MemoryError,
+    ):
+        return ["M6 worker receipt is not valid bounded UTF-8 JSON"]
+    try:
+        return validate_m6_worker_receipt_payload(payload, expected_sha=expected_sha)
+    except (RecursionError, MemoryError):
+        return ["M6 worker receipt is not valid bounded UTF-8 JSON"]
+
+
 def _m5_fault_injection_preflight_errors(
     repo_root: Path,
     fault_receipt: Path | None,
@@ -2026,6 +2370,36 @@ def _m5_fault_injection_preflight_errors(
         return errors
     errors.extend(
         validate_m5_fault_receipt_file(fault_receipt, expected_sha=expected_sha)
+    )
+    return errors
+
+
+def _m6_fault_injection_preflight_errors(
+    repo_root: Path,
+    *,
+    fault_receipt: Path | None,
+    worker_receipt: Path | None,
+    source: Mapping[str, str] | None = None,
+) -> list[str]:
+    environment = os.environ if source is None else source
+    errors = _m5_fault_injection_preflight_errors(
+        repo_root, fault_receipt, source=environment
+    )
+    errors.extend(_m6_selector_contract_errors(repo_root))
+    if not environment.get("LEGAL_RAG_REDIS_URL", "").strip():
+        errors.append("LEGAL_RAG_REDIS_URL is required for real broker integration")
+    if worker_receipt is None:
+        errors.append(
+            "--m6-receipt is required and must come from the independent real worker suite"
+        )
+        return errors
+    try:
+        expected_sha = _git_head_sha(repo_root)
+    except GateConfigurationError as exc:
+        errors.append(str(exc))
+        return errors
+    errors.extend(
+        validate_m6_worker_receipt_file(worker_receipt, expected_sha=expected_sha)
     )
     return errors
 
@@ -2121,6 +2495,34 @@ def _m5_cumulative_preflight_failure_records(
             mode="fault-injection",
         )
         for test_id in sorted(MANDATORY_M5_CHECK_IDS)
+    ]
+
+
+def _m6_cumulative_preflight_failure_records(
+    errors: Sequence[str],
+    *,
+    worker_receipt: Path | None,
+) -> list[dict[str, Any]]:
+    summary = (
+        "M6 cumulative broker/worker preflight failed; no gate commands were "
+        "executed:\n" + "\n".join(f"- {error}" for error in errors)
+    )
+    artifact_path = (
+        str(worker_receipt.resolve(strict=False))
+        if worker_receipt is not None
+        else None
+    )
+    return [
+        result_record(
+            test_id=test_id,
+            command="quality_gate:M6 cumulative preflight",
+            exit_code=1,
+            status="failed",
+            output_summary=summary,
+            artifact_path=artifact_path,
+            mode="fault-injection",
+        )
+        for test_id in sorted(MANDATORY_M6_CHECK_IDS)
     ]
 
 
@@ -2372,6 +2774,77 @@ def run_m5_fault_injection(
     )
 
 
+def _m6_acceptance_records(
+    repo_root: Path,
+    *,
+    worker_receipt: Path,
+) -> list[dict[str, Any]]:
+    receipt_artifact = str(worker_receipt.resolve(strict=False))
+    records: list[dict[str, Any]] = []
+    for test_id, selectors in M6_TEST_SELECTORS.items():
+        record = run_pytest_check(
+            test_id=test_id,
+            selectors=selectors,
+            repo_root=repo_root,
+            timeout_seconds=1200,
+            artifact_path=receipt_artifact
+            if test_id != "M6-T06"
+            else selectors[0].split("::", maxsplit=1)[0],
+            mode="fault-injection",
+        )
+        if test_id in _M6_RECEIPT_REAL_SCENARIOS:
+            record["output_summary"] = _clean_summary(
+                f"{record['output_summary']}\n"
+                f"worker receipt: exact-HEAD {test_id} real broker evidence verified"
+            )
+        records.append(record)
+    return records
+
+
+def run_m6_fault_injection(
+    repo_root: Path = REPO_ROOT,
+    *,
+    restart_receipt: Path | None = None,
+    fault_receipt: Path | None = None,
+    worker_receipt: Path | None = None,
+) -> dict[str, Any]:
+    """Execute all 58 M0-M6 checks with real PostgreSQL and Redis/Celery evidence."""
+
+    started_at = utc_now()
+    preflight_errors = _m6_fault_injection_preflight_errors(
+        repo_root,
+        fault_receipt=fault_receipt,
+        worker_receipt=worker_receipt,
+    )
+    if preflight_errors:
+        return _gate_report(
+            milestone="M6",
+            mode="fault-injection",
+            started_at=started_at,
+            records=_m6_cumulative_preflight_failure_records(
+                preflight_errors,
+                worker_receipt=worker_receipt,
+            ),
+            mandatory_check_ids=MANDATORY_M6_CHECK_IDS,
+        )
+
+    assert worker_receipt is not None  # preflight rejects a missing receipt
+    records = _m0_offline_records(repo_root, state_milestone="M6")
+    records.extend(_m1_acceptance_records(repo_root))
+    records.extend(_m2_acceptance_records(repo_root))
+    records.extend(_m3_acceptance_records(repo_root, restart_receipt=restart_receipt))
+    records.extend(_m4_acceptance_records(repo_root))
+    records.extend(_m5_acceptance_records(repo_root, fault_receipt=fault_receipt))
+    records.extend(_m6_acceptance_records(repo_root, worker_receipt=worker_receipt))
+    return _gate_report(
+        milestone="M6",
+        mode="fault-injection",
+        started_at=started_at,
+        records=records,
+        mandatory_check_ids=MANDATORY_M6_CHECK_IDS,
+    )
+
+
 def validate_request(milestone: str | None, mode: str | None) -> list[str]:
     errors: list[str] = []
     if milestone not in SUPPORTED_MILESTONES:
@@ -2425,14 +2898,12 @@ def _write_report(path: Path, report: Mapping[str, Any]) -> None:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run a milestone quality gate.")
-    parser.add_argument(
-        "--milestone", help="Milestone identifier (M0, M1, M2, M3, M4, or M5)."
-    )
+    parser.add_argument("--milestone", help="Milestone identifier (M0 through M6).")
     parser.add_argument(
         "--mode",
         help=(
             "Gate mode (offline for M0-M2; integration for M3-M4; "
-            "fault-injection for M5)."
+            "fault-injection for M5-M6)."
         ),
     )
     parser.add_argument("--output", help="Optional path for the JSON report.")
@@ -2440,7 +2911,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--restart-receipt",
         type=Path,
         help=(
-            "M3-M5: receipt created by m3_restart_probe.py prepare before the "
+            "M3-M6: receipt created by m3_restart_probe.py prepare before the "
             "PostgreSQL service restart."
         ),
     )
@@ -2448,9 +2919,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--fault-receipt",
         type=Path,
         help=(
-            "M5: sanitized exact-HEAD receipt produced by the independent "
+            "M5-M6: sanitized exact-HEAD receipt produced by the independent "
             "fault-injection suite."
         ),
+    )
+    parser.add_argument(
+        "--m6-receipt",
+        type=Path,
+        help="M6: sanitized exact-HEAD real PostgreSQL/Redis/Celery worker receipt.",
     )
     return parser
 
@@ -2460,6 +2936,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     request_errors = validate_request(args.milestone, args.mode)
     if request_errors:
         report = _invalid_request_report(args.milestone, args.mode, request_errors)
+    elif args.milestone == "M6":
+        report = run_m6_fault_injection(
+            REPO_ROOT,
+            restart_receipt=args.restart_receipt,
+            fault_receipt=args.fault_receipt,
+            worker_receipt=args.m6_receipt,
+        )
     elif args.milestone == "M5":
         report = run_m5_fault_injection(
             REPO_ROOT,

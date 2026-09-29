@@ -420,20 +420,23 @@ def test_run_event_allowlist_is_closed_and_matches_packaged_migration() -> None:
     assert "answer.draft" not in migration_sql
 
 
-def test_m4_migration_remains_packaged_below_the_m5_single_head() -> None:
+def test_m4_migration_remains_packaged_below_the_m6_single_head() -> None:
     config = alembic_config()
     scripts = ScriptDirectory.from_config(config)
     m4_migration = import_module(
         "legal_rag.storage.alembic.versions.0005_m4_api_sessions"
     )
 
-    assert scripts.get_heads() == ["0006_m5_harness_recovery"]
+    assert scripts.get_heads() == ["0007_m6_jobs_outbox"]
     m4_revision = scripts.get_revision("0005_m4_api_sessions")
-    head = scripts.get_revision("0006_m5_harness_recovery")
+    m5_revision = scripts.get_revision("0006_m5_harness_recovery")
+    head = scripts.get_revision("0007_m6_jobs_outbox")
     assert m4_revision is not None
+    assert m5_revision is not None
     assert head is not None
     assert m4_revision.down_revision == "0004_m3_ann_guards"
-    assert head.down_revision == m4_revision.revision
+    assert m5_revision.down_revision == m4_revision.revision
+    assert head.down_revision == m5_revision.revision
     assert m4_migration.revision == m4_revision.revision
     assert m4_migration.down_revision == m4_revision.down_revision
 
@@ -444,13 +447,16 @@ def test_m4_migration_remains_packaged_below_the_m5_single_head() -> None:
     packaged_m5_migration = alembic_package.joinpath(
         "versions", "0006_m5_harness_recovery.py"
     )
+    packaged_m6_migration = alembic_package.joinpath("versions", "0007_m6_jobs_outbox.py")
     assert alembic_package.joinpath("script.py.mako").is_file()
     assert packaged_m4_migration.is_file()
     assert packaged_m5_migration.is_file()
+    assert packaged_m6_migration.is_file()
     assert (
         Path(m4_revision.path).resolve() == Path(str(packaged_m4_migration)).resolve()
     )
-    assert Path(head.path).resolve() == Path(str(packaged_m5_migration)).resolve()
+    assert Path(m5_revision.path).resolve() == Path(str(packaged_m5_migration)).resolve()
+    assert Path(head.path).resolve() == Path(str(packaged_m6_migration)).resolve()
 
     installed_files = distribution_files("legal-rag-assistant")
     assert installed_files is not None

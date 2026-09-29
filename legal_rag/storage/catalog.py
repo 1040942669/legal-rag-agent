@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import date, datetime
 from typing import TYPE_CHECKING, Any, Literal, Mapping, Sequence
@@ -1284,10 +1285,14 @@ class PostgresLegalCatalogRepository:
                 )
                 return self._lookup_article(connection, request)
 
-    def get_active_snapshot(self, scope_id: str) -> ActiveSnapshotSelection:
+    def get_active_snapshot(
+        self, scope_id: str, *, connection: Connection | None = None
+    ) -> ActiveSnapshotSelection:
         resolved_scope_id = _canonical_id(scope_id, "scope_id")
-        with self.engine.connect() as connection:
-            selection, _ = self._active_snapshot(connection, resolved_scope_id)
+        with (
+            self.engine.connect() if connection is None else nullcontext(connection)
+        ) as active_connection:
+            selection, _ = self._active_snapshot(active_connection, resolved_scope_id)
         return selection
 
     def activate_snapshot(
@@ -1301,6 +1306,7 @@ class PostgresLegalCatalogRepository:
         required_profile_id: str | None = None,
         actor: str | None = None,
         reason: str | None = None,
+        connection: Connection | None = None,
     ) -> SnapshotActivationResult:
         return self._change_active_snapshot(
             scope_id=scope_id,
@@ -1312,6 +1318,7 @@ class PostgresLegalCatalogRepository:
             actor=actor,
             reason=reason,
             rollback=False,
+            connection=connection,
         )
 
     def rollback_snapshot(
@@ -1344,6 +1351,7 @@ class PostgresLegalCatalogRepository:
         *,
         before_revision: int | None = None,
         limit: int = 100,
+        connection: Connection | None = None,
     ) -> tuple[SnapshotActivationEvent, ...]:
         resolved_scope_id = _canonical_id(scope_id, "scope_id")
         if type(limit) is not int or limit <= 0 or limit > 1_000:
@@ -1362,8 +1370,10 @@ class PostgresLegalCatalogRepository:
         statement = statement.order_by(
             snapshot_activation_events.c.revision.desc()
         ).limit(limit)
-        with self.engine.connect() as connection:
-            rows = connection.execute(statement).mappings().all()
+        with (
+            self.engine.connect() if connection is None else nullcontext(connection)
+        ) as active_connection:
+            rows = active_connection.execute(statement).mappings().all()
         return tuple(self._event_from_row(row) for row in rows)
 
     def _lookup_article(
@@ -1883,6 +1893,7 @@ class PostgresLegalCatalogRepository:
         actor: str | None,
         reason: str | None,
         rollback: bool,
+        connection: Connection | None = None,
     ) -> SnapshotActivationResult:
         resolved_scope_id = _canonical_id(scope_id, "scope_id")
         resolved_snapshot_id = _canonical_id(snapshot_id, "snapshot_id")
@@ -1903,7 +1914,10 @@ class PostgresLegalCatalogRepository:
         resolved_actor = _canonical_optional_text(actor, "actor", max_length=128)
         resolved_reason = _canonical_optional_text(reason, "reason")
 
-        with self.engine.begin() as connection:
+        with (
+            self.engine.begin() if connection is None else nullcontext(connection)
+        ) as active_connection:
+            connection = active_connection
             connection.execute(
                 select(
                     func.pg_advisory_xact_lock(
