@@ -1,6 +1,8 @@
 # 真实发布回执
 
-此目录保存远端核验的里程碑回执。当前 `M0.json` 至 `M5.json` 均已完成软件发布、独立回执、回执 merge-target master CI 和对应 Issue/Milestone 收口。`M5.json` 记录了经核验的 `v0.6.0` 软件、Tag、Release、exact PR-head CI、release-target master CI、独立 receipt PR #23 final-head CI、普通 merge、receipt merge-target master CI 以及治理关闭时间，状态为 `verified`。
+此目录保存远端核验的里程碑回执。`M0.json` 至 `M5.json` 已完成软件发布、独立回执、回执 merge-target master CI 和对应 Issue/Milestone 收口。`M5.json` 记录了经核验的 `v0.6.0` 软件、Tag、Release、exact PR-head CI、release-target master CI、独立 receipt PR #23 final-head CI、普通 merge、receipt merge-target master CI 以及治理关闭时间，状态为 `verified`。
+
+`M6.json` 记录已远端核验的 `v0.7.0` 软件 PR #26、四路精确 PR-head 与 release-target master CI、annotated Tag 和公开 Release。独立回执 [PR #27](https://github.com/1040942669/legal-rag-agent/pull/27) 的第一候选 `09bc371...` 在 [精确 head CI 36558052677](https://github.com/1040942669/legal-rag-agent/actions/runs/36558052677) 四路成功，制品摘要及 M6 worker 内部文件哈希亦已记录。新增这些事实后的回执 PR head 会变化，因此 `receipt_status` 为 `pending_final_receipt_head_ci_and_merge`；最终 head CI、正常 merge、receipt merge-target master CI 和 Issue #25/Milestone 7 治理关闭仍须实际核验，不能把第一候选门禁当成最终门禁。后续只更新实际发生的回执与治理事实，不移动 `v0.7.0` Tag，也不重新发布 Release。
 
 每个阶段远程核验发布后，将模板 `../templates/RELEASE_RECEIPT.example.json` 填为 `Mx.json`。
 必须记录实际 Tag 目标 SHA、PR、CI、Release URL、是否 draft 以及发布验证时间。
