@@ -3,16 +3,16 @@
 ## 当前状态
 
 - 当前里程碑：M5，版本 `v0.6.0`。
-- 当前状态：`released_receipt_pending`。软件已发布，独立发布回执与治理关闭尚未完成，因此不能提前写成 fully `released`。
+- 当前状态：`released`。软件发布、独立发布回执、回执 merge-target master CI、Issue 与 Milestone 治理关闭均已完成并远端核验。
 - 软件分支：`codex/m5-harness-recovery`。
 - 软件 PR：[PR #22](https://github.com/1040942669/legal-rag-agent/pull/22)，final head `aa737e8d1f77214277c0544ce069d36c2b2161ff`，普通 merge commit `832acaafaf5633e76daed7a62a73755187fca51e`。
 - 精确 PR-head CI：[run 36497021956](https://github.com/1040942669/legal-rag-agent/actions/runs/36497021956)，3/3 jobs success。
 - 精确 release-target master CI：[run 36498443123](https://github.com/1040942669/legal-rag-agent/actions/runs/36498443123)，3/3 jobs success。
 - annotated Tag：`v0.6.0`，Tag object `c0ef0721ab49da0d7840b76e741a52e35b8941d2`，peeled target 精确为 `832acaafaf5633e76daed7a62a73755187fca51e`。
 - GitHub Release：[v0.6.0 - Durable Harness Recovery](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.6.0)，于 `2026-09-28T23:41:41Z` 发布，非 draft、非 prerelease，附件 0。
-- 当前回执分支：`codex/m5-release-receipt`，基线为上述不可变软件 release target。
-- 独立回执 PR：[PR #23](https://github.com/1040942669/legal-rag-agent/pull/23)。第一份 receipt candidate `3eead1deb511325c91d47b31f9c39f2868607b07` 的 [CI run 36500603258](https://github.com/1040942669/legal-rag-agent/actions/runs/36500603258) 已 3/3 jobs success；对应三组 artifact digest 和内部文件 SHA-256 已写回 `docs/refactor/receipts/M5.json`。下一份提交将成为 receipt final-head 候选并重新触发完整 CI。
-- 跟踪项：[Issue #21](https://github.com/1040942669/legal-rag-agent/issues/21) 与 [Milestone 6](https://github.com/1040942669/legal-rag-agent/milestone/6) 保持 open。只有 receipt merge 后精确 master CI 成功，才可依次关闭。
+- 当前 finalization 分支：`codex/m5-release-finalize`，基线为回执普通 merge commit `3436e9ad41c7455aa5f31117ab7ece3f4ea847c1`。该分支只记录已经发生的治理事实，不新增产品能力，也不生成递归回执。
+- 独立回执 PR：[PR #23](https://github.com/1040942669/legal-rag-agent/pull/23)。first candidate `3eead1deb511325c91d47b31f9c39f2868607b07` 的 [CI run 36500603258](https://github.com/1040942669/legal-rag-agent/actions/runs/36500603258) 与 final head `9dd6ec3867f05dd207ec15657861028f138167fc` 的 [CI run 36501403167](https://github.com/1040942669/legal-rag-agent/actions/runs/36501403167) 均为 3/3 jobs success。PR 于 `2026-09-29T00:13:59Z` 普通合并为 `3436e9ad41c7455aa5f31117ab7ece3f4ea847c1`，该精确 commit 的 [master run 36502063863](https://github.com/1040942669/legal-rag-agent/actions/runs/36502063863) 亦为 3/3 success。
+- 跟踪项：[Issue #21](https://github.com/1040942669/legal-rag-agent/issues/21) 于 `2026-09-29T00:23:07Z` 关闭；确认 `open_issues=0` 后，跟踪 M5 的 GitHub [Milestone 6](https://github.com/1040942669/legal-rag-agent/milestone/6) 于 `2026-09-29T00:23:22Z` 关闭。这里的 GitHub Milestone 编号不表示路线图 M6 已开始。
 - 本里程碑没有真实或付费模型调用，没有生产部署，没有强推、admin merge、auto-merge、review 绕过或保护规则绕过。
 - M6 未开始；M5 完成后必须停止。
 
@@ -27,8 +27,10 @@
 7. `aaa56131743da94d25b38beb670a4b6f8c4d7f53`：`test(m5): preserve legacy restart fixture readiness`
 8. `979c12fab74ec0911bfa93fd9de07f7437c1eb5d`：`style(m5): format restart fixture`
 9. `aa737e8d1f77214277c0544ce069d36c2b2161ff`：`docs(m5): prepare durable recovery candidate`
+10. `3eead1deb511325c91d47b31f9c39f2868607b07`：M5 独立回执 first candidate
+11. `9dd6ec3867f05dd207ec15657861028f138167fc`：`docs(m5): verify receipt candidate`
 
-`aa737e8...` 是软件 PR 的最终 head，`832acaaf...` 是通过 master CI 的软件发布目标。Tag 永久留在软件发布目标，不跟随后续 receipt 或 finalization 文档提交移动。
+`aa737e8...` 是软件 PR 的最终 head，`832acaaf...` 是通过 master CI 的软件发布目标，`9dd6ec3...` 是回执 PR 的最终 head，`3436e9a...` 是通过 master CI 的回执合并目标。Tag 永久留在软件发布目标，不跟随后续 receipt 或 finalization 文档提交移动。
 
 ## 完整运行链路
 
@@ -140,6 +142,14 @@ Checkpoint 无法撤回外部请求，也无法证明 provider exactly-once。M5
 - 三个 master artifact digest 与内部文件 SHA-256 已写入 `docs/refactor/receipts/M5.json`。
 - 真实或付费模型调用：0。
 
+### 独立回执 final head 与 merge target
+
+- PR #23 final head `9dd6ec3867f05dd207ec15657861028f138167fc` 的 [run 36501403167](https://github.com/1040942669/legal-rag-agent/actions/runs/36501403167)：offline、M4 service、M5 fault 三个 jobs 全部 success。
+- final-head artifact digest：offline `sha256:8af81ba947dcf0f2ea7dc98eb4611c6acc97e84aabd10b8830a3b902e368e845`；M4 `sha256:ff9aeadef3be9a8b8f4aca993b4058f26126d171a80c06394983deb93f5e2202`；M5 `sha256:89f164949bd30288b12f93469de2035bcf93033ebd67a1c8414990528ddeff37`。
+- PR #23 于 `2026-09-29T00:13:59Z` 以普通 merge commit `3436e9ad41c7455aa5f31117ab7ece3f4ea847c1` 合并；没有 admin、auto、squash、rebase 或强推。
+- 精确 receipt merge-target [master run 36502063863](https://github.com/1040942669/legal-rag-agent/actions/runs/36502063863)：3/3 jobs success。artifact digest：offline `sha256:c55adfdad0d6cc47ea8921d9a7676990dbac23b89c823e16b1383435cfe3a129`；M4 `sha256:3d70c2fe5ea2b919f8e818475af45e5e2d3b5daafd55b41f21d316287b3d743d`；M5 `sha256:cdeceb76af01fcb6453a3fc9b6f702ad2670d9bffef3ec5ac6b0074b85e9fcd6`。
+- final-head 与 merge-target 的全部内部 gate、JUnit、restart、demo、wheel probe 和 wheel SHA-256 已写入 `docs/refactor/receipts/M5.json`；Issue #21 与 Milestone 6 只在 merge-target CI 成功后关闭。
+
 ### 保留的失败证据
 
 - 较早 `7ba6ae8...` 的 PR run `36495569685` 在 M4 service job 得到 `78 passed, 1 failed`。旧 M4 process fixture 没有建立 M5 persistent checkpointer，导致 readiness 未就绪。修复把遗留 fixture 明确固定为 `m4-linear-v1`，没有弱化生产 M5 的 fail-closed readiness；最终 PR 与 master 三路 CI 均通过。
@@ -147,16 +157,14 @@ Checkpoint 无法撤回外部请求，也无法证明 provider exactly-once。M5
 - 第二次新数据库完成重启但名称不满足 integration fixture guard；第一次累计 gate 因相同 guard 失败关闭。随后使用 guard-compliant fresh database 完整重跑并通过。
 - 这些失败保留在报告中，没有被冒充为发布成功证据。
 
-## 当前必须完成的回执链
+## 已完成的治理链与最终化边界
 
-1. 提交并 push 已核验的 first-candidate CI 与 artifact 数据，使新提交成为 PR #23 的 receipt final-head 候选。
-2. 等待该精确 final head 的三个 CI jobs 全部成功，不写 `Closes #21`。
-3. 使用普通 merge commit 与 `--match-head-commit` 合并，不使用 admin、auto、squash 或 rebase。
-4. 等待 receipt merge commit 在 `master` 上的精确三路 CI 全部成功并下载、散列 artifacts。
-5. 只有此时关闭 Issue #21；确认 Milestone 6 `open_issues=0` 后再关闭 Milestone。
-6. 从最新 master 创建 `codex/m5-release-finalize`，补写 receipt final head、merge SHA、master CI、Issue/Milestone 时间和最终 `released` 状态。
-7. finalization PR 同样要求 exact-head 三路 CI、普通 merge 和精确 merge-target master CI；不再递归生成新回执，也不移动 `v0.6.0`。
-8. 完成后停止，不启动 M6。
+1. 软件 PR #22 exact-head CI、普通 merge、release-target master CI、annotated Tag 与 GitHub Release 已完成。
+2. 独立 receipt PR #23 first candidate 和 final head 的精确三路 CI 已完成。
+3. receipt PR 已普通合并，精确 receipt merge-target master 三路 CI 已完成。
+4. Issue #21 与 Milestone 6 已按依赖顺序关闭，M5 机器状态现在是 `released`。
+5. 当前 `codex/m5-release-finalize` 只补写上述外部事实；该 PR 仍要求 exact-head 三路 CI、普通 merge 和精确 merge-target master CI。
+6. finalization 不递归生成新 receipt，不移动 `v0.6.0`，不修改产品代码；完成后停止，不启动 M6。
 
 ## 已知限制与优先提升点
 
@@ -172,4 +180,4 @@ Checkpoint 无法撤回外部请求，也无法证明 provider exactly-once。M5
 
 ## 停止条件
 
-只有 receipt PR、其精确 head CI、普通 merge、receipt merge 后精确 master CI、Issue #21、Milestone 6、非递归 finalization PR 与其精确 master CI 都已真实核验，才可把 M5 标成 `released`。任一步失败都要记录真实阻塞，不得移动 Tag、编造回执或把未完成状态写成完成。M5 完成后停止。
+M5 软件、独立 receipt、receipt merge-target CI、Issue 与 Milestone 已真实核验，因此里程碑状态是 `released`。操作性停止条件只剩非递归 finalization PR 的 exact-head CI、普通 merge 和精确 merge-target master CI；任一步失败都要记录真实阻塞，不得移动 Tag、编造递归回执或启动 M6。finalization 完成后停止。

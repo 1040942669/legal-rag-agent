@@ -7,23 +7,23 @@
     "observed_default_branch": "master",
     "observed_baseline_commit": "61f1065fc6d5678d0d57114e2e361294d04906b4",
     "observed_on": "2026-09-29",
-    "workspace_head": "832acaafaf5633e76daed7a62a73755187fca51e",
-    "workspace_head_note": "Verified v0.6.0 software release target and base of the independent M5 receipt branch. Receipt commits intentionally follow the immutable software tag and require their own exact-head CI.",
-    "workspace_branch": "codex/m5-release-receipt",
-    "workspace_dirty": true,
+    "workspace_head": "3436e9ad41c7455aa5f31117ab7ece3f4ea847c1",
+    "workspace_head_note": "Verified clean M5 receipt merge target used as the base of the documentation-only finalization branch. This field intentionally records the non-self-referential base rather than the later finalization commit. Finalization is non-recursive and does not move the immutable v0.6.0 software tag.",
+    "workspace_branch": "codex/m5-release-finalize",
+    "workspace_dirty": false,
     "remote_tags_checked": true
   },
-  "execution_status": "released_receipt_pending",
+  "execution_status": "released",
   "active_milestone": "M5",
   "last_verified_release": {
-    "milestone_id": "M4",
-    "version": "v0.5.0",
-    "tag": "v0.5.0",
-    "tag_object_sha": "36d6883cc1bc29f09f7be5625db458739bce4335",
-    "target_sha": "670e005a081cffa36a75af2b202e50eb2b859c3d",
-    "release_url": "https://github.com/1040942669/legal-rag-agent/releases/tag/v0.5.0",
-    "published_at": "2026-09-28T19:59:42Z",
-    "verified_at": "2026-09-28T20:49:11Z"
+    "milestone_id": "M5",
+    "version": "v0.6.0",
+    "tag": "v0.6.0",
+    "tag_object_sha": "c0ef0721ab49da0d7840b76e741a52e35b8941d2",
+    "target_sha": "832acaafaf5633e76daed7a62a73755187fca51e",
+    "release_url": "https://github.com/1040942669/legal-rag-agent/releases/tag/v0.6.0",
+    "published_at": "2026-09-28T23:41:41Z",
+    "verified_at": "2026-09-29T00:23:22Z"
   },
   "authorization": {
     "document_only_until_user_starts": false,
@@ -605,16 +605,16 @@
       "name": "Harness与恢复",
       "planned_version": "v0.6.0",
       "required": true,
-      "status": "released_receipt_pending",
+      "status": "released",
       "branch": "codex/m5-harness-recovery",
       "receipt_branch": "codex/m5-release-receipt",
       "finalize_branch": "codex/m5-release-finalize",
       "issue_url": "https://github.com/1040942669/legal-rag-agent/issues/21",
-      "issue_state": "open",
-      "issue_closed_at": null,
+      "issue_state": "closed",
+      "issue_closed_at": "2026-09-29T00:23:07Z",
       "milestone_url": "https://github.com/1040942669/legal-rag-agent/milestone/6",
-      "milestone_state": "open",
-      "milestone_closed_at": null,
+      "milestone_state": "closed",
+      "milestone_closed_at": "2026-09-29T00:23:22Z",
       "pr_url": "https://github.com/1040942669/legal-rag-agent/pull/22",
       "pr_state": "merged",
       "pr_is_draft": false,
@@ -640,7 +640,7 @@
       "release_published_at": "2026-09-28T23:41:41Z",
       "remote_release_verified": true,
       "receipt_path": "docs/refactor/receipts/M5.json",
-      "receipt_status": "verified_release_receipt_pending_merge",
+      "receipt_status": "verified",
       "receipt_pr_url": "https://github.com/1040942669/legal-rag-agent/pull/23",
       "receipt_candidate_sha": "3eead1deb511325c91d47b31f9c39f2868607b07",
       "receipt_candidate_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36500603258",
@@ -649,12 +649,24 @@
       "receipt_candidate_ci_m5_artifact_digest": "sha256:e91d8930d2c7569307d7fb2d09a776bb82a27a896b053a8fe2cd8e28fd662bf7",
       "receipt_candidate_ci_quality_gate_json_sha256": "c8a663b5bf960947e0f238a069b7ba2f79cc606a4e39541ab897f3402fcbddd7",
       "receipt_candidate_ci_fault_junit_sha256": "61c85216ff7bb5afc366915d1b0a8780b3f8ab163d65cbd368b2b4d4d75219a3",
-      "receipt_final_sha": null,
-      "receipt_final_ci_url": null,
-      "receipt_merge_sha": null,
-      "receipt_master_ci_url": null,
+      "receipt_final_sha": "9dd6ec3867f05dd207ec15657861028f138167fc",
+      "receipt_final_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36501403167",
+      "receipt_final_ci_offline_artifact_digest": "sha256:8af81ba947dcf0f2ea7dc98eb4611c6acc97e84aabd10b8830a3b902e368e845",
+      "receipt_final_ci_m4_artifact_digest": "sha256:ff9aeadef3be9a8b8f4aca993b4058f26126d171a80c06394983deb93f5e2202",
+      "receipt_final_ci_m5_artifact_digest": "sha256:89f164949bd30288b12f93469de2035bcf93033ebd67a1c8414990528ddeff37",
+      "receipt_final_ci_quality_gate_json_sha256": "a843b3751758cad03c217d20b9f25cd6c671edf9f8c02c2f32c893bcd1f843ad",
+      "receipt_final_ci_fault_junit_sha256": "5c64ce359394ddb5600782392f5946e2f23e2c36ef52341fc75ceaa098179f0c",
+      "receipt_merge_sha": "3436e9ad41c7455aa5f31117ab7ece3f4ea847c1",
+      "receipt_merged_at": "2026-09-29T00:13:59Z",
+      "receipt_master_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36502063863",
+      "receipt_master_ci_sha": "3436e9ad41c7455aa5f31117ab7ece3f4ea847c1",
+      "receipt_master_ci_offline_artifact_digest": "sha256:c55adfdad0d6cc47ea8921d9a7676990dbac23b89c823e16b1383435cfe3a129",
+      "receipt_master_ci_m4_artifact_digest": "sha256:3d70c2fe5ea2b919f8e818475af45e5e2d3b5daafd55b41f21d316287b3d743d",
+      "receipt_master_ci_m5_artifact_digest": "sha256:cdeceb76af01fcb6453a3fc9b6f702ad2670d9bffef3ec5ac6b0074b85e9fcd6",
+      "receipt_master_ci_quality_gate_json_sha256": "0253b9fd7fd9bef026ea1a61172239e16edb0b646e224ed5977ce3efd3c114e9",
+      "receipt_master_ci_fault_junit_sha256": "1523abadf5730020dc563ed5d22502aab4c7e11836dd37b25f61ed64e0a196bb",
       "tests": {
-        "status": "software_released_candidate_and_master_ci_passed_receipt_pending",
+        "status": "passed",
         "passed": 921,
         "failed": 0,
         "skipped": 0,
@@ -691,9 +703,15 @@
         "receipt_candidate_ci_status": "passed_on_exact_first_receipt_candidate",
         "receipt_candidate_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36500603258",
         "receipt_candidate_ci_sha": "3eead1deb511325c91d47b31f9c39f2868607b07",
+        "receipt_final_ci_status": "passed_on_exact_receipt_final_head",
+        "receipt_final_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36501403167",
+        "receipt_final_ci_sha": "9dd6ec3867f05dd207ec15657861028f138167fc",
+        "receipt_master_ci_status": "passed_on_exact_receipt_merge_commit",
+        "receipt_master_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36502063863",
+        "receipt_master_ci_sha": "3436e9ad41c7455aa5f31117ab7ece3f4ea847c1",
         "live_model_calls": 0,
         "report_path": "reports/refactor/M5.md",
-        "scope": "Provider-free M0-M5 release evidence on the exact software PR head and exact release-target master commit. PostgreSQL restart, cross-process hard-kill recovery, cumulative gate, isolated wheel, annotated tag and published Release are verified. The independent receipt PR and governance closure remain pending."
+        "scope": "Provider-free M0-M5 release evidence on the exact software PR head, software release-target master commit, receipt final head, and receipt merge-target master commit. PostgreSQL restart, cross-process hard-kill recovery, cumulative gate, isolated wheel, annotated tag, published Release, Issue #21 closure, and Milestone 6 closure are verified."
       },
       "interim_progress": {
         "completed_subtasks": [
@@ -710,15 +728,12 @@
         "final_candidate_ci_status": "passed_on_exact_pr_head",
         "release_target_ci_status": "passed_on_exact_master_commit",
         "tag_and_release_status": "published_and_verified",
-        "receipt_pr_status": "open_first_candidate_ci_passed_final_head_pending",
+        "receipt_pr_status": "normally_merged_after_exact_final_head_ci",
         "receipt_pr_url": "https://github.com/1040942669/legal-rag-agent/pull/23",
-        "release_status": "published_receipt_pending"
+        "issue_and_milestone_status": "closed_after_receipt_master_ci",
+        "release_status": "published_and_fully_receipted"
       },
-      "release_requirements_remaining": [
-        "Complete the independent release receipt PR and require its exact-head and merge-target master CI to pass.",
-        "Close Issue #21 and Milestone 6 only after the receipt merge-target CI is successful.",
-        "Use a documentation-only finalize PR to record receipt and closure facts, then stop without starting M6."
-      ],
+      "release_requirements_remaining": [],
       "blockers": []
     },
     {
@@ -770,5 +785,5 @@
       "blockers": []
     }
   ],
-  "next_action": "Commit and push the independent M5 release receipt, create its PR, and require exact-head CI before a normal merge. Then require merge-target master CI, close Issue #21 and Milestone 6, record those external facts in a documentation-only finalize PR, mark M5 released, and stop without starting M6."
+  "next_action": "Complete the documentation-only M5 finalization PR with exact-head CI, a normal merge, and exact merge-target master CI, then stop. Do not create a recursive receipt, move v0.6.0, or start M6."
 }

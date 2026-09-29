@@ -4,11 +4,11 @@
 
 ## [Unreleased]
 
-M5 `v0.6.0` 软件已发布，独立发布回执与治理关闭正在收口。M6 未开始，本节没有新增产品功能。
+M5 `v0.6.0` 已发布并完成独立发布回执与治理关闭。当前仅进行非递归的文档收尾，不新增产品能力；M6、M7 均未开始。
 
 ## [0.6.0] - 2026-09-29
 
-> 软件已发布，独立回执待收口：[PR #22](https://github.com/1040942669/legal-rag-agent/pull/22) final head `aa737e8d1f77214277c0544ce069d36c2b2161ff` 的三路 CI 与 merge/release target `832acaafaf5633e76daed7a62a73755187fca51e` 的三路 master CI 均成功；M5 专项 JUnit 为 81/0/0/0，M0-M5 累计门禁 51/51，恢复 demo、真实 PostgreSQL service restart 与隔离 wheel probe 通过。annotated `v0.6.0` Tag object `c0ef0721ab49da0d7840b76e741a52e35b8941d2` 精确 peeled 到 release target，GitHub Release 非 draft、非 prerelease。独立 receipt PR、Issue #21 与 Milestone 6 治理关闭仍待完成，因此状态为 `released_receipt_pending`。
+> 已发布并完成独立回执：[PR #22](https://github.com/1040942669/legal-rag-agent/pull/22) final head `aa737e8d1f77214277c0544ce069d36c2b2161ff` 的三路 CI 与 merge/release target `832acaafaf5633e76daed7a62a73755187fca51e` 的三路 master CI 均成功；M5 专项 JUnit 为 81/0/0/0，M0-M5 累计门禁 51/51，恢复 demo、真实 PostgreSQL service restart 与隔离 wheel probe 通过。annotated `v0.6.0` Tag object `c0ef0721ab49da0d7840b76e741a52e35b8941d2` 精确 peeled 到 release target，GitHub Release 非 draft、非 prerelease。独立 [receipt PR #23](https://github.com/1040942669/legal-rag-agent/pull/23) final head `9dd6ec3867f05dd207ec15657861028f138167fc` 的 [三路 CI run 36501403167](https://github.com/1040942669/legal-rag-agent/actions/runs/36501403167) 为 3/3 success；PR 于 `2026-09-29T00:13:59Z` 以普通 merge commit `3436e9ad41c7455aa5f31117ab7ece3f4ea847c1` 合并，其 [master run 36502063863](https://github.com/1040942669/legal-rag-agent/actions/runs/36502063863) 亦为 3/3 success。Issue #21 于 `2026-09-29T00:23:07Z` 关闭，跟踪 M5 的 GitHub Milestone 6 于 `2026-09-29T00:23:22Z` 关闭，因此 M5 状态为 `released`；路线图 M6 仍为 `not_started`。
 
 ### Added
 
@@ -38,7 +38,7 @@ M5 `v0.6.0` 软件已发布，独立发布回执与治理关闭正在收口。M6
 
 ### Known limitations
 
-- 软件 exact-head 测试、merge-target CI、Tag 与 Release 已完成；独立 receipt PR、receipt merge 后 master CI 与治理闭环尚未完成。
+- 软件 exact-head、release-target master CI、Tag、Release、独立 receipt PR、receipt merge 后 master CI 与 Issue/Milestone 治理闭环均已完成；当前文档 finalization 是非递归收尾，不移动 `v0.6.0`，也不新增产品能力。
 - LangGraph checkpoint 与应用事务不是跨表全局原子提交；M5 通过可信业务 pointer 和保守 outcome reconciliation 缩小风险，但不承诺任意 provider exactly-once、远端撤销或零重复计费。
 - unknown external outcome 默认不静默重试，run 可能以 `completed_with_limits` 结束并给出 stop reason。
 - supervisor 仍不是通用分布式队列；批量评测、导入任务、worker 运营与完整可观测性属于后续 M6。
