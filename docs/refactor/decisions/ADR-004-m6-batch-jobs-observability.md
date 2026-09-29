@@ -1,6 +1,6 @@
 # ADR-004: M6 durable batch jobs and redacted observations
 
-- Status: Proposed while M6 integration gates are running
+- Status: Accepted for the verified `v0.7.0` software release; independent documentation receipt pending
 - Date: 2026-09-29
 - Affected milestone and planned version: M6 / `v0.7.0`
 - Base: `76a038936ddfd900f98ad8709fedcc50c07063d3` (`origin/master` after M5 finalization)

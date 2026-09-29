@@ -1,0 +1,182 @@
+{
+  "schema_version": 1,
+  "record_kind": "verified_software_release_pending_independent_receipt",
+  "milestone_id": "M6",
+  "version": "v0.7.0",
+  "repository": "1040942669/legal-rag-agent",
+  "branch": "master",
+  "software_branch": "codex/m6-async-jobs",
+  "pr_url": "https://github.com/1040942669/legal-rag-agent/pull/26",
+  "pr_state": "merged",
+  "pr_is_draft": false,
+  "software_candidate_sha": "b9400ab289618707a53ee6b14f6ac1cee4af2ee1",
+  "software_merge_sha": "28517b6f323253baf638ba60c887d10630dd0bf1",
+  "software_pr_merged_at": "2026-09-29T10:19:15Z",
+  "candidate_sha": "b9400ab289618707a53ee6b14f6ac1cee4af2ee1",
+  "candidate_sha_role": "software_pr_head",
+  "receipt_branch": "codex/m6-release-receipt",
+  "receipt_pr_url": null,
+  "receipt_candidate_sha": null,
+  "receipt_candidate_ci_url": null,
+  "receipt_final_sha": null,
+  "receipt_final_ci_url": null,
+  "receipt_merge_sha": null,
+  "receipt_pr_merged_at": null,
+  "receipt_master_ci_url": null,
+  "receipt_master_ci_sha": null,
+  "issue_url": "https://github.com/1040942669/legal-rag-agent/issues/25",
+  "issue_state": "open",
+  "issue_closed_at": null,
+  "milestone_url": "https://github.com/1040942669/legal-rag-agent/milestone/7",
+  "milestone_state": "open",
+  "milestone_closed_at": null,
+  "final_pr_head_sha": "b9400ab289618707a53ee6b14f6ac1cee4af2ee1",
+  "release_target_sha": "28517b6f323253baf638ba60c887d10630dd0bf1",
+  "tag_name": "v0.7.0",
+  "tag_object_sha": "f40715c16e90b429a7c49a6347092114fefc787d",
+  "remote_tag_target_sha": "28517b6f323253baf638ba60c887d10630dd0bf1",
+  "pr_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36553279892",
+  "pr_ci_sha": "b9400ab289618707a53ee6b14f6ac1cee4af2ee1",
+  "pr_ci_event": "pull_request",
+  "pr_ci_status": "success",
+  "pr_ci_jobs_succeeded": 4,
+  "pr_ci_jobs_total": 4,
+  "pr_ci_verified_for_final_head": true,
+  "pr_ci_artifacts": {
+    "offline": {
+      "id": 11025621501,
+      "name": "m2-quality-gate-b9400ab289618707a53ee6b14f6ac1cee4af2ee1-1",
+      "digest": "sha256:8f401babdb6c3ce3f66d809055dbaf8a06000843df61d834ed3cc33efd4bab4a"
+    },
+    "m4_service": {
+      "id": 11027175203,
+      "name": "m4-service-b9400ab289618707a53ee6b14f6ac1cee4af2ee1-1",
+      "digest": "sha256:c1f15892234eb79f6aebf66b90d51ce18886756d18688e89dba1d60fa8c0e7ae"
+    },
+    "m5_fault": {
+      "id": 11026985525,
+      "name": "m5-fault-b9400ab289618707a53ee6b14f6ac1cee4af2ee1-1",
+      "digest": "sha256:39ced3a52d53f23c7c627005d5cb5d6ce500d16e436d80c6787fd28733e1a375"
+    },
+    "m6_worker": {
+      "id": 11027031041,
+      "name": "m6-worker-b9400ab289618707a53ee6b14f6ac1cee4af2ee1-1",
+      "digest": "sha256:537c63b8dd6d899866b50fd24a4b468f730a9120b889fe1bf8ff6c97f20a72ec",
+      "worker_junit_sha256": "1d19e950f9b2e9e7f3122eaebc61abadc5e4a55973feff4634f7805745154abf",
+      "worker_receipt_sha256": "00479afecf48c4d81f4df8da9c23d621d214c369668d318c4b5a6acc78e9df23",
+      "gate_json_sha256": "02f3ce3485c33032911e87e0f60d3bde499c516690776333b537c7380c6c7dbb",
+      "wheel_probe_receipt_sha256": "a58e800a4f0e3b47b80b2d5d5ab7ae0d033014decc31fef9e16759c9e58490cd",
+      "wheel_sha256": "1627cb1ff7a36ffd33ebef1e4f8a665380be1d9c4b20c01788079cbb7b10a130",
+      "wheel_size_bytes": 429210
+    }
+  },
+  "ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36554828645",
+  "ci_verified_for_target_sha": true,
+  "master_ci_sha": "28517b6f323253baf638ba60c887d10630dd0bf1",
+  "master_ci_event": "push",
+  "master_ci_branch": "master",
+  "master_ci_status": "success",
+  "master_ci_jobs_succeeded": 4,
+  "master_ci_jobs_total": 4,
+  "master_ci_artifacts": {
+    "offline": {
+      "id": 11027216855,
+      "name": "m2-quality-gate-28517b6f323253baf638ba60c887d10630dd0bf1-1",
+      "digest": "sha256:61d453fa3b86d7cc9a7ae1c67e146b82dfe4392df1aeeb72c8dcd7b9e89eb997"
+    },
+    "m4_service": {
+      "id": 11027362199,
+      "name": "m4-service-28517b6f323253baf638ba60c887d10630dd0bf1-1",
+      "digest": "sha256:0b8cfad62a09dc0d81edd0553079cec6fe680c8c006c516b86d2d5573802cd5d"
+    },
+    "m5_fault": {
+      "id": 11027821699,
+      "name": "m5-fault-28517b6f323253baf638ba60c887d10630dd0bf1-1",
+      "digest": "sha256:1bfbc884675b77bcf9e62df295431e318658ca0cd75c1b893821d15348a94d4"
+    },
+    "m6_worker": {
+      "id": 11028207157,
+      "name": "m6-worker-28517b6f323253baf638ba60c887d10630dd0bf1-1",
+      "digest": "sha256:5660415bbcfc01bbc4455d9cb863fba6164a7833e2f22bae9f7f79e44b2e7695",
+      "worker_junit_sha256": "364a4072f331cab7dc735bbb836baae18973acbecd15a2afb167cd7491d2c84d",
+      "worker_receipt_sha256": "4a0bd7c4a0f5112bd8e0570a06931f299ff0f8748609f039d18c5cf10a9da81f",
+      "gate_json_sha256": "7b0de5127081087fe00cb6a021a56920e19c0d8e8c316a8f226ac944984bd92b",
+      "wheel_probe_receipt_sha256": "a9c33d2e0a335042ca9017231654d1370a9a21ebec7feb191f096fcde1e83e08",
+      "wheel_sha256": "fa42e8498fb64180efe302661302c54ecb231a6e5980af3168d1667a5f45184e",
+      "wheel_size_bytes": 429210
+    }
+  },
+  "release_url": "https://github.com/1040942669/legal-rag-agent/releases/tag/v0.7.0",
+  "release_id": 399044922,
+  "release_is_draft": false,
+  "release_is_prerelease": false,
+  "release_is_immutable": false,
+  "release_asset_count": 0,
+  "published_at": "2026-09-29T10:39:52Z",
+  "verified_at": "2026-09-29T10:43:42Z",
+  "verification_method": "GitHub CLI and Release API confirmed the published non-draft, non-prerelease release. Git remote refs and Git Data API confirmed the annotated tag object and exact peeled commit. GitHub Actions API confirmed successful exact-head PR and exact release-target master runs, each with four jobs. Artifact digests came from GitHub Actions; downloaded M6 worker reports and wheel files were hashed locally. Independent receipt PR and governance closure remain pending.",
+  "acceptance_report": "reports/refactor/M6.md",
+  "package_evidence": {
+    "version": "0.7.0",
+    "wheel_name": "legal_rag_assistant-0.7.0-py3-none-any.whl",
+    "master_ci_wheel_size_bytes": 429210,
+    "master_ci_wheel_sha256": "fa42e8498fb64180efe302661302c54ecb231a6e5980af3168d1667a5f45184e",
+    "master_ci_wheel_sha256_independently_rehashed": true,
+    "wheel_archive_entries": 99,
+    "m6_runtime_files_verified": 12,
+    "m6_jobs_entry_point_verified": true,
+    "m6_jobs_dependencies_optional": true,
+    "isolated_install_verified": true,
+    "source_checkout_isolated": true,
+    "migration_revision_in_wheel": "0007_m6_jobs_outbox"
+  },
+  "test_evidence": {
+    "mandatory_checks_passed": 58,
+    "mandatory_checks_total": 58,
+    "master_gate_status": "passed",
+    "master_gate_failed_checks": 0,
+    "master_gate_exit_code": 0,
+    "master_gate_duration_ms": 480416,
+    "m6_real_worker_scenarios_passed": 6,
+    "m6_real_worker_scenarios_total": 6,
+    "m6_observability_scenario": "provider-free unit validation; no remote Langfuse send",
+    "master_worker_junit_tests": 41,
+    "master_worker_junit_failures": 0,
+    "master_worker_junit_errors": 0,
+    "master_worker_junit_skipped": 0,
+    "local_offline_pytest_passed": 977,
+    "local_offline_subtests_passed": 157,
+    "local_m6_database_suite_passed": 24,
+    "live_model_calls": 0
+  },
+  "service_evidence": {
+    "postgresql_major": 18,
+    "redis_version": "7.4",
+    "worker_backend": "celery",
+    "real_worker_process": true,
+    "migration_revision": "0007_m6_jobs_outbox",
+    "postgresql_business_state_source_of_truth": true,
+    "outbox_recovery_and_duplicate_delivery_verified": true,
+    "cross_process_worker_kill_resume_verified": true,
+    "active_snapshot_preserved_on_index_failure": true,
+    "lease_fenced_activation_verified": true,
+    "optional_remote_observability_default_off": true
+  },
+  "preserved_failures": [
+    {
+      "kind": "earlier_pr_ci_configuration_failure",
+      "url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36544268358",
+      "result": "3 of 4 jobs succeeded; M5 wheel probe expected fixed 0.6.0 while the candidate wheel was 0.7.0",
+      "resolution": "The M5 compatibility probe now reads the candidate package version. Later exact-head PR and release-target master runs passed all four jobs."
+    }
+  ],
+  "known_limitations": [
+    "Redis and Celery may redeliver a message; database fencing and unique keys protect the tested business writes but do not prove arbitrary external side effects exactly once.",
+    "Automatic outbox recovery creates at most five rows per job, including the initial row. A pending row can still retry broker publication. Exhausted queued jobs show delivery_unconfirmed and require authorized operator reconciliation if all broker messages were lost.",
+    "Cancellation is best effort at item boundaries and does not undo an external call already made.",
+    "Langfuse remote export is opt-in and was not sent to a live service. Provider-free fixtures are not live-model quality, current-law coverage, legal correctness, production identity, capacity, or disaster-recovery evidence.",
+    "Alembic 0007 downgrade rejects nonempty M6 job history. Preserve PostgreSQL state and use a planned forward repair for valuable jobs; deleting Redis or database volumes is not rollback evidence."
+  ],
+  "receipt_status": "pending_independent_receipt_pr_and_ci",
+  "note": "The v0.7.0 software release is verified at the exact release-target commit. This document-only receipt candidate must still pass exact-head CI, merge under repository rules, pass receipt merge-target master CI, and close Issue #25 and Milestone 7 in order. Those future objects are null or open here. Do not move the v0.7.0 tag or create another release."
+}

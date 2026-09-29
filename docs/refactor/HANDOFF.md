@@ -1,6 +1,31 @@
 # M6 执行交接
 
-> 当前工作节。下方保留的 M5 交接是当时的历史快照，其中“M6 未开始”的陈述不再表示当前状态；当前机器状态以 `STATE.json` 和本节为准。
+> 当前状态以本节和 `STATE.json` 为准。下方的 M6 发布前候选与 M5 交接均为历史快照，其中“尚无 M6 Tag/Release”或“M6 未开始”等陈述不再表示当前状态。
+
+## 当前事实：软件已发布，独立回执待完成
+
+- M6 软件状态为 `released_receipt_pending`，不是发布失败，也尚不能把独立回执和 Issue/Milestone 治理写作完成。M6 从已核验的 M5 finalization `origin/master` `76a038936ddfd900f98ad8709fedcc50c07063d3` 开始；M5 `v0.6.0` Tag/Release 保持不变。
+- 软件分支 `codex/m6-async-jobs` 的 [PR #26](https://github.com/1040942669/legal-rag-agent/pull/26) 最终 head 为 `b9400ab289618707a53ee6b14f6ac1cee4af2ee1`；[精确 head CI 36553279892](https://github.com/1040942669/legal-rag-agent/actions/runs/36553279892) 的 offline、M4 service、M5 fault、M6 worker 四路全部成功。PR 于 `2026-09-29T10:19:15Z` 普通 squash 合并，实际 merge commit 为 `28517b6f323253baf638ba60c887d10630dd0bf1`。该精确 master commit 的 [CI 36554828645](https://github.com/1040942669/legal-rag-agent/actions/runs/36554828645) 同样四路全部成功。
+- 远端 annotated `v0.7.0` Tag object 为 `f40715c16e90b429a7c49a6347092114fefc787d`，peeled target 为上述软件 merge commit `28517b6...`；[GitHub Release v0.7.0](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.7.0) 于 `2026-09-29T10:39:52Z` 发布，已核验非 draft、非 prerelease，附件 0。Tag 不随回执文档提交移动，也不重复创建 Release。
+- 当前独立回执工作分支是 `codex/m6-release-receipt`，从上述已发布的 `origin/master` 创建，分支起点 HEAD 为 `28517b6...`。本次仅准备 `docs/refactor/receipts/M6.json`、`STATE.json`、`HANDOFF.md`、`reports/refactor/M6.md`、README/CHANGELOG 和 ADR 等文档；本交接写入时，回执尚无 commit、push、PR、CI 或 merge 结果。不能预写其将来的 SHA 或把发布软件的 CI 代替回执 CI。
+- 跟踪 [Issue #25](https://github.com/1040942669/legal-rag-agent/issues/25) 和 GitHub [Milestone 7](https://github.com/1040942669/legal-rag-agent/milestone/7) 仍 open；应在独立回执正常合并且精确 merge-target master CI 成功后再关闭。M7 尚未开始，也不在本次范围。
+- 本次授权覆盖在门禁和 review/保护规则满足时的正常 commit、push、PR、合并及发布。没有强推、admin merge 或 review 绕过；默认禁用真实或付费模型调用，不上传凭证、私人资料或未授权语料。
+
+## 当前验证与可证明边界
+
+- 发布目标 master run `36554828645` 的 M6 artifact 记录累计门禁 `58/58` mandatory passed、0 failed、exit 0；真实 PostgreSQL/Redis/Celery worker JUnit `41/0/0/0`，M6 `0.7.0` wheel 隔离安装/smoke passed，`live_model_calls=false`。M6-T01 至 T05、T07 是真实服务场景；T06 是 provider-free 观测单元。PR head `b9400ab...` 的四路 CI 也通过。具体证据、复现、早期失败和不运行项见 [M6 验收报告](../../reports/refactor/M6.md)，回执中应绑定精确 master artifact digest/文件哈希。
+- 本地已执行 M0 离线基础门禁 `7/7` mandatory passed，内部全量 `977 passed, 157 subtests`、JUnit `1134/0/0/0`；安全修正后的隔离 PostgreSQL suite 曾 `44 passed`，最后定向 claim 隔离测试加入后按 CI 顺序 M6 数据库 suite `24 passed`。更早 code-frozen head `ed0c980...` 的四路 CI 也是通过，但不能代替最终软件 PR head 或 master 证据。
+- 独立文档回执候选本地 M0 基础门禁再次 `7/7` mandatory passed、exit 0、109620 ms；内部全量 `977 passed, 157 subtests`、JUnit `1134/0/0/0`，35 个候选 Markdown 链接、STATE/manifest 与 244 个 Git-candidate 文本文件秘密形态检查通过。这不代替回执 PR 最终精确 head CI；临时结果保留在 ignored `.tmp/m6-receipt-m0-gate.json`。
+- 未运行真实法律语料/在线模型质量、人工法律评审、付费模型实验、生产部署及生产容量/SLO；因此本版只声称工程机制的 provider-free 验证，不声称法律回答质量或生产效果。隔离本地 PostgreSQL 55436 已停止，既有 5432 未触及；工具策略两次拒绝删除精确 ignored `.tmp/m6-pg-b8853e7d36d6` 与 `.tmp/m6-restart-receipt-b8853e7d36d6.json`，本地临时产物仍在且未上传。
+- 已知可靠性边界：激活、item 与 job terminal 在同事务并受 lease/epoch/cancel fence；默认每 job 最多自动生成 5 条 outbox 记录并退避，耗尽时状态 `queued/delivery_unconfirmed`。同一 pending row 的未确认 broker 发送仍可重试，这不是发送调用硬上限。若预算耗尽且 broker 消息全失，需授权运维人工对账；不提供普通用户无限重投，不承诺 exactly-once。
+
+## 下一条可执行动作
+
+从已核验的软件 release target 制作仅文档的 M6 回执候选，完整审查无敏感内容后 push 并创建独立 PR；在最终回执 PR head 重新运行四路精确 CI，核查 review/保护规则后正常合并，并核验回执 merge-target master CI。随后关闭 Issue #25/Milestone 7，补写真实治理事实；若需 finalization PR，它仍必须正常通过自己的门禁，不递归生成软件版本或移动 `v0.7.0`。任何一步未完成都保留 `released_receipt_pending`，不得再发一次 Release。完成本次 M6 范围后停止，不进入 M7。
+
+---
+
+## 历史：M6 发布前候选交接
 
 ## 当前事实
 
