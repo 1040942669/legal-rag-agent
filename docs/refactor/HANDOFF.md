@@ -1,4 +1,35 @@
-# M5 执行交接
+# M6 执行交接
+
+> 当前工作节。下方保留的 M5 交接是当时的历史快照，其中“M6 未开始”的陈述不再表示当前状态；当前机器状态以 `STATE.json` 和本节为准。
+
+## 当前事实
+
+- M6 `v0.7.0` 正在 `codex/m6-async-jobs` 开发；基线是已核验 `origin/master` `76a038936ddfd900f98ad8709fedcc50c07063d3`。该提交合并了 M5 finalization PR #24，[master CI 36504995613](https://github.com/1040942669/legal-rag-agent/actions/runs/36504995613) 三项全部成功。M5 `v0.6.0` 仍已发布，Tag 不移动，也不为 M5 新增回执。
+- M6 跟踪 [Issue #25](https://github.com/1040942669/legal-rag-agent/issues/25) 和 GitHub [Milestone 7](https://github.com/1040942669/legal-rag-agent/milestone/7)。开发 [Draft PR #26](https://github.com/1040942669/legal-rag-agent/pull/26) 已创建；观测子任务提交 `93508a5` 与核心 job/worker 提交 `71f6328` 已 push，门禁/wheel 提交 `8bc4eeb` 已在本地完成。文档收敛后将一并推送；M6 尚无 Tag 或 Release。
+- 本次授权：在门禁和仓库 review/保护规则满足时可 commit、push、创建 PR、正常合并并发布；不能强推或绕过 review。默认禁用 live/paid model，不上传凭证、私人资料、未授权语料。
+
+## 实施中的 M6 文件与边界
+
+- `legal_rag/jobs/`：服务端注册引用、PostgreSQL job/item/outbox、dispatcher、Celery worker 与 M2/M3 业务 handler；新增 `legal_rag/storage/alembic/versions/0007_m6_jobs_outbox.py` 和对应中央 schema metadata。
+- `legal_rag/api/app.py`、`schemas.py`、`command.py`：owner-scoped 202 创建、状态/取消，`LEGAL_RAG_JOB_REGISTRY_PATH` opt-in 装配与 M6 schema readiness；不把在线 M5 graph 节点入队。
+- `legal_rag/observability/`：typed local observation、默认关闭且需明示授权的脱敏 Langfuse exporter；失败不能改变主任务。
+- `scripts/quality_gate.py`、`.github/workflows/quality-gate.yml` 与 M6 专项测试：目标是 58 项累积 gate 和独立 Linux PostgreSQL/Redis/Celery job，未见最终候选绿灯前不能宣称 M6 完成。
+- `README.md`、`CHANGELOG.md`、`docs/README.md`、`reports/refactor/M6.md`、`decisions/ADR-004`：任务流程、可证明范围、配置、回滚和真实证据。
+
+## 当前验证与待办
+
+- 本地全量离线 `uv run --offline --frozen --no-sync pytest -q tests`：先前中间轮次 `966 passed, 157 subtests`；在 worker/CI 文件收敛后最新轮次 `976 passed, 157 subtests passed in 99.36s`。最终候选提交 SHA 的 CI 仍待核验。
+- 隔离 PostgreSQL 18.1/pgvector 0.8.1 集成：M6 store 初轮 9/9；修复中央 Alembic metadata 后，M6 store + M5 schema + M3 migration `22 passed in 18.84s`；加测 rollback 与 downgrade guard 后 store 13/13。累计 DB suite 在真实独立服务重启前 `37 passed in 22.93s`、重启后 `37 passed in 20.15s`；`m3_restart_probe` prepare/实际 stop/start/new-process verify 全部 exit 0。旧 M4 current-head 断言更新为 0005→0006→0007 后，聚焦 unit 27/27。既有 5432 未触及。
+- 保留失败：初次跨迁移 2 failed/10 passed，原因是 0007 表缺中央 metadata；旧 M4 schema current-head 断言初次 1 failed/26 passed。均已定向修复并复测。完整细节见 [M6 报告](../../reports/refactor/M6.md)。
+- 尚未完成：真实 Redis/Celery M6-T01 至 T07；M0-M6 累计 gate 58/58；最终候选精确 PR-head CI、merge-target master CI 与 wheel probe；任何 Tag/Release/回执。M6 wheel isolated smoke 已在本地候选工作区单独通过，不代替最终 SHA 的 CI。独立 cluster 已停止；工具策略两次拒绝清理精确 `.tmp/m6-pg-b8853e7d36d6` 和 `.tmp/m6-restart-receipt-b8853e7d36d6.json`，忽略的本地临时产物仍在，未上传。
+
+## 下一条可执行动作
+
+等待并审查真实 Linux Redis/Celery 测试与 receipt，运行隔离 PostgreSQL restart 与完整累计 gate；修复红灯后冻结候选、创建 Draft PR，再按 `MASTER_PLAN.md` §13 的精确 SHA、review、Tag、Release、独立回执顺序推进。若 CI、review、schema 或测试任一门禁不满足，停在真实状态，不造发布声明。M7 不在本次范围。
+
+---
+
+## 历史：M5 执行交接
 
 ## 当前状态
 

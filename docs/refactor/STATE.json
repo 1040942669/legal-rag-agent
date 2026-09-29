@@ -7,14 +7,14 @@
     "observed_default_branch": "master",
     "observed_baseline_commit": "61f1065fc6d5678d0d57114e2e361294d04906b4",
     "observed_on": "2026-09-29",
-    "workspace_head": "3436e9ad41c7455aa5f31117ab7ece3f4ea847c1",
-    "workspace_head_note": "Verified clean M5 receipt merge target used as the base of the documentation-only finalization branch. This field intentionally records the non-self-referential base rather than the later finalization commit. Finalization is non-recursive and does not move the immutable v0.6.0 software tag.",
-    "workspace_branch": "codex/m5-release-finalize",
+    "workspace_head": "8bc4eeb36940d7f7e11899fc9bc3933f3409d75d",
+    "workspace_head_note": "Last completed M6 code/gate commit before this documentation candidate; M6 was based on verified origin/master 76a038936ddfd900f98ad8709fedcc50c07063d3 after PR #24 and master CI 36504995613. Documentation commit SHA is recorded externally to avoid self-reference.",
+    "workspace_branch": "codex/m6-async-jobs",
     "workspace_dirty": false,
     "remote_tags_checked": true
   },
-  "execution_status": "released",
-  "active_milestone": "M5",
+  "execution_status": "in_progress",
+  "active_milestone": "M6",
   "last_verified_release": {
     "milestone_id": "M5",
     "version": "v0.6.0",
@@ -30,7 +30,7 @@
     "allow_live_model_calls": false,
     "allow_production_deployment": false,
     "allow_force_push": false,
-    "remote_write_scope": "Only as explicitly authorized by the user in the project session"
+    "remote_write_scope": "M6 commit, push, PR, normal merge and v0.7.0 release are authorized only when required gates and repository rules pass; no force push or review bypass"
   },
   "stage_status_values": [
     "not_started",
@@ -740,12 +740,12 @@
       "id": "M6",
       "name": "任务与观测",
       "planned_version": "v0.7.0",
-      "required": false,
-      "status": "not_started",
-      "branch": null,
-      "issue_url": null,
-      "milestone_url": null,
-      "pr_url": null,
+      "required": true,
+      "status": "in_progress",
+      "branch": "codex/m6-async-jobs",
+      "issue_url": "https://github.com/1040942669/legal-rag-agent/issues/25",
+      "milestone_url": "https://github.com/1040942669/legal-rag-agent/milestone/7",
+      "pr_url": "https://github.com/1040942669/legal-rag-agent/pull/26",
       "candidate_sha": null,
       "release_target_sha": null,
       "tag": null,
@@ -756,9 +756,11 @@
         "passed": null,
         "failed": null,
         "skipped": null,
-        "report_path": null
+        "report_path": "reports/refactor/M6.md"
       },
-      "blockers": []
+      "blockers": [
+        "Real Redis/Celery worker-loss and duplicate-delivery suite, cumulative M0-M6 gate, exact-head CI, review and release checks remain pending."
+      ]
     },
     {
       "id": "M7",
@@ -785,5 +787,5 @@
       "blockers": []
     }
   ],
-  "next_action": "Complete the documentation-only M5 finalization PR with exact-head CI, a normal merge, and exact merge-target master CI, then stop. Do not create a recursive receipt, move v0.6.0, or start M6."
+  "next_action": "Implement M6-T01 through M6-T07 on codex/m6-async-jobs from verified origin/master 76a0389; run the real broker/worker and cumulative gates before any release claim. M5 v0.6.0 remains immutable."
 }
