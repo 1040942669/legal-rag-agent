@@ -7,8 +7,8 @@
     "observed_default_branch": "master",
     "observed_baseline_commit": "61f1065fc6d5678d0d57114e2e361294d04906b4",
     "observed_on": "2026-09-29",
-    "workspace_head": "c0b8a33dcb16e644511d7c1d64d908ba85f3befc",
-    "workspace_head_note": "Last pushed M6 wheel-fix commit before this current handoff update; M6 was based on verified origin/master 76a038936ddfd900f98ad8709fedcc50c07063d3 after PR #24 and master CI 36504995613. This JSON cannot self-reference its own final commit SHA.",
+    "workspace_head": "fde7f455ac3b43036887ee6c547cdf30e46c6318",
+    "workspace_head_note": "M6 activation-fence and bounded-redrive code commit prepared before this documentation commit; exact-head CI is pending. M6 was based on verified origin/master 76a038936ddfd900f98ad8709fedcc50c07063d3 after PR #24 and master CI 36504995613. This JSON cannot self-reference its own final commit SHA.",
     "workspace_branch": "codex/m6-async-jobs",
     "workspace_dirty": false,
     "remote_tags_checked": true
@@ -761,10 +761,19 @@
         "first_exact_head_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36544268358",
         "first_exact_head_ci_status": "three_of_four_jobs_success_m5_wheel_version_mismatch",
         "first_exact_head_m6_worker_junit": "32/0/0/0",
-        "first_exact_head_m6_gate": "58/58"
+        "first_exact_head_m6_gate": "58/58",
+        "pre_fence_ci_sha": "a7f4bc55168e833ee58aface1874a66d319ad7b6",
+        "pre_fence_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36546785727",
+        "pre_fence_ci_status": "four_of_four_jobs_success_before_activation_fence_and_bounded_redrive",
+        "pre_fence_m6_worker_junit": "32/0/0/0",
+        "pre_fence_m6_gate": "58/58",
+        "post_fence_local_postgresql_regression": "44 passed in 19.78s",
+        "post_fence_local_ci_order_m6_database": "23 passed in 6.02s",
+        "post_fence_local_offline": "977 passed, 157 subtests, JUnit 1134/0/0/0",
+        "post_fence_local_m0_gate": "7/7 mandatory passed"
       },
       "blockers": [
-        "M5 compatibility wheel job failed on first 0.7.0 candidate because CI expected 0.6.0; fix must pass all four jobs on the final exact PR head before review, merge and release."
+        "Activation-fence and bounded-redrive repairs passed local PostgreSQL and offline checks but must pass all four CI jobs on their new exact PR head before review, merge and release."
       ]
     },
     {
@@ -792,5 +801,5 @@
       "blockers": []
     }
   ],
-  "next_action": "Require all four jobs on the new exact PR head after the pushed M5 wheel fix before normal merge and master CI. M5 v0.6.0 remains immutable."
+  "next_action": "Require all four exact-head CI jobs for the pushed activation-fence and bounded-redrive candidate before normal merge and master CI. M5 v0.6.0 remains immutable."
 }

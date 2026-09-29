@@ -279,23 +279,34 @@ class JobStore:
             return self._read_job(connection, new_id)
 
     def claim_outbox(
-        self, dispatcher_id: str, *, limit: int = 20, lease_seconds: int = 30
+        self,
+        dispatcher_id: str,
+        *,
+        limit: int = 20,
+        lease_seconds: int = 30,
+        job_id: str | None = None,
     ) -> list[OutboxRecord]:
         _required_string("dispatcher_id", dispatcher_id, max_length=128)
         _count("limit", limit, minimum=1, maximum=1000)
         _count("lease_seconds", lease_seconds, minimum=1, maximum=3600)
+        if job_id is not None:
+            _required_string("job_id", job_id, max_length=128)
+        statement = (
+            "SELECT o.outbox_id FROM job_outbox o JOIN jobs j ON j.job_id=o.job_id "
+            "WHERE o.status='pending' AND j.status IN ('queued','running') "
+            "AND o.next_attempt_at <= clock_timestamp() "
+            "AND (o.claim_expires_at IS NULL OR o.claim_expires_at <= clock_timestamp()) "
+        )
+        if job_id is not None:
+            statement += "AND o.job_id=:job_id "
+        statement += (
+            "ORDER BY o.created_at,o.outbox_id LIMIT :limit FOR UPDATE OF o SKIP LOCKED"
+        )
         with self.engine.begin() as connection:
             rows = (
                 connection.execute(
-                    text(
-                        "SELECT o.outbox_id FROM job_outbox o JOIN jobs j ON j.job_id=o.job_id "
-                        "WHERE o.status='pending' AND j.status IN ('queued','running') "
-                        "AND o.next_attempt_at <= clock_timestamp() "
-                        "AND (o.claim_expires_at IS NULL OR o.claim_expires_at <= clock_timestamp()) "
-                        "ORDER BY o.created_at,o.outbox_id "
-                        "LIMIT :limit FOR UPDATE OF o SKIP LOCKED"
-                    ),
-                    {"limit": limit},
+                    text(statement),
+                    {"limit": limit, "job_id": job_id},
                 )
                 .mappings()
                 .all()

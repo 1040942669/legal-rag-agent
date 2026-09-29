@@ -50,12 +50,32 @@ def _age_last_delivery(engine: Engine, job_id: str, *, seconds: int) -> None:
 
 
 def _deliver(store: JobStore, job_id: str, dispatcher_id: str) -> None:
-    message = next(
-        row
-        for row in store.claim_outbox(dispatcher_id, limit=1000)
-        if row.job_id == job_id
-    )
+    (message,) = store.claim_outbox(dispatcher_id, job_id=job_id)
     assert store.mark_outbox_delivered(message.id, dispatcher_id, message.lease_epoch)
+
+
+def test_targeted_outbox_claim_does_not_lease_unrelated_job(
+    migrated_engine: Engine,
+) -> None:
+    store = JobStore(migrated_engine)
+    target_job_id = _new_job(store)
+    unrelated_job_id = _new_job(store)
+    (claimed,) = store.claim_outbox("dispatcher-targeted", job_id=target_job_id)
+    assert claimed.job_id == target_job_id
+    with migrated_engine.connect() as connection:
+        unrelated = (
+            connection.execute(
+                text(
+                    "SELECT claim_owner,delivery_attempts FROM job_outbox "
+                    "WHERE job_id=:job_id"
+                ),
+                {"job_id": unrelated_job_id},
+            )
+            .mappings()
+            .one()
+        )
+    assert unrelated["claim_owner"] is None
+    assert unrelated["delivery_attempts"] == 0
 
 
 def test_queued_job_without_worker_has_bounded_automatic_redelivery(
@@ -146,11 +166,7 @@ def test_pending_broker_retry_does_not_spend_recovery_budget(
 ) -> None:
     store = JobStore(migrated_engine)
     job_id = _new_job(store)
-    initial = next(
-        row
-        for row in store.claim_outbox("dispatcher-down", limit=1000)
-        if row.job_id == job_id
-    )
+    (initial,) = store.claim_outbox("dispatcher-down", job_id=job_id)
     assert store.mark_outbox_retry(
         initial.id,
         "dispatcher-down",

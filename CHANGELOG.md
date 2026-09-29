@@ -4,7 +4,7 @@
 
 ## [Unreleased]
 
-M5 `v0.6.0` 已发布并完成独立发布回执与治理关闭；finalization PR #24 也已合并并通过精确 master CI。M6 `v0.7.0` 首轮精确 head 的真实 broker/worker suite 与 58/58 累计门禁通过，但四路 CI 因 M5 wheel 旧版本参数仅 3/4；修正后的最终候选 CI、Tag 与 Release 尚未完成。M7 未开始。
+M5 `v0.6.0` 已发布并完成独立发布回执与治理关闭；finalization PR #24 也已合并并通过精确 master CI。M6 `v0.7.0` 的 `a7f4bc5...` 精确 head 四路 CI 曾全绿，但随后补充激活租约 fence 与有界 outbox 恢复；这些新修正的最终候选 CI、Tag 与 Release 尚未完成。M7 未开始。
 
 ## [0.7.0] - Unreleased (M6 candidate)
 
@@ -12,15 +12,17 @@ M5 `v0.6.0` 已发布并完成独立发布回执与治理关闭；finalization P
 
 - 两个明确的批任务入口：预注册 M2 provider-free 离线评测和 M3 prebuilt 语料/索引导入；202 只确认 PostgreSQL 接受，任务状态和进度可由 owner 查询。
 - Alembic `0007_m6_jobs_outbox` 的 job、item ledger、transactional outbox、lease epoch/有限重领、取消和重复投递对账；Redis 仅作为 Celery broker。
+- 导入最终激活与 job 租约核验、item 完成和成功终态同事务提交；自动 outbox 恢复默认最多 5 次发布并指数退避，耗尽后显示 `delivery_unconfirmed`，不无限堆积消息。
 - Linux/WSL2 Celery prefork worker 与 outbox dispatcher；消息只有 job ID 与 schema version，worker 不接收 HTTP 提供的路径或私人文本。
 - 本地 typed observation，以及默认关闭、需显式数据流确认且严格脱敏的可选 Langfuse OTLP exporter。
-- M6-T01 至 M6-T07 验收入口和 M0-M6 累计门禁；首轮真实 broker/worker 与 58/58 检查通过，最终候选四路 CI 尚待重跑。
+- M6-T01 至 M6-T07 验收入口和 M0-M6 累计门禁；修正前的真实 broker/worker 与 58/58 检查通过，新安全修正仍须在最终候选上重跑四路 CI。
 
 ### Security and limits
 
 - job 注册引用由受控主机配置，绑定 authenticated scope/profile；GET/cancel 对其他 owner 返回非枚举 404。Redis outage 不删除 PostgreSQL job/结果。
 - M2 评测不调用 live model；M3 导入只消费已验证的预构建 artifact，`embedded` 阶段不声称现场生成 embedding。索引读回验证后才激活快照。
 - Celery late ACK、worker-loss reject 与数据库 fencing 仍是 at-least-once，不承诺任意外部调用 exactly-once。取消在阶段边界生效，不能撤销已提交操作。
+- 自动发布预算耗尽且 broker 消息全部丢失时，不保证无人值守的继续恢复；需授权运维对账。当前无普通用户重投 API。
 - 此段为开发候选说明，不能被解读为 `v0.7.0` Tag/Release 已存在。真实测试、未运行项和回滚边界见 [M6 验收报告](reports/refactor/M6.md)。
 
 ## [0.6.0] - 2026-09-29

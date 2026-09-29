@@ -5,7 +5,7 @@
 ## 当前事实
 
 - M6 `v0.7.0` 正在 `codex/m6-async-jobs` 开发；基线是已核验 `origin/master` `76a038936ddfd900f98ad8709fedcc50c07063d3`。该提交合并了 M5 finalization PR #24，[master CI 36504995613](https://github.com/1040942669/legal-rag-agent/actions/runs/36504995613) 三项全部成功。M5 `v0.6.0` 仍已发布，Tag 不移动，也不为 M5 新增回执。
-- M6 跟踪 [Issue #25](https://github.com/1040942669/legal-rag-agent/issues/25) 和 GitHub [Milestone 7](https://github.com/1040942669/legal-rag-agent/milestone/7)。[Draft PR #26](https://github.com/1040942669/legal-rag-agent/pull/26) 首轮 head 为 `f1b44baaa61e6c6d9be83b58bf4105ca260382f8`；M5 wheel 修正及首轮 CI 证据已通过 `c0b8a33dcb16e644511d7c1d64d908ba85f3befc` push。其后的交接文字提交 SHA 无法自引用。M6 尚无 Tag 或 Release。
+- M6 跟踪 [Issue #25](https://github.com/1040942669/legal-rag-agent/issues/25) 和 GitHub [Milestone 7](https://github.com/1040942669/legal-rag-agent/milestone/7)。[Draft PR #26](https://github.com/1040942669/legal-rag-agent/pull/26) 的已验证旧 head 为 `a7f4bc55168e833ee58aface1874a66d319ad7b6`，其 [四路 CI 36546785727](https://github.com/1040942669/legal-rag-agent/actions/runs/36546785727) 全绿。随后发现激活 fence 与 outbox 无界重投风险，安全修正代码提交为 `fde7f455ac3b43036887ee6c547cdf30e46c6318`；旧 CI 不覆盖新修正。M6 尚无 Tag 或 Release。
 - 本次授权：在门禁和仓库 review/保护规则满足时可 commit、push、创建 PR、正常合并并发布；不能强推或绕过 review。默认禁用 live/paid model，不上传凭证、私人资料、未授权语料。
 
 ## 实施中的 M6 文件与边界
@@ -22,12 +22,15 @@
 - 修正后本地 M0 累计基础门禁 `7/7` mandatory passed，exit 0，耗时 97829 ms；其中再次执行全量离线测试，Markdown 链接、STATE/manifest 和 Git-candidate 秘密形态扫描全部通过。门禁 JSON 保存在 ignored `.tmp`，不上传。
 - 隔离 PostgreSQL 18.1/pgvector 0.8.1 集成：M6 store 初轮 9/9；修复中央 Alembic metadata 后，M6 store + M5 schema + M3 migration `22 passed in 18.84s`；加测 rollback 与 downgrade guard 后 store 13/13。累计 DB suite 在真实独立服务重启前 `37 passed in 22.93s`、重启后 `37 passed in 20.15s`；`m3_restart_probe` prepare/实际 stop/start/new-process verify 全部 exit 0。旧 M4 current-head 断言更新为 0005→0006→0007 后，聚焦 unit 27/27。既有 5432 未触及。
 - 保留失败：初次跨迁移 2 failed/10 passed，原因是 0007 表缺中央 metadata；旧 M4 schema current-head 断言初次 1 failed/26 passed。均已定向修复并复测。完整细节见 [M6 报告](../../reports/refactor/M6.md)。
-- 首轮精确 head [CI run 36544268358](https://github.com/1040942669/legal-rag-agent/actions/runs/36544268358)：offline、M4、M6 三路 success；M6 真实 Redis/Celery JUnit 32/0/0/0 覆盖 T01-T05/T07，T06 观测单元为 6/0/0/0，58/58 累计 gate、真实 PostgreSQL service restart 和隔离 0.7.0 wheel probe 通过。T04 是不可达 loopback Redis 地址的真实连接失败/恢复，并非停机共享 Redis 容器。M5 job 在 wheel probe 因固定 `--expected-version 0.6.0` 与 0.7.0 候选冲突而失败；已在本地改为读取候选版本，M5 smoke/累计 gate 仍须新 head 重跑。首轮整体 3/4，不是发布门禁通过。
-- 尚未完成：修正后的最终候选四路 exact-head CI、merge-target master CI、Tag/Release/回执。独立本地 cluster 已停止；工具策略两次拒绝清理精确 `.tmp/m6-pg-b8853e7d36d6` 和 `.tmp/m6-restart-receipt-b8853e7d36d6.json`，忽略的本地临时产物仍在，未上传。
+- 首轮精确 head [CI run 36544268358](https://github.com/1040942669/legal-rag-agent/actions/runs/36544268358)：offline、M4、M6 三路 success；M6 真实 Redis/Celery JUnit 32/0/0/0 覆盖 T01-T05/T07，T06 观测单元为 6/0/0/0，58/58 累计 gate、真实 PostgreSQL service restart 和隔离 0.7.0 wheel probe 通过。T04 是不可达 loopback Redis 地址的真实连接失败/恢复，并非停机共享 Redis 容器。M5 job 在 wheel probe 因固定 `--expected-version 0.6.0` 与 0.7.0 候选冲突而失败；随后改为读取候选版本并在第二轮重跑通过。首轮整体 3/4，不是发布门禁通过。
+- 第二轮精确 head `a7f4bc5...` 的 [CI run 36546785727](https://github.com/1040942669/legal-rag-agent/actions/runs/36546785727) 四路 success；M5 0.7.0 兼容 wheel probe、M6 32/0/0/0 真实 worker JUnit、58/58 累计 gate 均通过。但这轮发生在发布前复核发现的两处风险修正之前，不能作为后续新代码的门禁。
+- 安全修正本地初验：`integration_tests/test_m6_outbox_bounded_recovery_db.py`、`test_m6_handlers_db.py`、`test_m6_job_store_db.py` 与 M3 catalog/M5 schema/M3 migration 在隔离 PostgreSQL 55436 随机数据库合计 `44 passed in 19.78s`。最终导入激活改为同事务 job lease/epoch/cancel fence、pointer/item/terminal 提交；自动重新发布默认最多 5 次并指数退避，耗尽时 `queued/delivery_unconfirmed` 可见，迟到 worker 领取会清 warning。若所有 broker 消息丢失，尚需授权运维人工恢复，不能声称无限自动续跑。
+- 安全修正后的 M0 本地基础门禁 7/7 mandatory passed，内部全量 `977 passed, 157 subtests`、JUnit 1134/0/0/0、STATE/链接/243 个 Git-candidate 文件秘密形态检查通过。按 CI 文件顺序重跑 M6 store/handler/outbox 三个数据库 suite `23 passed in 6.02s`。新门禁测试曾因误用 `scripts` 包导入得到 `1 failed, 102 passed`，改为既有文件加载方式后 `103 passed`；失败未当作通过证据。
+- 尚未完成：安全修正后的最终候选四路 exact-head CI、merge-target master CI、Tag/Release/回执。隔离本地 cluster 经 data_directory/端口/PID 三重核对后再次正常停止，`pg_isready` 为 no response；既有 5432 未触及。工具策略此前两次拒绝清理精确 `.tmp/m6-pg-b8853e7d36d6` 和 `.tmp/m6-restart-receipt-b8853e7d36d6.json`，忽略的本地临时产物仍在，未上传。
 
 ## 下一条可执行动作
 
-等待 PR #26 含 M5 wheel 修正的新精确 head 四路 CI 全绿；随后按 `MASTER_PLAN.md` §13 的 review、普通 merge、精确 master CI、Tag、Release、独立回执顺序推进。若 CI、review、schema 或测试任一门禁不满足，停在真实状态，不造发布声明。M7 不在本次范围。
+等待 PR #26 安全修正新精确 head 的四路 CI 全绿。随后按 `MASTER_PLAN.md` §13 的 review、普通 merge、精确 master CI、Tag、Release、独立回执顺序推进。若 CI、review、schema 或测试任一门禁不满足，停在真实状态，不造发布声明。M7 不在本次范围。
 
 ---
 
