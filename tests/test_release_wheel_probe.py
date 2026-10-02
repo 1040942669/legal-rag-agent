@@ -163,14 +163,14 @@ def test_m6_profile_verifies_jobs_runtime_entry_point_and_optional_extra(
     tmp_path: Path,
 ) -> None:
     wheel = _write_wheel(
-        tmp_path / "legal_rag_assistant-0.7.0-py3-none-any.whl",
-        version="0.7.0",
+        tmp_path / "legal_rag_assistant-0.7.1-py3-none-any.whl",
+        version="0.7.1",
         profile="M6",
     )
     receipt = release_probe.probe_release_wheel(wheel, profile="M6")
     assert receipt["status"] == "passed"
     assert receipt["release_profile"] == "M6"
-    assert receipt["distribution"]["version"] == "0.7.0"
+    assert receipt["distribution"]["version"] == "0.7.1"
     assert receipt["checks"]["m5_runtime_files"] == "passed"
     assert receipt["checks"]["m6_runtime_files"] == "passed"
     assert receipt["checks"]["m6_jobs_entry_point"] == "passed"
@@ -216,8 +216,8 @@ def test_m6_profile_rejects_missing_worker_contracts(
     expected_code: str,
 ) -> None:
     wheel = _write_wheel(
-        tmp_path / "legal_rag_assistant-0.7.0-py3-none-any.whl",
-        version="0.7.0",
+        tmp_path / "legal_rag_assistant-0.7.1-py3-none-any.whl",
+        version="0.7.1",
         profile="M6",
         omit_file=omit_file,
         jobs_entry_point=jobs_entry_point,
@@ -231,8 +231,8 @@ def test_m6_profile_rejects_missing_worker_contracts(
 
 def test_m6_jobs_dependency_cannot_be_unconditional(tmp_path: Path) -> None:
     wheel = _write_wheel(
-        tmp_path / "legal_rag_assistant-0.7.0-py3-none-any.whl",
-        version="0.7.0",
+        tmp_path / "legal_rag_assistant-0.7.1-py3-none-any.whl",
+        version="0.7.1",
         profile="M6",
         unconditional_dependency="celery",
     )
@@ -449,8 +449,8 @@ def test_m6_smoke_requests_installed_api_jobs_and_migration_proof(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     wheel = _write_wheel(
-        tmp_path / "legal_rag_assistant-0.7.0-py3-none-any.whl",
-        version="0.7.0",
+        tmp_path / "legal_rag_assistant-0.7.1-py3-none-any.whl",
+        version="0.7.1",
         profile="M6",
     )
     calls: list[str] = []
@@ -464,7 +464,7 @@ def test_m6_smoke_requests_installed_api_jobs_and_migration_proof(
         return {"status": "passed"}
 
     def m6_smoke(*args: Any, **kwargs: Any) -> dict[str, object]:
-        assert kwargs["expected_version"] == "0.7.0"
+        assert kwargs["expected_version"] == "0.7.1"
         calls.append("m6")
         return {
             "status": "passed",

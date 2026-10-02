@@ -57,6 +57,7 @@ def build_bounded_graph(
     *,
     checkpointer: Any,
     nodes: HarnessNodes,
+    node_wrapper: Callable[[str, Callable], Callable] | None = None,
 ):
     """Compile the single controller for M5 retrieval and generation.
 
@@ -71,7 +72,10 @@ def build_bounded_graph(
         callback = getattr(nodes, name, None)
         if not callable(callback):
             raise TypeError(f"harness node {name!r} is not callable")
-        builder.add_node(name, _validated_node(name, callback))
+        validated = _validated_node(name, callback)
+        builder.add_node(
+            name, node_wrapper(name, validated) if node_wrapper else validated
+        )
 
     entry_mapping = {name: name for name in HARNESS_NODE_NAMES}
     entry_mapping["__end__"] = END

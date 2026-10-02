@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import nullcontext
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -33,6 +34,7 @@ from .budget import (
     retry_allowed,
     retry_decision,
 )
+from .observations import HarnessObservationAdapter
 from .state import (
     HarnessState,
     checkpoint_marker,
@@ -155,6 +157,7 @@ class BoundedHarnessNodes:
     followup_planner: FollowupPlanner | None = None
     retry_unknown_external: bool = False
     fault_hook: FaultHook | None = None
+    observation_adapter: HarnessObservationAdapter | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.assistant, LegalChatAssistant):
@@ -483,7 +486,13 @@ class BoundedHarnessNodes:
             )
             try:
                 assert self.followup_planner is not None
-                output = self.followup_planner(state, retrieved)
+                with self._observed_attempt(
+                    "plan_followup",
+                    "generator",
+                    reservation,
+                    usage_client=self.followup_planner,
+                ):
+                    output = self.followup_planner(state, retrieved)
             except Exception as error:
                 decision = retry_decision(error)
                 status = (
@@ -554,7 +563,8 @@ class BoundedHarnessNodes:
             )
             self._fault("after_model_attempt_dispatched", state)
             try:
-                generated = self.assistant.generate_turn(retrieved, generate=True)
+                with self._observed_attempt("generate", "generator", reservation):
+                    generated = self.assistant.generate_turn(retrieved, generate=True)
             except Exception as error:
                 decision = retry_decision(error)
                 status = (
@@ -618,10 +628,11 @@ class BoundedHarnessNodes:
                 lease_epoch=self.lease_epoch,
             )
             try:
-                retrieved = self.assistant.retrieve_turn(
-                    prepared,
-                    max_followup_rounds=0,
-                )
+                with self._observed_attempt("retrieve", "retriever", reservation):
+                    retrieved = self.assistant.retrieve_turn(
+                        prepared,
+                        max_followup_rounds=0,
+                    )
             except Exception as error:
                 decision = self._finish_failed_external_attempt(
                     reservation,
@@ -667,12 +678,13 @@ class BoundedHarnessNodes:
                 lease_epoch=self.lease_epoch,
             )
             try:
-                items = list(
-                    self.assistant.retriever.retrieve(
-                        query,
-                        top_k=self.assistant.top_k,
+                with self._observed_attempt("retrieve", "retriever", reservation):
+                    items = list(
+                        self.assistant.retriever.retrieve(
+                            query,
+                            top_k=self.assistant.top_k,
+                        )
                     )
-                )
             except Exception as error:
                 decision = self._finish_failed_external_attempt(
                     reservation,
@@ -746,25 +758,37 @@ class BoundedHarnessNodes:
             raise ExecutionFailure(
                 code="missing_retrieval_artifact", stage="checkpoint"
             )
-        payload = self.persistence.load_node_artifact(
-            state["run_id"],
-            artifact_id,
-            expected_kind="retrieved_turn",
-            expected_hash=artifact_hash,
+        lookup = (
+            self.observation_adapter.cache_lookup(None, "retriever")
+            if self.observation_adapter
+            else nullcontext()
         )
-        return retrieved_turn_from_artifact(payload, prepared=self._prepared(state))
+        with lookup:
+            payload = self.persistence.load_node_artifact(
+                state["run_id"],
+                artifact_id,
+                expected_kind="retrieved_turn",
+                expected_hash=artifact_hash,
+            )
+            return retrieved_turn_from_artifact(payload, prepared=self._prepared(state))
 
     def _safe_result(self, state: HarnessState) -> SafeRunResult:
         artifact_id = state["verification_result_ref"]
         artifact_hash = state["verification_result_hash"]
         if artifact_id is None or artifact_hash is None:
             raise ExecutionFailure(code="missing_verified_result", stage="checkpoint")
-        payload = self.persistence.load_node_artifact(
-            state["run_id"],
-            artifact_id,
-            expected_kind="verified_result",
-            expected_hash=artifact_hash,
+        lookup = (
+            self.observation_adapter.cache_lookup(None, "verifier")
+            if self.observation_adapter
+            else nullcontext()
         )
+        with lookup:
+            payload = self.persistence.load_node_artifact(
+                state["run_id"],
+                artifact_id,
+                expected_kind="verified_result",
+                expected_hash=artifact_hash,
+            )
         return SafeRunResult(
             answer_text=payload["answer_text"],
             answer_payload=payload["answer_payload"],
@@ -847,6 +871,15 @@ class BoundedHarnessNodes:
             self.execution_input.run_id,
             self.worker_id,
             self.lease_epoch,
+        )
+
+    def _observed_attempt(
+        self, node: str, tool: str, reservation: AttemptReservation, **kwargs
+    ):
+        return (
+            self.observation_adapter.attempt(node, tool, reservation, **kwargs)
+            if self.observation_adapter
+            else nullcontext()
         )
 
     def _fault(self, point: str, state: HarnessState) -> None:

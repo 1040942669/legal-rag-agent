@@ -36,13 +36,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     from legal_rag.harness.runner import GraphRunExecutor
     from legal_rag.harness.state import HARNESS_GRAPH_VERSION
+    from legal_rag.jobs.registry import JobRegistry
+    from legal_rag.jobs.store import JobStore
+    from legal_rag.observability.config import observer_from_environment
     from legal_rag.services.run_executor import LegalChatRunExecutor
     from legal_rag.services.run_service import RunService
     from legal_rag.services.service_retrieval import PostgresAssistantFactory
     from legal_rag.services.supervisor import RunSupervisor
-    from legal_rag.jobs.registry import JobRegistry
-    from legal_rag.jobs.store import JobStore
-    from legal_rag.observability.config import observer_from_environment
     from legal_rag.storage.database import create_database_engine
     from legal_rag.storage.migrations import upgrade_database
 
@@ -74,11 +74,13 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     assistant_factory = PostgresAssistantFactory(engine)
+    job_observer = observer_from_environment()
     if settings.graph_version == HARNESS_GRAPH_VERSION:
         executor = GraphRunExecutor(
             service,
             assistant_factory,
             generate=False,
+            observer=job_observer,
         )
     else:
         executor = LegalChatRunExecutor(
@@ -97,7 +99,6 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit("LEGAL_RAG_JOB_REGISTRY_PATH must be absolute")
     job_registry = JobRegistry.from_json_file(registry_path) if registry_path else None
     job_store = JobStore(engine) if job_registry is not None else None
-    job_observer = observer_from_environment()
     app = create_app(
         service=service,
         authenticator=authenticator,

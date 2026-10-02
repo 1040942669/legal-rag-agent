@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from legal_rag.chat import LegalChatAssistant, RetrievedTurn
+from legal_rag.observability.events import Observer
 from legal_rag.services.run_executor import (
     AssistantFactory,
     ExecutionFailure,
@@ -20,6 +21,7 @@ from .budget import BudgetExhausted
 from .checkpoint import FencedPostgresSaver, checkpoint_namespace, checkpoint_pool
 from .graph import build_bounded_graph
 from .nodes import BoundedHarnessNodes, FaultHook
+from .observations import HarnessObservationAdapter
 from .state import (
     HARNESS_GRAPH_VERSION,
     HARNESS_STATE_SCHEMA_VERSION,
@@ -27,7 +29,6 @@ from .state import (
     new_harness_state,
     validate_harness_state,
 )
-
 
 FollowupPlanner = Callable[[HarnessState, RetrievedTurn], Sequence[str]]
 
@@ -47,6 +48,7 @@ class GraphRunExecutor:
     followup_planner: FollowupPlanner | None = None
     retry_unknown_external: bool = False
     fault_hook: FaultHook | None = None
+    observer: Observer | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.service, RunService):
@@ -108,6 +110,17 @@ class GraphRunExecutor:
                 stage="assistant_factory",
             )
         restore_completed_history(assistant, execution_input)
+        observation_adapter = (
+            HarnessObservationAdapter(
+                self.observer,
+                run_id=frozen.run_id,
+                session_id=frozen.session_id,
+                persistence=self.service,
+                completion_client=assistant.llm,
+            )
+            if self.observer is not None
+            else None
+        )
         nodes = BoundedHarnessNodes(
             assistant=assistant,
             execution_input=execution_input,
@@ -119,6 +132,7 @@ class GraphRunExecutor:
             followup_planner=self.followup_planner,
             retry_unknown_external=self.retry_unknown_external,
             fault_hook=self.fault_hook,
+            observation_adapter=observation_adapter,
         )
         namespace = checkpoint_namespace(
             graph_version=frozen.graph_version,
@@ -135,7 +149,13 @@ class GraphRunExecutor:
                     lease_epoch=frozen.lease_epoch,
                     namespace=namespace,
                 )
-                graph = build_bounded_graph(checkpointer=saver, nodes=nodes)
+                graph = build_bounded_graph(
+                    checkpointer=saver,
+                    nodes=nodes,
+                    node_wrapper=observation_adapter.wrap_node
+                    if observation_adapter
+                    else None,
+                )
                 final_envelope = graph.invoke(
                     {"payload": state},
                     {

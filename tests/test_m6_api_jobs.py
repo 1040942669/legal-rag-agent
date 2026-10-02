@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
 from fastapi.testclient import TestClient
 
 from legal_rag.api.app import create_app
@@ -197,3 +198,29 @@ def test_m6_observer_failure_cannot_undo_accepted_job(tmp_path: Path) -> None:
     )
     assert response.status_code == 202
     assert store.get_job("job-123", store.submissions[0]["owner_id"]) is not None
+
+
+@pytest.mark.parametrize("status", ["running", "succeeded", "failed", "cancelled"])
+def test_m6_idempotent_submission_observes_returned_durable_status(
+    tmp_path: Path, status: str
+) -> None:
+    events = []
+    client, store = _client(
+        tmp_path, job_observer=SimpleNamespace(record=events.append)
+    )
+    first = client.post(
+        "/api/v1/evaluations", json={"experiment_id": "eval-a"}, headers=_headers()
+    )
+    assert first.status_code == 202
+    existing = store.records["job-123"]
+    existing.status = status
+    # A real JobStore returns the existing row for the same idempotency key.
+    store.create_job = lambda **kwargs: existing
+    replay = client.post(
+        "/api/v1/evaluations", json={"experiment_id": "eval-a"}, headers=_headers()
+    )
+    assert replay.status_code == 202
+    assert replay.json()["status"] == status
+    assert events[-1].name == f"job.{status}"
+    assert events[-1].status == status
+    assert events[-1].context.experiment_id == "job-123"

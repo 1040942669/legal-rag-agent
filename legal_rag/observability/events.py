@@ -14,7 +14,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Mapping, Protocol
 
-
 OBSERVATION_NAMES = frozenset(
     {
         "job.queued",
@@ -97,12 +96,16 @@ NODE_NAMES = frozenset(
         "validated",
         "activated",
         "evaluation",
+        "rerank",
+        "judge",
         "other",
     }
 )
 TOOL_NAMES = frozenset(
     {
         "retriever",
+        "reranker",
+        "judge",
         "embedding",
         "generator",
         "verifier",
@@ -172,7 +175,7 @@ class Observation:
     queue_wait_ms: float | None = None
     counts: Mapping[str, int] = field(default_factory=dict)
     budget_used: Mapping[str, int] = field(default_factory=dict)
-    retry_count: int = 0
+    retry_count: int | None = 0
     cache_status: str | None = None
     evidence_ids: tuple[str, ...] = ()
     error_category: str | None = None

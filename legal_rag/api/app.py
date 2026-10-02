@@ -27,6 +27,15 @@ from sqlalchemy import and_, select, text
 from sqlalchemy.exc import SQLAlchemyError
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from legal_rag.harness.checkpoint import (
+    CheckpointerNotReady,
+    assert_postgres_checkpointer_ready,
+)
+from legal_rag.harness.state import HARNESS_GRAPH_VERSION
+from legal_rag.jobs.registry import JobRegistry
+from legal_rag.jobs.store import JobConflictError, JobContractError, JobRecord, JobStore
+from legal_rag.observability import Observation, ObservationContext, Observer
+from legal_rag.observability.config import close_observer
 from legal_rag.services.run_service import (
     ActiveRunConflictError,
     CheckpointCompatibilityError,
@@ -41,21 +50,12 @@ from legal_rag.services.run_service import (
     SessionInactiveError,
 )
 from legal_rag.services.supervisor import RunSupervisor
-from legal_rag.harness.checkpoint import (
-    CheckpointerNotReady,
-    assert_postgres_checkpointer_ready,
-)
-from legal_rag.harness.state import HARNESS_GRAPH_VERSION
-from legal_rag.jobs.registry import JobRegistry
-from legal_rag.jobs.store import JobConflictError, JobContractError, JobRecord, JobStore
-from legal_rag.observability import Observation, ObservationContext, Observer
-from legal_rag.observability.config import close_observer
 from legal_rag.storage.schema import active_snapshot_pointers, embedding_imports
 
 from .auth import AuthenticationError, ServicePrincipal, TokenAuthenticator
 from .schemas import (
-    CancelRunResponse,
     CancelJobResponse,
+    CancelRunResponse,
     EvaluationCreateRequest,
     IngestionCreateRequest,
     JobAcceptedResponse,
@@ -244,7 +244,7 @@ def create_app(
 
     app = FastAPI(
         title="Legal RAG Service",
-        version="0.7.0",
+        version="0.7.1",
         lifespan=lifespan,
         docs_url=None,
         redoc_url=None,
@@ -529,10 +529,16 @@ def create_app(
                 job_observer.record(
                     Observation(
                         context=ObservationContext(
-                            trace_id=record.job_id, job_id=record.job_id
+                            trace_id=record.job_id,
+                            job_id=record.job_id,
+                            experiment_id=(
+                                record.job_id if kind == "evaluation" else None
+                            ),
                         ),
-                        name="job.queued",
-                        status="queued",
+                        # Idempotent replay may return running or terminal work.
+                        # The observation reports that row, not a new enqueue.
+                        name=f"job.{record.status}",
+                        status=record.status,
                         counts={
                             "total": record.total,
                             "completed": record.completed,

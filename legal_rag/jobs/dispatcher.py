@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -33,7 +34,15 @@ class CeleryPublisher:
         )
 
 
-def _observe_dispatch(observer: Any | None, job_id: str, *, delivered: bool) -> None:
+def _observe_dispatch(
+    observer: Any | None,
+    record: Any,
+    *,
+    delivered: bool,
+    duration_ms: float,
+    error_category: str | None = None,
+    retry_recorded: bool = False,
+) -> None:
     if observer is None:
         return
     try:
@@ -41,11 +50,25 @@ def _observe_dispatch(observer: Any | None, job_id: str, *, delivered: bool) -> 
 
         observer.record(
             Observation(
-                context=ObservationContext(trace_id=job_id, job_id=job_id),
-                name="job.queued" if delivered else "job.retry",
-                status="queued" if delivered else "retrying",
+                context=ObservationContext(
+                    trace_id=record.job_id, job_id=record.job_id
+                ),
+                # Publishing a duplicate may happen after the business job has
+                # started or finished; delivery does not put it back in queued.
+                name="job.retry" if retry_recorded else "tool.completed",
+                status=(
+                    "succeeded"
+                    if delivered
+                    else "retrying"
+                    if retry_recorded
+                    else "failed"
+                ),
                 tool="dispatcher",
-                error_category=None if delivered else "broker_unavailable",
+                # claim_outbox increments delivery_attempts before this attempt.
+                # Recovery-row generation is not a broker publish retry count.
+                retry_count=max(0, record.attempts - 1),
+                duration_ms=duration_ms,
+                error_category=error_category,
             )
         )
     except Exception:  # noqa: BLE001 - exporter failures cannot block delivery.
@@ -75,8 +98,9 @@ def dispatch_once(
     delivered = 0
     deferred = 0
     for record in records:
+        started = time.perf_counter()
         if record.schema_version != MESSAGE_SCHEMA_VERSION:
-            store.mark_outbox_retry(
+            retry_recorded = store.mark_outbox_retry(
                 record.id,
                 dispatcher_id,
                 record.lease_epoch,
@@ -84,7 +108,14 @@ def dispatch_once(
                 delay_seconds=retry_delay_seconds,
             )
             deferred += 1
-            _observe_dispatch(observer, record.job_id, delivered=False)
+            _observe_dispatch(
+                observer,
+                record,
+                delivered=False,
+                duration_ms=(time.perf_counter() - started) * 1000,
+                error_category="validation_failed",
+                retry_recorded=retry_recorded,
+            )
             continue
         try:
             publisher.publish(
@@ -93,7 +124,7 @@ def dispatch_once(
                 task_id=f"legal-rag-job-{record.job_id}",
             )
         except Exception:  # noqa: BLE001 - do not leak broker credentials.
-            store.mark_outbox_retry(
+            retry_recorded = store.mark_outbox_retry(
                 record.id,
                 dispatcher_id,
                 record.lease_epoch,
@@ -101,7 +132,14 @@ def dispatch_once(
                 delay_seconds=retry_delay_seconds,
             )
             deferred += 1
-            _observe_dispatch(observer, record.job_id, delivered=False)
+            _observe_dispatch(
+                observer,
+                record,
+                delivered=False,
+                duration_ms=(time.perf_counter() - started) * 1000,
+                error_category="broker_unavailable",
+                retry_recorded=retry_recorded,
+            )
             continue
         if store.mark_outbox_delivered(
             record.id,
@@ -109,7 +147,12 @@ def dispatch_once(
             record.lease_epoch,
         ):
             delivered += 1
-            _observe_dispatch(observer, record.job_id, delivered=True)
+            _observe_dispatch(
+                observer,
+                record,
+                delivered=True,
+                duration_ms=(time.perf_counter() - started) * 1000,
+            )
     return DispatchReport(
         recovered=len(recovered),
         attempted=len(records),

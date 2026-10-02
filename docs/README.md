@@ -13,7 +13,7 @@
 7. [架构决策记录](../ARCHITECTURE_DECISION_LOG.md)：关键取舍、失败假设、回滚条件。
 8. [Phase 4B 技术调研](PHASE4B_RESEARCH_AND_DECISIONS.md)：reranker/observability 机制、L9 可取原则和暂缓项。
 9. [历史 Phase 执行计划](LEGAL_RAG_EXECUTION_PLAN.md)：截至 2026-09-18 的 Phase 0-5 记录，不是当前 M0-M7 路线。
-10. [M6 验收报告](../reports/refactor/M6.md) 与 [ADR-004](refactor/decisions/ADR-004-m6-batch-jobs-observability.md)：批任务、真实 broker/worker 验证、`v0.7.0` 软件发布证据和仍待独立回执的状态。
+10. [M6 验收报告](../reports/refactor/M6.md)、[观测修补报告](../reports/refactor/M6-observability-patch.md) 与 [ADR-004](refactor/decisions/ADR-004-m6-batch-jobs-observability.md)：批任务、真实 broker/worker 验证、`v0.7.0` 发布与回执证据，以及 `v0.7.1` 的实际观测修补进度。
 
 ## 文档职责
 

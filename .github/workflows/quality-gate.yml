@@ -534,8 +534,12 @@ jobs:
           integration_tests/test_m6_job_store_db.py
           integration_tests/test_m6_handlers_db.py
           integration_tests/test_m6_outbox_bounded_recovery_db.py
+          integration_tests/test_m6_harness_observation_db.py
           tests/test_m6_observability.py
           tests/test_m6_observability_config.py
+          tests/test_m6_job_observations.py
+          tests/test_m6_trace_observation.py
+          tests/test_m6_harness_observation.py
           --junitxml="${RUNNER_TEMP}/m6-worker-junit.xml"
 
       - name: Reject skipped, xfailed, or absent M6 broker tests
