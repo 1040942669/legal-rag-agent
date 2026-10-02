@@ -1,6 +1,6 @@
 # ADR-004: M6 durable batch jobs and redacted observations
 
-- Status: Accepted; v0.7.0 release and receipt verified, v0.7.1 runtime observation patch published, independent patch receipt pending
+- Status: Accepted; v0.7.0/v0.7.1 releases and independent receipts verified; M6 governance closed after receipt merge-target master CI
 - Date: 2026-10-02 (original decision 2026-09-29)
 - Affected milestone and versions: M6 / released `v0.7.0` and correctness patch `v0.7.1`
 - Base: `76a038936ddfd900f98ad8709fedcc50c07063d3` (`origin/master` after M5 finalization)
@@ -41,7 +41,7 @@ The final requirements audit found that the event schema supported rich facts bu
 
 The released v0.7.1 patch observes actual validated node/attempt boundaries and immutable artifact lookups. Run/session identifiers come from frozen execution; batch case-attempt IDs are namespaced by the validated experiment. Reserved budgets remain separate from proven client calls. Retry counts come from durable attempts, not a reset local loop. Monotonic current invocation durations and database queue wait retain different meanings. Historical cache source calls and compute durations are not counted as current work. Token components require explicit per-component provider reporting coverage; unknown components and unverified prices stay null. Failure categories are stable allowlisted values, not exception text. Local and remote sinks remain default-off/best-effort, and remote tokens, raw evidence IDs, text and secrets remain excluded.
 
-The cost is additional execution-boundary instrumentation and tests. No new database migration or dependency is required. The already published v0.7.0 annotated Tag/Release remains fixed. v0.7.1 passed its own exact-head/master gates, isolated installed-wheel proof and normal merge, and was published on 2026-10-02. Its independent documentation receipt and governance gates must still pass before M6 closes. See the [patch acceptance report](../../../reports/refactor/M6-observability-patch.md).
+The cost is additional execution-boundary instrumentation and tests. No new database migration or dependency is required. The already published v0.7.0 annotated Tag/Release remains fixed. v0.7.1 passed its own exact-head/master gates, isolated installed-wheel proof and normal merge, and was published on 2026-10-02. Independent receipt PR #29 passed its exact final-head and actual merge-target master four-job gates, then Issue #25 and Milestone 7 were closed on 2026-10-02. M6 is released; this non-recursive documentation finalization does not move the software tag or start M7. See the [patch acceptance report](../../../reports/refactor/M6-observability-patch.md).
 
 ## Rollback and replacement conditions
 

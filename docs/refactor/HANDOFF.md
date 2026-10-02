@@ -1,8 +1,25 @@
 # M6 执行交接
 
-> 当前状态以最前面的“当前事实”及 `STATE.json` 为准。后续 `v0.7.0` 回执待办、发布前候选及 M5 内容均保留为历史快照，不能把其旧待办或绿灯当作当前 `v0.7.1` 补丁的状态。
+> 当前状态以最前面的“当前事实”及 `STATE.json` 为准。后续软件已发布但回执待完成、`v0.7.0` 回执待办、发布前候选及 M5 内容均保留为历史快照，不能把其旧待办或绿灯当作当前状态。
 
-## 当前事实：v0.7.1 软件已发布，独立回执待完成
+## 当前事实：M6 软件、独立回执和治理已完成
+
+- M6 的 `execution_status` 与 milestone `status` 均为 `released`，独立回执 `receipt_status=verified`，发布剩余事项为空。[Issue #25](https://github.com/1040942669/legal-rag-agent/issues/25) 于 `2026-10-02T12:27:11Z` 以 `completed` 关闭；[Milestone 7](https://github.com/1040942669/legal-rag-agent/milestone/7) 于 `12:27:23Z` 关闭，`12:27:32Z` 核验为 open 0、closed 3。这些治理动作在精确 receipt master 门禁通过后发生。M7 在总体路线图仍为必需项，保持 `not_started`、`required=true`，只是不进入本次 M6 执行范围。
+- 独立 [回执 PR #29](https://github.com/1040942669/legal-rag-agent/pull/29) 的最终 head 为 `51cbe21a9e08b3df68a8eeed296adfb11d3a0ca7`；[CI 37003455439](https://github.com/1040942669/legal-rag-agent/actions/runs/37003455439) 精确绑定该 head，四路全部 success，于 `2026-10-02T12:08:05Z` 更新完成。PR 于 `12:10:19Z` 普通 merge 为 `7ec13709d90fad1a01b85b9558a3bb8924a0846d`，不是 squash：两父提交为软件 master `582eb8949c1150fc7a12761bd46fbda9c173ef62` 和回执 final head `51cbe21a...`。[精确 merge-target master CI 37005116491](https://github.com/1040942669/legal-rag-agent/actions/runs/37005116491) 四路全部 success，于 `12:25:27Z` 完成。
+- 首个回执候选 `359def8477a9121f2bbd62ccc97bf4c20df86e16` 的 [CI 37002990833](https://github.com/1040942669/legal-rag-agent/actions/runs/37002990833) 已于 `2026-10-02T11:53:14Z` cancelled/superseded，不是 passed。final head `51cbe21a...` 的本地 M0 文件为 ignored `.tmp/m6-v071-receipt-final-head-m0-gate.json`，`7/7` mandatory、exit 0、122887 ms；全量 `1013 passed, 157 subtests passed in 118.92s`，JUnit `1170/0/0/0`。早期真实失败与取消记录保留，不改写为成功。
+- 回执 master 的 offline/M4/M5/M6 mandatory 分别为 `25/25`、`41/41`、`51/51`、`58/58`，全部 passed、exit 0。M6 累计 gate 为 560308 ms，worker JUnit `76/0/0/0`、累计 M5 JUnit `81/0/0/0`；全量 `1013 + 157 subtests`、JUnit `1170/0/0/0`，M4 integration `79/0/0/0`。fault/worker closed-schema validator errors 均为 `[]`，绑定精确回执 master，`live_model_calls=false`。十场景及 recovery demo passed；真实 PostgreSQL 18 重启、新进程 verification、vector `0.8.6` 和 head `0007_m6_jobs_outbox` 已核验，M5 fault 回执自己的 schema head `0006_m5_recovery` 不混同为当前数据库 head。
+- 回执 master M6 artifact ID `11226250664`，API digest `sha256:35442ff5d6b44e3f63e2a62a4d4336f4bcb8ecd1d53829e64290f22d1537b2a9`；PR final-head M6 artifact ID `11224654642`，digest `sha256:449a9832b6c1b5649a293ab753730c21e5c68fd513610c27fedb0e9e598746f2`。实际回执 master M6 wheel 为 `0.7.1`、438731 bytes、101 entries，SHA-256 `4974cf563c3fdac18b8bd13ce5d18052e6e11405f31a387eba08e97f0c011708`；仓库外 installed-wheel smoke passed，13 modules、jobs CLI、head `0007_m6_jobs_outbox` 及 `source_checkout_isolated=true` 均核验。四路主制品目录为 `.tmp/m6-receipt-final-pr-ci-37003455439` 与 `.tmp/m6-v071-receipt-master-ci-37005116491`；master 三路独立交叉核验目录为 `.tmp/m6-v071-receipt-master-secondary-37005116491`。
+- 软件发布事实保持不变：PR #28 final head `d6fc26882237ca149ab38c7e944b32a260e0430b` 普通 squash 合并至 `582eb8949c1150fc7a12761bd46fbda9c173ef62`，软件精确 head/master CI `36998001012` / `36999853797` 已通过。annotated `v0.7.1` 与正式 Release `401759927` 仍固定软件目标 `582eb894...`，不改指向文档回执或最终化提交。已发布软件 master 的 wheel 仍为 438489 bytes，SHA-256 `00a37901b690c8a2059f930c63310de431b2eef7c591c89a40c31580f6259aa3`；不被上述回执文档构建 wheel 替代。旧 `v0.7.0` 的 31 个原始 M6 字段及 `initial_release_history`、M5 `v0.6.0` 均完整保留。
+
+## 当前唯一剩余动作：非递归治理最终化自身验证后停止
+
+当前分支 `codex/m6-v071-finalization` 从 fresh `origin/master` `7ec13709d90fad1a01b85b9558a3bb8924a0846d` 创建，该 SHA 只是已核验回执 master 和此次最终化基线，不是本次尚未提交文档自己的 SHA。冻结本次唯一最终化提交后再读取实际 candidate SHA，运行适用本地门禁和自身精确 head 四路 CI；按当时 review/保护规则正常合并自身 PR，再核验自身精确 merge-target master 四路 CI，然后停止。当前文档中的未来 finalization SHA、PR、merge、CI URL 均为 null，门禁状态为 `not_run`，没有提前声明绿灯。
+
+这是一次非递归最终化，不为上述最终化再生成跟进回执，不发布新版本或新 Release，不再创建 M5 回执，不移动已发布 Tag，不启动 M7。测试期间不得修改任何 tracked 候选文件，包括文档，因为 M2 身份包含整个 tracked `diff_hash`。真实/付费模型、远端 Langfuse 实发、私人资料、未授权语料和生产部署仍未启用。
+
+---
+
+## 历史：v0.7.1 软件已发布、独立回执待完成快照
 
 - 当前里程碑仍为 M6，状态 `released_receipt_pending`，不是整个 M6 已完成。`v0.7.1` 运行时观测补全软件已通过精确软件 head 和发布目标 master 四路 CI，annotated Tag 与正式 Release 已远端核验；独立回执自身门禁、合并及治理关闭尚未发生。
 - 软件 [PR #28](https://github.com/1040942669/legal-rag-agent/pull/28) final head 为 `d6fc26882237ca149ab38c7e944b32a260e0430b`；[精确 candidate CI 36998001012](https://github.com/1040942669/legal-rag-agent/actions/runs/36998001012) 的 offline、M4 service、M5 fault、M6 worker 全部 success。PR 于 `2026-10-02T11:13:49Z` 普通 squash 合并为 `582eb8949c1150fc7a12761bd46fbda9c173ef62`；该精确 push 的 [master CI 36999853797](https://github.com/1040942669/legal-rag-agent/actions/runs/36999853797) 亦为 4/4 success。软件 head 与 merge target 的 tree 同为 `3e0f3aa4d3c012bc868e4f495b23edbaaa225e42`。
@@ -11,7 +28,7 @@
 - `STATE.json` 的当前 M6 primary 字段及 `last_verified_release` 指向 `v0.7.1`；旧 `v0.7.0` 软件、测试、发布和 PR #27 独立回执字段完整保留在 `initial_release_history`，其完整证据仍在 `receipts/M6.json`。M5 `v0.6.0` 与初版 `v0.7.0` 的 Tag、目标和 Release 均保持不变，不为 M5 新建回执。
 - [Issue #25](https://github.com/1040942669/legal-rag-agent/issues/25) 与 GitHub [Milestone 7](https://github.com/1040942669/legal-rag-agent/milestone/7) 在 `2026-10-02T11:31:17Z` 核验仍 open，Milestone 有 1 个 open issue。在新独立回执通过自身门禁、正常合并且精确 receipt merge-target master CI 成功之前不关闭治理事项。M7 未开始。
 
-## 当前发布证据与下一条可执行动作
+## 历史：软件发布证据与当时下一条可执行动作
 
 - 软件发布目标 master 的 M6 累计 gate 为 `58/58` mandatory passed、exit 0、464392 ms；合并 worker/观测专项 JUnit `76/0/0/0`，156.040 s。M6-T06 为 `42 passed in 23.05s`，M6-T07 合计 `4 passed in 41.49s`，明确包含 1 个真实 broker 并发用例和 3 个真实 PostgreSQL graph 观测用例，不把全部 4 个称为 broker 用例。M5 fault 与 M6 worker closed-schema validators errors `[]`，回执绑定精确 `582eb894...`，`live_model_calls=false`。
 - 同一 master run 的 offline/M2、M4、M5 gate 分别为 `25/25`、`41/41`、`51/51`；各路全量 `1013 passed, 157 subtests passed`，JUnit `1170/0/0/0`。独立 M4 integration 为 `79/0/0/0`，M5 fault 为 `81/0/0/0`；M5 十场景与 recovery demo 均 passed。实际 PostgreSQL service restart、新进程 verification 和独立应用重启通过，不用单元 fake 冒充这些机制的证据。
