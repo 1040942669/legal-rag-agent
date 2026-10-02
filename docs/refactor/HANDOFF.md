@@ -1,8 +1,32 @@
 # M6 执行交接
 
-> 当前状态以本节和 `STATE.json` 为准。下方的 M6 发布前候选与 M5 交接均为历史快照，其中“尚无 M6 Tag/Release”或“M6 未开始”等陈述不再表示当前状态。
+> 当前状态以最前面的“当前事实”及 `STATE.json` 为准。后续 `v0.7.0` 回执待办、发布前候选及 M5 内容均保留为历史快照，不能把其旧待办或绿灯当作当前 `v0.7.1` 补丁的状态。
 
-## 当前事实：软件已发布，独立回执待完成
+## 当前事实：M6 运行时观测补全进行中
+
+- 当前里程碑仍为 M6，状态 `in_progress`。`v0.7.0` 软件与其独立回执已经完成；全计划复核确认 `MASTER_PLAN.md` §11.6 的实际运行观测尚有缺口，因此不关闭治理事项，也不把旧门禁通过等同于完整 M6 完成。
+- 当前工作分支 `codex/m6-observation-completion` 从已核验的 `origin/master` `0dcafb87dd8537d66f6486febf73fd0d1258b0ed` 创建。此次状态更新时 HEAD 仍为该基线，运行时代码、测试及交接文档存在未提交修改；补丁尚无 commit/push/PR、精确 candidate CI、merge、Tag/Release 或独立回执的完成声明。
+- 软件补丁计划为 `v0.7.1`，用于完成 M6 运行时观测及真实性修正，不是只为文档生成软件版本。已经发布的 `v0.7.0` 和 M5 `v0.6.0` 保留原 Tag、目标提交和 Release，不移动或重复发布。
+- 已确认的问题是：typed Observation 的预算、重试、缓存、证据、模型用量与耗时字段主要只在人工构造的测试中出现；M2 工件和 M5 在线 run 缺少统一运行关联；幂等 API 重放可能把既有 running/succeeded/failed/cancelled job 记录成 queued。补丁正在连接实际调用点与可信持久事实，并增加真实运行路径断言。
+- 当前改动包括 `legal_rag/jobs/dispatcher.py`、`handlers.py`、API 装配与状态事件、M5 graph/node/runner 观测、M2/local Trace 关联、provider 用量可用性以及对应观测回归。当前文档改动为 `STATE.json`、本文件、`receipts/M6.json` 和 `receipts/README.md`；其它候选说明、版本与最终证据由主执行流程收口。
+- [Issue #25](https://github.com/1040942669/legal-rag-agent/issues/25) 与 GitHub [Milestone 7](https://github.com/1040942669/legal-rag-agent/milestone/7) 于 `2026-10-02` 只读复核仍 open，Milestone 有 1 个 open issue。两者在完整补丁和独立回执通过之前保持 open；M7 未开始，也不在本次授权范围。
+
+## 已核验的 v0.7.0 软件与独立回执
+
+- 原软件 [PR #26](https://github.com/1040942669/legal-rag-agent/pull/26) final head `b9400ab289618707a53ee6b14f6ac1cee4af2ee1` 和 release target `28517b6f323253baf638ba60c887d10630dd0bf1` 各自的四路 CI 均成功。annotated `v0.7.0` object `f40715c16e90b429a7c49a6347092114fefc787d` 固定 peeled 到该软件提交，正式 [Release](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.7.0) 已于 `2026-09-29T10:39:52Z` 发布，非 draft、非 prerelease。
+- 独立回执 [PR #27](https://github.com/1040942669/legal-rag-agent/pull/27) 的 final head `5d20b4256582b36159333b9998844d148b104d01` 经 [CI 36559972128](https://github.com/1040942669/legal-rag-agent/actions/runs/36559972128) 四路 success，于 `2026-09-29T11:21:13Z` 普通 merge 为 `0dcafb87dd8537d66f6486febf73fd0d1258b0ed`。该精确 merge-target [master CI 36561210905](https://github.com/1040942669/legal-rag-agent/actions/runs/36561210905) 亦为 offline、M4 service、M5 fault、M6 worker 四路 success；上述 GitHub 元数据在 `2026-10-02` 再次只读核验。
+- final receipt head/master artifact 均有 `58/58` mandatory passed、exit 0、worker JUnit `41/0/0/0`，以及 `0.7.0` wheel 隔离 smoke passed。master M6 artifact digest 为 `sha256:1d1cf3e74c428b8ac82bfee22fe80bb6404c19615993db3d4d9c8929ca70e898`，内部 gate JSON SHA-256 为 `b963528a81f26ee3b9d1253c071988c2e9e2132fed2f2214fd14485d4c3a7df7`；下载的 worker 回执精确绑定 `0dcafb87...`。完整 final-head/master 摘要及内部文件哈希补入 [M6 回执](receipts/M6.json)。这些是历史已发布机制的证据，不覆盖新的未提交补丁。
+- 修正了历史回执中软件 master M5 artifact digest 少一个末尾字符的抄写错误，GitHub Actions API 核验正确值为 `sha256:1bfbc884675b77bcf9e62df295431e318658ca0cd75c1b893821d15348a94d4c`；没有改动软件、测试结果或任何远端发布对象。
+
+## 当前验证边界与下一条可执行动作
+
+新的 `v0.7.1` 定向 jobs/API/M2 回归 `40 passed in 33.57s`，隔离 PostgreSQL durable 回归 `27 passed in 8.23s`，旧位置参数与打包检查 `8 passed in 0.54s`。本地 commit 前真实 wheel 的 M6 隔离 smoke passed，不是最终 CI wheel。此前全量门禁的旧生成元数据、可编辑安装文件清单及运行期间 tracked diff_hash 漂移失败均保留在 [补丁报告](../../reports/refactor/M6-observability-patch.md)。最终全量门禁待冻结代码与文档后运行，测试期间不得修改任何 Git 候选文件。远端补丁 CI/Release 尚未运行，不得复制旧 `58/58`、`41/0/0/0` 或旧 wheel SHA 作为补丁通过证据。
+
+先完成 jobs/M2/M5 观测的实际调用点回归，检查真实关联、预算、重试、缓存、证据、耗时及模型用量的 unknown/null 语义，再执行适用的本地累计门禁并冻结候选。随后按 §13 正常 commit/push/PR、精确 head 四路 CI、review/保护规则检查、普通 merge、精确 master CI、annotated `v0.7.1` 和 Release、独立回执及治理收口的顺序推进。任一门禁失败记录真实状态和失败证据；不强推、不 admin merge、不绕过 review。真实或付费模型、远端 Langfuse 实发、私人资料和未授权语料均未获启用。完成 M6 后停止，不进入 M7。
+
+---
+
+## 历史：v0.7.0 软件已发布，独立回执待完成
 
 - M6 软件状态为 `released_receipt_pending`，不是发布失败，也尚不能把独立回执和 Issue/Milestone 治理写作完成。M6 从已核验的 M5 finalization `origin/master` `76a038936ddfd900f98ad8709fedcc50c07063d3` 开始；M5 `v0.6.0` Tag/Release 保持不变。
 - 软件分支 `codex/m6-async-jobs` 的 [PR #26](https://github.com/1040942669/legal-rag-agent/pull/26) 最终 head 为 `b9400ab289618707a53ee6b14f6ac1cee4af2ee1`；[精确 head CI 36553279892](https://github.com/1040942669/legal-rag-agent/actions/runs/36553279892) 的 offline、M4 service、M5 fault、M6 worker 四路全部成功。PR 于 `2026-09-29T10:19:15Z` 普通 squash 合并，实际 merge commit 为 `28517b6f323253baf638ba60c887d10630dd0bf1`。该精确 master commit 的 [CI 36554828645](https://github.com/1040942669/legal-rag-agent/actions/runs/36554828645) 同样四路全部成功。

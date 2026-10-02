@@ -29,6 +29,11 @@ class CompletionUsage:
     total_tokens: int = 0
     token_usage_calls: int = 0
     latency_ms: float = 0.0
+    # Component coverage is separate from aggregate usage. Missing provider
+    # fields must not become a falsely complete zero in execution telemetry.
+    input_usage_calls: int = 0
+    output_usage_calls: int = 0
+    total_usage_calls: int = 0
 
     def record_tokens(
         self,
@@ -48,6 +53,9 @@ class CompletionUsage:
         self.output_tokens += completion
         self.total_tokens += total
         self.token_usage_calls += 1
+        self.input_usage_calls += int(input_tokens is not None)
+        self.output_usage_calls += int(output_tokens is not None)
+        self.total_usage_calls += int(total_tokens is not None)
 
     def snapshot(self) -> dict[str, int | float]:
         return {

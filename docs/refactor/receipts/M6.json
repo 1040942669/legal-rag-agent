@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "record_kind": "verified_software_release_pending_independent_receipt",
+  "record_kind": "verified_software_release_and_independent_receipt_milestone_in_progress",
   "milestone_id": "M6",
   "version": "v0.7.0",
   "repository": "1040942669/legal-rag-agent",
@@ -63,12 +63,99 @@
       "isolated_wheel_smoke": "passed"
     }
   },
-  "receipt_final_sha": null,
-  "receipt_final_ci_url": null,
-  "receipt_merge_sha": null,
-  "receipt_pr_merged_at": null,
-  "receipt_master_ci_url": null,
-  "receipt_master_ci_sha": null,
+  "receipt_pr_state": "merged",
+  "receipt_pr_is_draft": false,
+  "receipt_final_sha": "5d20b4256582b36159333b9998844d148b104d01",
+  "receipt_final_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36559972128",
+  "receipt_final_ci_event": "pull_request",
+  "receipt_final_ci_status": "success",
+  "receipt_final_ci_jobs_succeeded": 4,
+  "receipt_final_ci_jobs_total": 4,
+  "receipt_final_ci_artifacts": {
+    "offline": {
+      "id": 11029539340,
+      "name": "m2-quality-gate-5d20b4256582b36159333b9998844d148b104d01-1",
+      "digest": "sha256:523ad8a2784f17d6e9155fee527fcb116eef968925f266a722d3e56a334c0c23"
+    },
+    "m4_service": {
+      "id": 11028429434,
+      "name": "m4-service-5d20b4256582b36159333b9998844d148b104d01-1",
+      "digest": "sha256:dc5a0c53a9fdaf7c3b1b1cd23ddd3acb12781588c0857c345bbb28a5c7c6cf44"
+    },
+    "m5_fault": {
+      "id": 11030295187,
+      "name": "m5-fault-5d20b4256582b36159333b9998844d148b104d01-1",
+      "digest": "sha256:2396fddc878c1bdf1e2a7b7106f7e08892569d9761fbb58075f47965857586f2"
+    },
+    "m6_worker": {
+      "id": 11030025634,
+      "name": "m6-worker-5d20b4256582b36159333b9998844d148b104d01-1",
+      "digest": "sha256:2f4b5c1f66f4cd7af10ea36fd9ac34831187770864d82fabbaf9186343b3360e",
+      "worker_junit_sha256": "7222e86425e96356cca24a488e3c9199e7624c8fb48b36472758009412aac27c",
+      "worker_receipt_sha256": "6703299a2225ce1aebd015d0fe1dd224054a2775658ffc8fe95cae05779dd335",
+      "gate_json_sha256": "7fd3540308c00cb4fe59850bef75388551f46ba16abf532c779af1ee4c21d1e6",
+      "wheel_probe_receipt_sha256": "c6ddcd7983e82a966e66044f944d4c6c4272465412d8b75d54501e9a086af43f",
+      "wheel_sha256": "8ce050e435ddb9e8af1dffb9b2224710efc896465cce34cd52863a0f5a4044de",
+      "wheel_size_bytes": 429714,
+      "worker_junit_tests": 41,
+      "worker_junit_failures": 0,
+      "worker_junit_errors": 0,
+      "worker_junit_skipped": 0,
+      "gate_mandatory_passed": 58,
+      "gate_mandatory_total": 58,
+      "gate_exit_code": 0,
+      "gate_duration_ms": 351833,
+      "live_model_calls": false,
+      "isolated_wheel_smoke": "passed"
+    }
+  },
+  "receipt_merge_sha": "0dcafb87dd8537d66f6486febf73fd0d1258b0ed",
+  "receipt_pr_merged_at": "2026-09-29T11:21:13Z",
+  "receipt_master_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36561210905",
+  "receipt_master_ci_sha": "0dcafb87dd8537d66f6486febf73fd0d1258b0ed",
+  "receipt_master_ci_event": "push",
+  "receipt_master_ci_status": "success",
+  "receipt_master_ci_jobs_succeeded": 4,
+  "receipt_master_ci_jobs_total": 4,
+  "receipt_master_ci_artifacts": {
+    "offline": {
+      "id": 11030525726,
+      "name": "m2-quality-gate-0dcafb87dd8537d66f6486febf73fd0d1258b0ed-1",
+      "digest": "sha256:e20d894308c4e93f9b14f00db2b429b51026819baf60529e2805d8cf847cdbef"
+    },
+    "m4_service": {
+      "id": 11030786074,
+      "name": "m4-service-0dcafb87dd8537d66f6486febf73fd0d1258b0ed-1",
+      "digest": "sha256:16f001646a2b9b8d1bb223cfb74aa8b54a6e1aad22564cb8327bbec5d18f2e88"
+    },
+    "m5_fault": {
+      "id": 11029593690,
+      "name": "m5-fault-0dcafb87dd8537d66f6486febf73fd0d1258b0ed-1",
+      "digest": "sha256:681e863b0d7a54fb0191f8d6de41ca86e015ea41c630cbca58ea76d26110342d"
+    },
+    "m6_worker": {
+      "id": 11029943364,
+      "name": "m6-worker-0dcafb87dd8537d66f6486febf73fd0d1258b0ed-1",
+      "digest": "sha256:1d1cf3e74c428b8ac82bfee22fe80bb6404c19615993db3d4d9c8929ca70e898",
+      "worker_junit_sha256": "b1183c425ce55d7ba697484dd49c19b666c26238a9addf6e4b5c75ce2bff4bf0",
+      "worker_receipt_sha256": "934bfe091a5e539536d4dc19f6dde15862a97689b3e3354ae55ed681712b0697",
+      "gate_json_sha256": "b963528a81f26ee3b9d1253c071988c2e9e2132fed2f2214fd14485d4c3a7df7",
+      "wheel_probe_receipt_sha256": "92f6d9239c7490a5a0b2d5cdb114301c2111776b1d20097476635ad950d89c3e",
+      "wheel_sha256": "2d094586d13692948d436ce4899a2f5225c4ca8208be73f9ba7fa35cfaebb9c6",
+      "wheel_size_bytes": 429714,
+      "worker_junit_tests": 41,
+      "worker_junit_failures": 0,
+      "worker_junit_errors": 0,
+      "worker_junit_skipped": 0,
+      "gate_mandatory_passed": 58,
+      "gate_mandatory_total": 58,
+      "gate_exit_code": 0,
+      "gate_duration_ms": 458589,
+      "live_model_calls": false,
+      "isolated_wheel_smoke": "passed"
+    }
+  },
+  "receipt_verified_at": "2026-10-02T10:17:09Z",
   "issue_url": "https://github.com/1040942669/legal-rag-agent/issues/25",
   "issue_state": "open",
   "issue_closed_at": null,
@@ -137,7 +224,7 @@
     "m5_fault": {
       "id": 11027821699,
       "name": "m5-fault-28517b6f323253baf638ba60c887d10630dd0bf1-1",
-      "digest": "sha256:1bfbc884675b77bcf9e62df295431e318658ca0cd75c1b893821d15348a94d4"
+      "digest": "sha256:1bfbc884675b77bcf9e62df295431e318658ca0cd75c1b893821d15348a94d4c"
     },
     "m6_worker": {
       "id": 11028207157,
@@ -159,7 +246,7 @@
   "release_asset_count": 0,
   "published_at": "2026-09-29T10:39:52Z",
   "verified_at": "2026-09-29T10:43:42Z",
-  "verification_method": "GitHub CLI and Release API confirmed the published non-draft, non-prerelease release. Git remote refs and Git Data API confirmed the annotated tag object and exact peeled commit. GitHub Actions API confirmed successful exact-head software PR, exact release-target master, and first independent receipt PR candidate runs, each with four jobs. Artifact digests came from GitHub Actions; downloaded M6 worker reports and wheel files were hashed locally. Final receipt PR head/merge, receipt merge-target master CI, and governance closure remain pending.",
+  "verification_method": "GitHub CLI and Release API confirmed the published non-draft, non-prerelease release. Git remote refs and Git Data API confirmed the annotated tag object and exact peeled commit. GitHub Actions API confirmed successful exact-head software PR, exact release-target master, first receipt candidate, final receipt PR head and receipt merge-target master runs, each with four jobs. Artifact digests came from GitHub Actions; downloaded M6 worker reports and wheel files were hashed locally. On 2026-10-02, GitHub PR and Actions APIs reconfirmed PR #27 final head, normal merge and both exact-head four-job runs. Issue #25 and Milestone 7 remain open because the full M6 runtime observation requirements are being completed in a software patch.",
   "acceptance_report": "reports/refactor/M6.md",
   "package_evidence": {
     "version": "0.7.0",
@@ -220,8 +307,24 @@
     "Automatic outbox recovery creates at most five rows per job, including the initial row. A pending row can still retry broker publication. Exhausted queued jobs show delivery_unconfirmed and require authorized operator reconciliation if all broker messages were lost.",
     "Cancellation is best effort at item boundaries and does not undo an external call already made.",
     "Langfuse remote export is opt-in and was not sent to a live service. Provider-free fixtures are not live-model quality, current-law coverage, legal correctness, production identity, capacity, or disaster-recovery evidence.",
+    "The v0.7.0 tests prove observation serialization, redaction and failure isolation but not all production runtime fields required by MASTER_PLAN section 11.6. Correlated M2/M5 telemetry, real budget/retry/cache/evidence/model-usage/duration facts and truthful idempotent status events require the pending v0.7.1 patch.",
     "Alembic 0007 downgrade rejects nonempty M6 job history. Preserve PostgreSQL state and use a planned forward repair for valuable jobs; deleting Redis or database volumes is not rollback evidence."
   ],
-  "receipt_status": "pending_final_receipt_head_ci_and_merge",
-  "note": "The v0.7.0 software release and the first independent receipt PR #27 candidate are verified. This documentation update changes the PR head, so its own exact-head four-job CI must pass before normal merge. The receipt merge-target master CI and subsequent Issue #25/Milestone 7 closure also remain pending. Those future objects are null or open here. Do not move the v0.7.0 tag or create another release."
+  "receipt_status": "verified_v0_7_0_receipt_milestone_in_progress",
+  "milestone_completion": {
+    "status": "in_progress",
+    "planned_patch_version": "v0.7.1",
+    "branch": "codex/m6-observation-completion",
+    "baseline_sha": "0dcafb87dd8537d66f6486febf73fd0d1258b0ed",
+    "reason": "A full-plan audit identified missing runtime observations and false queued telemetry on idempotent replay despite the existing 58-check gate passing.",
+    "tests_status": "not_run",
+    "candidate_sha": null,
+    "pr_url": null,
+    "merge_sha": null,
+    "master_ci_url": null,
+    "tag": null,
+    "release_url": null,
+    "receipt_status": "not_started"
+  },
+  "note": "This record preserves the verified v0.7.0 software release and completed independent receipt PR #27, including its final-head and exact merge-target master CI. Full M6 remains in_progress while a real software patch planned as v0.7.1 completes section 11.6 runtime observations. The old passing evidence does not validate uncommitted patch code. Issue #25 and Milestone 7 remain open. The published v0.7.0 and v0.6.0 tags are not moved; M7 is not started. Patch tests, PR, merge, Release and its own independent receipt must be recorded only after they occur."
 }

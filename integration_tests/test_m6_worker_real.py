@@ -30,7 +30,6 @@ from legal_rag.jobs.worker import WorkerSettings, build_celery_app
 from legal_rag.storage.catalog import PostgresLegalCatalogRepository
 from legal_rag.storage.schema import snapshot_activation_events, snapshot_chunks
 
-
 _SCENARIOS = frozenset({"M6-T01", "M6-T02", "M6-T03", "M6-T04", "M6-T05", "M6-T07"})
 _ROOT = Path(__file__).resolve().parents[1]
 
@@ -591,6 +590,24 @@ def test_m6_t07_parallel_progress(
         row["job_id"] == fast.job_id
         and row["name"] == "job.progress"
         and row["counts"]["completed"] >= 1
+        for row in rows
+    )
+    assert any(
+        row["job_id"] == fast.job_id
+        and row["name"] == "job.succeeded"
+        and isinstance(row["duration_ms"], (int, float))
+        and row["duration_ms"] >= 0
+        and row["retry_count"] == 0
+        for row in rows
+    )
+    assert any(
+        row["job_id"] == fast.job_id
+        and row["experiment_id"] == fast.job_id
+        and isinstance(row["run_id"], str)
+        and row["name"] == "node.completed"
+        and row["node"] == "retrieve"
+        and row["evidence_ids"]
+        and row["budget_used"]["model_attempts"] == 0
         for row in rows
     )
     _receipt(

@@ -6,14 +6,14 @@
     "full_name": "1040942669/legal-rag-agent",
     "observed_default_branch": "master",
     "observed_baseline_commit": "61f1065fc6d5678d0d57114e2e361294d04906b4",
-    "observed_on": "2026-09-29",
-    "workspace_head": "09bc3713c901e9ea11f48cda0fdb6b3ec441ae2b",
-    "workspace_head_note": "This is the first independent M6 receipt PR #27 candidate, based on verified software release target 28517b6f323253baf638ba60c887d10630dd0bf1. Exact-head CI 36558052677 passed all four jobs. The subsequent documentation update cannot self-reference its own final head and requires fresh exact-head CI, normal merge and master CI. The M6 software branch was based on verified origin/master 76a038936ddfd900f98ad8709fedcc50c07063d3 after M5 PR #24 and master CI 36504995613.",
-    "workspace_branch": "codex/m6-release-receipt",
-    "workspace_dirty": false,
+    "observed_on": "2026-10-02",
+    "workspace_head": "0dcafb87dd8537d66f6486febf73fd0d1258b0ed",
+    "workspace_head_note": "M6 observation-completion patch branch starts from verified receipt PR #27 merge commit 0dcafb87dd8537d66f6486febf73fd0d1258b0ed; exact master CI 36561210905 passed four jobs. The v0.7.0 software release and independent receipt are verified, but runtime observation requirements in MASTER_PLAN section 11.6 remain incomplete. Current uncommitted code and documentation work plans v0.7.1; no patch candidate, CI, merge, tag or release is claimed yet.",
+    "workspace_branch": "codex/m6-observation-completion",
+    "workspace_dirty": true,
     "remote_tags_checked": true
   },
-  "execution_status": "released_receipt_pending",
+  "execution_status": "in_progress",
   "active_milestone": "M6",
   "last_verified_release": {
     "milestone_id": "M6",
@@ -30,7 +30,7 @@
     "allow_live_model_calls": false,
     "allow_production_deployment": false,
     "allow_force_push": false,
-    "remote_write_scope": "M6 commit, push, PR, normal merge and v0.7.0 release are authorized only when required gates and repository rules pass; no force push or review bypass"
+    "remote_write_scope": "M6 commit, push, PR, normal merge and software release, including the v0.7.1 observation-completion patch, are authorized only when required gates and repository rules pass; no force push or review bypass; do not move published v0.7.0 or v0.6.0 tags or start M7"
   },
   "stage_status_values": [
     "not_started",
@@ -739,17 +739,26 @@
     {
       "id": "M6",
       "name": "任务与观测",
-      "planned_version": "v0.7.0",
+      "planned_version": "v0.7.1",
+      "initial_planned_version": "v0.7.0",
       "required": true,
-      "status": "released_receipt_pending",
-      "branch": "codex/m6-async-jobs",
+      "status": "in_progress",
+      "branch": "codex/m6-observation-completion",
+      "initial_software_branch": "codex/m6-async-jobs",
       "receipt_branch": "codex/m6-release-receipt",
       "receipt_path": "docs/refactor/receipts/M6.json",
-      "receipt_status": "pending_final_receipt_head_ci_and_merge",
+      "receipt_status": "verified_v0_7_0_receipt_milestone_in_progress",
       "receipt_pr_url": "https://github.com/1040942669/legal-rag-agent/pull/27",
       "receipt_candidate_sha": "09bc3713c901e9ea11f48cda0fdb6b3ec441ae2b",
       "receipt_candidate_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36558052677",
-      "receipt_merge_sha": null,
+      "receipt_final_sha": "5d20b4256582b36159333b9998844d148b104d01",
+      "receipt_final_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36559972128",
+      "receipt_merge_sha": "0dcafb87dd8537d66f6486febf73fd0d1258b0ed",
+      "receipt_merged_at": "2026-09-29T11:21:13Z",
+      "receipt_master_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36561210905",
+      "receipt_master_ci_sha": "0dcafb87dd8537d66f6486febf73fd0d1258b0ed",
+      "receipt_final_ci_m6_artifact_digest": "sha256:2f4b5c1f66f4cd7af10ea36fd9ac34831187770864d82fabbaf9186343b3360e",
+      "receipt_master_ci_m6_artifact_digest": "sha256:1d1cf3e74c428b8ac82bfee22fe80bb6404c19615993db3d4d9c8929ca70e898",
       "issue_state": "open",
       "milestone_state": "open",
       "issue_url": "https://github.com/1040942669/legal-rag-agent/issues/25",
@@ -767,6 +776,7 @@
       "remote_release_verified": true,
       "tests": {
         "status": "passed",
+        "scope": "Historical v0.7.0 software and receipt evidence only; these passing checks do not prove the pending v0.7.1 runtime observation completion.",
         "passed": 58,
         "failed": 0,
         "skipped": 0,
@@ -822,15 +832,63 @@
         "receipt_candidate_ci_m4_artifact_digest": "sha256:0873e6956e29e8fd57422865bcb49494a6dd7c713a987fe34be8d0e72129297d",
         "receipt_candidate_ci_m5_artifact_digest": "sha256:7afa7060868770689f7a26bc31c99a1856d3108b46ee18317dab604777cb6471",
         "receipt_candidate_ci_m6_artifact_digest": "sha256:3baa81bdd9a8a5669a72598d25398b7b5dc83ce2ff374c1781ccf313555b53dc",
+        "receipt_final_ci_status": "passed_on_exact_final_receipt_head",
+        "receipt_final_ci_sha": "5d20b4256582b36159333b9998844d148b104d01",
+        "receipt_final_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36559972128",
+        "receipt_final_ci_jobs": "4/4 success: offline, M4 service, M5 fault injection, M6 worker",
+        "receipt_master_ci_status": "passed_on_exact_receipt_merge_commit",
+        "receipt_master_ci_sha": "0dcafb87dd8537d66f6486febf73fd0d1258b0ed",
+        "receipt_master_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36561210905",
+        "receipt_master_ci_jobs": "4/4 success: offline, M4 service, M5 fault injection, M6 worker",
+        "receipt_master_m6_gate": "58/58 mandatory passed, 0 failed, exit 0",
+        "receipt_master_m6_worker_junit": "41/0/0/0",
+        "receipt_master_m6_wheel": "0.7.0 isolated install and smoke passed",
         "post_fence_local_postgresql_regression": "44 passed in 19.78s",
         "post_fence_local_ci_order_m6_database": "24 passed in 5.94s after targeted-claim hygiene test",
         "post_fence_local_targeted_unit": "110 passed in 1.07s",
         "post_fence_local_offline": "977 passed, 157 subtests, JUnit 1134/0/0/0; before targeted-claim hygiene test",
         "post_fence_local_m0_gate": "7/7 mandatory passed, second run 109356 ms; before targeted-claim hygiene test"
       },
+      "observation_completion_patch": {
+        "version": "v0.7.1",
+        "status": "in_progress",
+        "branch": "codex/m6-observation-completion",
+        "baseline_sha": "0dcafb87dd8537d66f6486febf73fd0d1258b0ed",
+        "plan_requirement": "MASTER_PLAN section 11.6 runtime correlation and execution facts",
+        "confirmed_gaps": [
+          "Runtime observations omit budget, retry, cache, evidence, model-usage and duration facts that exist only in synthetic serializer tests or separate artifacts.",
+          "Idempotent API replay can emit a false queued event for an existing task in another durable status.",
+          "M5 online runs and M2 case artifacts are not connected to the common observation correlation contract."
+        ],
+        "tests_status": "targeted_passed_final_frozen_gate_pending",
+        "local_validation": {
+          "targeted_jobs_api_m2": "40 passed in 33.57s",
+          "durable_postgresql": "27 passed in 8.23s, isolated PostgreSQL 18",
+          "compatibility_and_packaging": "8 passed in 0.54s after positional compatibility regression and metadata repair",
+          "wheel_smoke": "local precommit M6 wheel 0.7.1 isolated smoke passed; not final CI package",
+          "failed_gate_reports": [
+            ".tmp/m6-observation-m0-gate.json: stale ignored 0.7.0 metadata",
+            ".tmp/m6-observation-frozen-m0-gate.json: same stale metadata; retry stopped and cause diagnosed",
+            ".tmp/m6-observation-resolved-m0-gate.json: editable distribution file inventory lacks migrations",
+            ".tmp/m6-observation-final-m0-gate.json: M2 resume rejects changed tracked diff_hash during documentation editing"
+          ],
+          "final_offline_gate": "pending on frozen candidate; failures preserved, no assertions weakened"
+        },
+        "candidate_sha": null,
+        "pr_url": null,
+        "final_pr_ci_url": null,
+        "merge_sha": null,
+        "master_ci_url": null,
+        "tag": null,
+        "release_url": null,
+        "receipt_status": "not_started",
+        "live_model_calls": 0
+      },
       "release_requirements_remaining": [
-        "Final documentation receipt PR head must pass all four exact-head CI jobs and be normally merged after current review/protection checks",
-        "Exact receipt merge-target master CI must pass before closing Issue #25 and Milestone 7 and finalizing governance facts"
+        "Complete truthful runtime observations and production-call-point regressions for jobs, M2 artifacts and M5 runs; preserve null unknown provider usage and current-versus-source cache accounting.",
+        "Run applicable local cumulative gates, freeze the v0.7.1 candidate, pass all four exact-head CI jobs, and normally merge after current review/protection checks.",
+        "Verify the exact patch merge-target master CI, annotated v0.7.1 tag, published Release and independent documentation receipt without moving v0.7.0.",
+        "Close Issue #25 and Milestone 7 only after the complete M6 implementation and patch receipt gates pass; then record governance finalization and stop before M7."
       ],
       "blockers": []
     },
@@ -859,5 +917,5 @@
       "blockers": []
     }
   ],
-  "next_action": "Receipt PR #27 first candidate 09bc3713c901e9ea11f48cda0fdb6b3ec441ae2b passed exact-head CI 36558052677 on all four jobs. Verify this evidence update's new final PR head with four CI jobs, check review/protection rules and normally merge, and verify exact receipt merge-target master CI. Only then close Issue #25 and Milestone 7 and record governance finalization. Do not recreate or move v0.7.0, alter M5 v0.6.0, or start M7."
+  "next_action": "Complete and verify the M6 runtime observation patch on codex/m6-observation-completion from 0dcafb87dd8537d66f6486febf73fd0d1258b0ed. Existing v0.7.0 software, receipt PR #27 final head and receipt merge-target master CI are verified, but they do not cover the newly confirmed section 11.6 gaps. Record actual patch tests and candidate evidence before proceeding through normal PR/master CI, v0.7.1 software release and its independent receipt. Keep Issue #25/Milestone 7 open until full M6 completion; do not move v0.7.0 or v0.6.0, create a documentation-only software version, or start M7."
 }

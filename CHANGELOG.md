@@ -4,11 +4,18 @@
 
 ## [Unreleased]
 
-M6 `v0.7.0` 软件已发布；本轮 Unreleased 没有新增产品能力。独立发布回执、其精确 CI 与 Issue #25/Milestone 7 治理关闭仍待完成，当前阶段状态为 `released_receipt_pending`。M5 `v0.6.0` 及其独立回执、finalization PR #24 均已完成，不移动其 Tag。M7 未开始。
+M6 `v0.7.1` 观测修补开发中，尚未合并或发布。`v0.7.0` 软件与独立回执 PR #27 已完成，但完整验收复核发现 §11.6 的实际观测接线不足；Issue #25/Milestone 7 保持 open，M6 状态为 `in_progress`。M5 `v0.6.0` 与 M6 `v0.7.0` Tag 不移动，M7 未开始。
+
+### Fixed in the v0.7.1 candidate
+
+- 幂等 job 提交记录返回的持久状态，不再把已运行或已结束任务误报为新 queued；dispatcher 的成功事件描述真实投递，而不是业务重新排队。
+- 当前 worker/item/stage 使用单调时钟记录耗时，重试来源区分 outbox delivery attempts、item attempts 和 worker claims。复用仅记录当前读取，不重放历史计算与调用。
+- 已有 M2 评测 Trace 关联 job/experiment/case-attempt；M5 实际节点、外部动作、持久预算、证据与 artifact cache lookup 接入统一观测。提供方未报告或报告不完整的 token 分量保持 null，费用不估算。
+- 累计 M6 门禁增加实际调用点与真实 PostgreSQL 图执行断言；候选仍需自身 exact-head/master CI、wheel、Release 和独立回执。详见 [观测修补验收报告](reports/refactor/M6-observability-patch.md)。
 
 ## [0.7.0] - 2026-09-29
 
-> 软件已发布，独立回执待完成：[PR #26](https://github.com/1040942669/legal-rag-agent/pull/26) final head `b9400ab289618707a53ee6b14f6ac1cee4af2ee1` 的 [四路 CI run 36553279892](https://github.com/1040942669/legal-rag-agent/actions/runs/36553279892) 全部成功；普通 squash merge 和 release target 为 `28517b6f323253baf638ba60c887d10630dd0bf1`，其 [master CI run 36554828645](https://github.com/1040942669/legal-rag-agent/actions/runs/36554828645) 亦为 4/4 success。annotated `v0.7.0` Tag object `f40715c16e90b429a7c49a6347092114fefc787d` 精确 peeled 到该提交，[GitHub Release](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.7.0) 于 `2026-09-29T10:39:52Z` 发布，非 draft、非 prerelease。当前不是已完成独立回执与治理关闭的整个 M6 闭环。
+> 软件及独立回执已发布：[PR #26](https://github.com/1040942669/legal-rag-agent/pull/26) final head `b9400ab289618707a53ee6b14f6ac1cee4af2ee1` 的 [四路 CI run 36553279892](https://github.com/1040942669/legal-rag-agent/actions/runs/36553279892) 全部成功；普通 squash merge 和 release target 为 `28517b6f323253baf638ba60c887d10630dd0bf1`，其 [master CI run 36554828645](https://github.com/1040942669/legal-rag-agent/actions/runs/36554828645) 亦为 4/4 success。annotated `v0.7.0` Tag object `f40715c16e90b429a7c49a6347092114fefc787d` 精确 peeled 到该提交，[GitHub Release](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.7.0) 于 `2026-09-29T10:39:52Z` 发布，非 draft、非 prerelease。独立回执 [PR #27](https://github.com/1040942669/legal-rag-agent/pull/27) 和其 [master CI](https://github.com/1040942669/legal-rag-agent/actions/runs/36561210905) 均完成，四路 success；完整 M6 仍需上面的运行时观测修补和治理关闭。
 
 ### Added
 
@@ -17,7 +24,7 @@ M6 `v0.7.0` 软件已发布；本轮 Unreleased 没有新增产品能力。独�
 - 导入最终激活与 job 租约核验、item 完成和成功终态同事务提交；默认最多自动创建 5 条 outbox 记录并指数退避，耗尽后显示 `delivery_unconfirmed`；同一未确认 pending 记录仍可重试发送。
 - Linux/WSL2 Celery prefork worker 与 outbox dispatcher；消息只有 job ID 与 schema version，worker 不接收 HTTP 提供的路径或私人文本。
 - 本地 typed observation，以及默认关闭、需显式数据流确认且严格脱敏的可选 Langfuse OTLP exporter。
-- M6-T01 至 M6-T07 验收入口和 M0-M6 累计门禁；最终软件 PR head 与 release-target master 四路 CI 均成功，真实 PostgreSQL/Redis/Celery worker JUnit 41/0/0/0、累计门禁 58/58、0.7.0 wheel 隔离 smoke 成功且无 live model 调用。独立回执文档提交仍须通过其自身精确 head CI。
+- M6-T01 至 M6-T07 验收入口和 M0-M6 累计门禁；最终软件 PR head、release-target master 及独立回执的 head/master 四路 CI 均成功，真实 PostgreSQL/Redis/Celery worker JUnit 41/0/0/0、累计门禁 58/58、0.7.0 wheel 隔离 smoke 成功且无 live model 调用。此处数字只对应历史 0.7.0，不替代观测补丁验收。
 
 ### Security and limits
 
@@ -25,7 +32,7 @@ M6 `v0.7.0` 软件已发布；本轮 Unreleased 没有新增产品能力。独�
 - M2 评测不调用 live model；M3 导入只消费已验证的预构建 artifact，`embedded` 阶段不声称现场生成 embedding。索引读回验证后才激活快照。
 - Celery late ACK、worker-loss reject 与数据库 fencing 仍是 at-least-once，不承诺任意外部调用 exactly-once。取消在阶段边界生效，不能撤销已提交操作。
 - 自动发布预算耗尽且 broker 消息全部丢失时，不保证无人值守的继续恢复；需授权运维对账。当前无普通用户重投 API。
-- 本版验证工程机制，不证明真实法律问答质量、生产容量、外部 Langfuse 实发或任意 provider exactly-once。软件 Release 已存在；回执与 Issue/Milestone 尚待独立核验。真实测试、未运行项和回滚边界见 [M6 验收报告](reports/refactor/M6.md)。
+- 本版验证工程机制，不证明真实法律问答质量、生产容量、外部 Langfuse 实发或任意 provider exactly-once。软件 Release 和回执已存在；Issue/Milestone 因观测补丁尚未闭环而保持 open。真实测试、未运行项和回滚边界见 [M6 验收报告](reports/refactor/M6.md)。
 
 ## [0.6.0] - 2026-09-29
 

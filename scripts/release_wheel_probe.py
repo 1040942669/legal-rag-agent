@@ -30,7 +30,7 @@ _m4 = importlib.util.module_from_spec(_M4_SPEC)
 _M4_SPEC.loader.exec_module(_m4)
 
 
-DEFAULT_VERSIONS: Final = {"M4": "0.5.0", "M5": "0.6.0", "M6": "0.7.0"}
+DEFAULT_VERSIONS: Final = {"M4": "0.5.0", "M5": "0.6.0", "M6": "0.7.1"}
 M5_REQUIRED_RUNTIME_FILES: Final = frozenset(
     {
         "legal_rag/harness/__init__.py",
@@ -65,6 +65,7 @@ M5_SMOKE_MODULES: Final = (
 )
 M6_REQUIRED_RUNTIME_FILES: Final = frozenset(
     {
+        "legal_rag/harness/observations.py",
         "legal_rag/jobs/__init__.py",
         "legal_rag/jobs/command.py",
         "legal_rag/jobs/dispatcher.py",
@@ -76,6 +77,7 @@ M6_REQUIRED_RUNTIME_FILES: Final = frozenset(
         "legal_rag/observability/config.py",
         "legal_rag/observability/events.py",
         "legal_rag/observability/langfuse.py",
+        "legal_rag/observability/tracing.py",
         "legal_rag/storage/alembic/versions/0007_m6_jobs_outbox.py",
     }
 )
@@ -83,6 +85,7 @@ M6_JOBS_EXTRA_DEPENDENCIES: Final = frozenset(
     {"alembic", "celery", "pgvector", "psycopg", "sqlalchemy"}
 )
 M6_SMOKE_MODULES: Final = (
+    "legal_rag.harness.observations",
     "legal_rag.api.app",
     "legal_rag.jobs.command",
     "legal_rag.jobs.dispatcher",
@@ -93,6 +96,7 @@ M6_SMOKE_MODULES: Final = (
     "legal_rag.observability.config",
     "legal_rag.observability.events",
     "legal_rag.observability.langfuse",
+    "legal_rag.observability.tracing",
     "legal_rag.storage.alembic.versions.0007_m6_jobs_outbox",
 )
 _EXTRA_ONLY_MARKER = re.compile(

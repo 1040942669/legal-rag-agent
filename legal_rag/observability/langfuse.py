@@ -21,7 +21,6 @@ from urllib.parse import urlsplit
 
 from .events import Observation
 
-
 _OTLP_TRACE_PATH = "/api/public/otel/v1/traces"
 
 
@@ -65,9 +64,10 @@ def build_langfuse_payload(
         _attribute("langfuse.observation.type", "event"),
         _attribute("langfuse.trace.name", "legal-rag-m6"),
         _attribute("m6.status", observation.status),
-        _attribute("m6.retry_count", observation.retry_count),
         _attribute("m6.evidence_count", len(observation.evidence_ids)),
     ]
+    if observation.retry_count is not None:
+        attributes.append(_attribute("m6.retry_count", observation.retry_count))
     if context.session_id is not None:
         attributes.append(
             _attribute(

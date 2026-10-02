@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .models import SearchResult, VerificationResult
+
+if TYPE_CHECKING:
+    from .observability.events import ObservationContext, Observer
 
 
 _SAFE_VERIFICATION_TRACE_FIELDS = (
@@ -41,9 +45,18 @@ _VERIFICATION_TRACE_COUNT_FIELDS = {
 
 
 class JsonlTraceWriter:
-    def __init__(self, path: str | Path, *, run_id: str) -> None:
+    def __init__(
+        self,
+        path: str | Path,
+        *,
+        run_id: str,
+        observer: Observer | None = None,
+        observation_context: ObservationContext | None = None,
+    ) -> None:
         self.path = Path(path)
         self.run_id = run_id
+        self.observer = observer
+        self.observation_context = observation_context
         self.path.parent.mkdir(parents=True, exist_ok=True)
 
     def write(self, record: dict[str, Any]) -> None:
@@ -55,6 +68,21 @@ class JsonlTraceWriter:
             serialized = json.dumps(payload, ensure_ascii=True)
         with self.path.open("a", encoding="utf-8") as handle:
             handle.write(serialized + "\n")
+        if self.observer is not None:
+            try:
+                from .observability.events import ObservationContext
+                from .observability.tracing import observe_retrieval_trace
+
+                context = self.observation_context or ObservationContext(
+                    trace_id=self.run_id
+                )
+                observe_retrieval_trace(
+                    self.observer,
+                    context=replace(context, run_id=self.run_id),
+                    record=record,
+                )
+            except Exception:  # noqa: BLE001 - optional observation is isolated.
+                pass
 
 
 def search_result_to_trace(result: SearchResult) -> dict[str, Any]:
@@ -74,16 +102,16 @@ def search_result_to_trace(result: SearchResult) -> dict[str, Any]:
     }
 
 
-def verification_result_to_trace(result: VerificationResult | None) -> dict[str, Any] | None:
+def verification_result_to_trace(
+    result: VerificationResult | None,
+) -> dict[str, Any] | None:
     """Serialize verifier diagnostics without copying untrusted draft fragments."""
 
     if result is None:
         return None
     raw = result.to_dict()
     payload = {
-        field: raw[field]
-        for field in _SAFE_VERIFICATION_TRACE_FIELDS
-        if field in raw
+        field: raw[field] for field in _SAFE_VERIFICATION_TRACE_FIELDS if field in raw
     }
     for source_field, count_field in _VERIFICATION_TRACE_COUNT_FIELDS.items():
         value = raw.get(source_field, [])

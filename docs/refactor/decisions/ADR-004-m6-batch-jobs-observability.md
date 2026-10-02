@@ -1,8 +1,8 @@
 # ADR-004: M6 durable batch jobs and redacted observations
 
-- Status: Accepted for the verified `v0.7.0` software release; independent documentation receipt pending
-- Date: 2026-09-29
-- Affected milestone and planned version: M6 / `v0.7.0`
+- Status: Accepted; v0.7.0 release and receipt verified, v0.7.1 runtime observation completion in progress
+- Date: 2026-10-02 (original decision 2026-09-29)
+- Affected milestone and versions: M6 / released `v0.7.0`, planned correctness patch `v0.7.1`
 - Base: `76a038936ddfd900f98ad8709fedcc50c07063d3` (`origin/master` after M5 finalization)
 - Tracking: [Issue #25](https://github.com/1040942669/legal-rag-agent/issues/25), GitHub [Milestone 7](https://github.com/1040942669/legal-rag-agent/milestone/7)
 
@@ -33,7 +33,15 @@ M6 observations are typed execution facts. A local JSONL sink is opt-in; Langfus
 
 ## Verification and limits
 
-M6-T01 through M6-T07 require real PostgreSQL/Redis/Celery integration, including worker process loss and duplicate delivery. Unit fakes establish contracts but cannot substitute for that gate. The release report must list exact executed commands, environment, JUnit counts, candidate SHA and any tests not run. Live model, external embedding, production capacity, real legal quality and provider exactly-once remain unverified. PostgreSQL `0007_m6_jobs_outbox` is an application schema change; downgrading after valued jobs exist is not a data-preserving rollback.
+M6-T01 through T05 and T07 require real PostgreSQL/Redis/Celery integration, including worker process loss and duplicate delivery. T06 uses provider-free unit/API tests for redaction, explicit opt-in and failure isolation; it is not a live Langfuse-send claim. Unit fakes cannot substitute for real component gates. The release report must list exact executed commands, environment, JUnit counts, candidate SHA and any tests not run. Live model, external embedding, production capacity, real legal quality and provider exactly-once remain unverified. PostgreSQL `0007_m6_jobs_outbox` is an application schema change; downgrading after valued jobs exist is not a data-preserving rollback.
+
+## Runtime observation correction after v0.7.0
+
+The final requirements audit found that the event schema supported rich facts but production job callbacks did not record them, M5 nodes were not connected, and idempotent submission could emit a false queued event. Green T01-T07 mechanism gates alone did not prove all of plan section 11.6. The alternatives were to narrow that requirement to a schema-only feature, or connect existing execution facts and strengthen its tests. The latter is chosen: it completes the original M6 scope without changing the M5 controller, defaults, durable checkpoint envelope, or queueing online nodes.
+
+The v0.7.1 candidate observes actual validated node/attempt boundaries and immutable artifact lookups. Run/session identifiers come from frozen execution; batch case-attempt IDs are namespaced by the validated experiment. Reserved budgets remain separate from proven client calls. Retry counts come from durable attempts, not a reset local loop. Monotonic current invocation durations and database queue wait retain different meanings. Historical cache source calls and compute durations are not counted as current work. Token components require explicit per-component provider reporting coverage; unknown components and unverified prices stay null. Failure categories are stable allowlisted values, not exception text. Local and remote sinks remain default-off/best-effort, and remote tokens, raw evidence IDs, text and secrets remain excluded.
+
+The cost is additional execution-boundary instrumentation and tests. No new database migration or dependency is required. The already published v0.7.0 annotated Tag/Release remains fixed. v0.7.1 needs its own exact-head/master gates, package proof, ordinary merge, release and independent receipt before M6 can close. See the [patch acceptance report](../../../reports/refactor/M6-observability-patch.md).
 
 ## Rollback and replacement conditions
 

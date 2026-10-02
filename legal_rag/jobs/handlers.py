@@ -7,6 +7,7 @@ import json
 import os
 import socket
 import threading
+import time
 import uuid
 from contextlib import contextmanager
 from datetime import timezone
@@ -66,8 +67,13 @@ def _observe(
     tool: str = "worker",
     error_category: str | None = None,
     queue_wait_ms: float | None = None,
+    duration_ms: float | None = None,
+    retry_count: int | None = 0,
+    cache_status: str | None = None,
 ) -> None:
-    if observer is None:
+    if observer is None or retry_count is None:
+        # Production ItemClaim/JobRecord provide durable counters. An adapter
+        # without that fact must not invent a retry count or serialize null.
         return
     try:
         from legal_rag.observability.events import Observation, ObservationContext
@@ -96,10 +102,57 @@ def _observe(
                 tool=tool,
                 counts=counts,
                 queue_wait_ms=queue_wait_ms,
+                duration_ms=duration_ms,
+                retry_count=retry_count,
+                cache_status=cache_status,
                 error_category=error_category,
             )
         )
     except Exception:  # noqa: BLE001 - optional observation is never a job gate.
+        return
+
+
+def _elapsed_ms(started: float) -> float:
+    """Current invocation wall time, never a historical artifact duration."""
+
+    return max(0.0, (time.perf_counter() - started) * 1000)
+
+
+def _retry_count(attempt_no: int | None) -> int | None:
+    return max(0, attempt_no - 1) if attempt_no is not None else None
+
+
+def _error_category(code: str) -> str:
+    if code == "index_build_failed":
+        return "index_build_failed"
+    if code == "job_failed":
+        return "other"
+    return "validation_failed"
+
+
+def _observe_evaluation_attempt(
+    observer: Any | None, job: Any, artifact: Any, case_id: str
+) -> None:
+    if observer is None:
+        return
+    try:
+        from legal_rag.observability.events import ObservationContext
+        from legal_rag.observability.tracing import observe_stored_evaluation_attempt
+
+        # Only invoked after new execution. Validate M2 ledger, stage/output
+        # binding and complete marker before exporting immutable attempt facts.
+        # Reuse must not replay historical usage as current execution.
+        observe_stored_evaluation_attempt(
+            observer,
+            context=ObservationContext(
+                trace_id=job.job_id,
+                job_id=job.job_id,
+                experiment_id=job.job_id,
+            ),
+            store=artifact,
+            case_id=case_id,
+        )
+    except Exception:  # noqa: BLE001 - optional facts cannot change job outcome.
         return
 
 
@@ -186,6 +239,7 @@ def run_evaluation_job(
     resumed_stage = getattr(job, "stage", "received")
     with _experiment_lock(registration.experiment_root, job.job_id):
         for case in cases:
+            started = time.perf_counter()
             check_active()
             case_id = case["case_id"]
             item_key = _item_key(
@@ -215,6 +269,9 @@ def run_evaluation_job(
                     status="skipped",
                     node="evaluation",
                     tool="evaluation",
+                    duration_ms=_elapsed_ms(started),
+                    retry_count=_retry_count(getattr(claim, "attempt_no", None)),
+                    cache_status="hit",
                 )
                 continue
             if existing_ref is not None:
@@ -232,6 +289,9 @@ def run_evaluation_job(
                     status="succeeded",
                     node="evaluation",
                     tool="evaluation",
+                    duration_ms=_elapsed_ms(started),
+                    retry_count=_retry_count(getattr(claim, "attempt_no", None)),
+                    cache_status="hit",
                 )
                 _observe(
                     observer,
@@ -241,6 +301,7 @@ def run_evaluation_job(
                     status="running",
                     node="evaluation",
                     tool="worker",
+                    retry_count=_retry_count(getattr(job, "claim_count", None)),
                 )
                 continue
             if resumed_stage in {"aggregating", "completed"}:
@@ -289,6 +350,8 @@ def run_evaluation_job(
                     ),
                     "evaluation item completion",
                 )
+                elapsed_ms = _elapsed_ms(started)
+                _observe_evaluation_attempt(observer, job, artifact, case_id)
                 _observe(
                     observer,
                     store,
@@ -297,6 +360,9 @@ def run_evaluation_job(
                     status="succeeded",
                     node="evaluation",
                     tool="evaluation",
+                    duration_ms=elapsed_ms,
+                    retry_count=_retry_count(getattr(claim, "attempt_no", None)),
+                    cache_status="miss",
                 )
                 _observe(
                     observer,
@@ -306,6 +372,7 @@ def run_evaluation_job(
                     status="running",
                     node="evaluation",
                     tool="worker",
+                    retry_count=_retry_count(getattr(job, "claim_count", None)),
                 )
             except JobLeaseLost:
                 raise
@@ -320,6 +387,19 @@ def run_evaluation_job(
                     "evaluation_case_failed",
                     retryable=False,
                 )
+                _observe(
+                    observer,
+                    store,
+                    job,
+                    name="evaluation.case",
+                    status="failed",
+                    node="evaluation",
+                    tool="evaluation",
+                    duration_ms=_elapsed_ms(started),
+                    retry_count=_retry_count(getattr(claim, "attempt_no", None)),
+                    cache_status="miss",
+                    error_category="validation_failed",
+                )
                 if isinstance(exc, JobPermanentError):
                     raise
                 raise JobPermanentError("evaluation_case_failed") from None
@@ -329,10 +409,22 @@ def run_evaluation_job(
                 store.set_stage(job.job_id, worker_id, lease_epoch, "aggregating"),
                 "aggregation stage",
             )
+        aggregation_started = time.perf_counter()
         aggregate_experiment_by_id(
             experiment_id=job.job_id,
             repository_root=registration.repository_root,
             experiment_root=registration.experiment_root,
+        )
+        _observe(
+            observer,
+            store,
+            job,
+            name="node.completed",
+            status="succeeded",
+            node="evaluation",
+            tool="evaluation",
+            duration_ms=_elapsed_ms(aggregation_started),
+            retry_count=_retry_count(getattr(job, "claim_count", None)),
         )
         if resumed_stage != "completed":
             _required_write(
@@ -354,6 +446,7 @@ def _stage_item(
     check_active: Callable[[], None],
     observer: Any | None = None,
 ) -> None:
+    started = time.perf_counter()
     check_active()
     stage_order = (
         "received",
@@ -386,6 +479,9 @@ def _stage_item(
             status="skipped",
             node=stage,
             tool="ingestion",
+            duration_ms=_elapsed_ms(started),
+            retry_count=_retry_count(getattr(claim, "attempt_no", None)),
+            cache_status="hit",
         )
         return
     if stage_order.index(stage) < stage_order.index(resumed_stage):
@@ -405,6 +501,7 @@ def _stage_item(
             ),
             f"{stage} completion",
         )
+        elapsed_ms = _elapsed_ms(started)
         _observe(
             observer,
             store,
@@ -413,6 +510,9 @@ def _stage_item(
             status="succeeded",
             node=stage,
             tool="indexer" if stage == "indexed" else "ingestion",
+            duration_ms=elapsed_ms,
+            retry_count=_retry_count(getattr(claim, "attempt_no", None)),
+            cache_status="miss",
         )
         _observe(
             observer,
@@ -422,6 +522,7 @@ def _stage_item(
             status="running",
             node=stage,
             tool="worker",
+            retry_count=_retry_count(getattr(job, "claim_count", None)),
         )
     except (JobLeaseLost, JobCancelled):
         raise
@@ -435,6 +536,19 @@ def _stage_item(
         )
         store.fail_item(
             job.job_id, worker_id, lease_epoch, item_key, code, retryable=False
+        )
+        _observe(
+            observer,
+            store,
+            job,
+            name="ingestion.step",
+            status="failed",
+            node=stage,
+            tool="indexer" if stage == "indexed" else "ingestion",
+            duration_ms=_elapsed_ms(started),
+            retry_count=_retry_count(getattr(claim, "attempt_no", None)),
+            cache_status="miss",
+            error_category=_error_category(code),
         )
         raise JobPermanentError(code) from None
 
@@ -618,6 +732,7 @@ def run_ingestion_job(
         check_active=check_active,
         observer=observer,
     )
+    started = time.perf_counter()
     check_active()
     _required_write(
         store.set_stage(job.job_id, worker_id, lease_epoch, "activated"),
@@ -652,6 +767,7 @@ def run_ingestion_job(
         if finished is None:
             check_active()
             raise JobLeaseLost("job lease lost before activation")
+        elapsed_ms = _elapsed_ms(started)
         _observe(
             observer,
             store,
@@ -660,6 +776,9 @@ def run_ingestion_job(
             status="succeeded",
             node="activated",
             tool="ingestion",
+            duration_ms=elapsed_ms,
+            retry_count=_retry_count(getattr(claim, "attempt_no", None)),
+            cache_status="miss",
         )
         _observe(
             observer,
@@ -669,6 +788,7 @@ def run_ingestion_job(
             status="succeeded",
             node="activated",
             tool="worker",
+            retry_count=_retry_count(getattr(job, "claim_count", None)),
         )
     except (JobLeaseLost, JobCancelled):
         raise
@@ -680,6 +800,19 @@ def run_ingestion_job(
         )
         store.fail_item(
             job.job_id, worker_id, lease_epoch, item_key, code, retryable=False
+        )
+        _observe(
+            observer,
+            store,
+            job,
+            name="ingestion.step",
+            status="failed",
+            node="activated",
+            tool="ingestion",
+            duration_ms=_elapsed_ms(started),
+            retry_count=_retry_count(getattr(claim, "attempt_no", None)),
+            cache_status="miss",
+            error_category=_error_category(code),
         )
         raise JobPermanentError(code) from None
     return "succeeded"
@@ -740,10 +873,22 @@ def process_job(
 ) -> str:
     """Claim one PostgreSQL job; duplicate Celery deliveries are safe."""
 
+    started = time.perf_counter()
     current = store.get_job_internal(job_id)
     if current is None:
         return "missing"
     if current.status in {"succeeded", "failed", "cancelled"}:
+        _observe(
+            observer,
+            store,
+            current,
+            name="cache.lookup",
+            status="skipped",
+            tool="worker",
+            duration_ms=_elapsed_ms(started),
+            retry_count=_retry_count(getattr(current, "claim_count", None)),
+            cache_status="hit",
+        )
         return current.status
     lease = store.claim_job(job_id, worker_id, lease_seconds=30)
     if lease is None:
@@ -770,6 +915,8 @@ def process_job(
                 name="job.failed",
                 status="failed",
                 error_category="validation_failed",
+                duration_ms=_elapsed_ms(started),
+                retry_count=_retry_count(getattr(lease, "claim_count", None)),
             )
         return "failed"
     queue_wait_ms = (
@@ -792,6 +939,7 @@ def process_job(
         status="running",
         tool="worker",
         queue_wait_ms=queue_wait_ms,
+        retry_count=_retry_count(getattr(lease, "claim_count", None)),
     )
     try:
         with _LeaseHeartbeat(store, job_id, worker_id, lease.lease_epoch) as heartbeat:
@@ -834,7 +982,13 @@ def process_job(
             if finished is None:
                 raise JobLeaseLost("job lease lost before terminal status")
             _observe(
-                observer, store, finished, name="job.succeeded", status="succeeded"
+                observer,
+                store,
+                finished,
+                name="job.succeeded",
+                status="succeeded",
+                duration_ms=_elapsed_ms(started),
+                retry_count=_retry_count(getattr(lease, "claim_count", None)),
             )
             return finished.status
     except JobCancelled:
@@ -843,7 +997,14 @@ def process_job(
         )
         if finished is not None:
             _observe(
-                observer, store, finished, name="job.cancelled", status="cancelled"
+                observer,
+                store,
+                finished,
+                name="job.cancelled",
+                status="cancelled",
+                duration_ms=_elapsed_ms(started),
+                retry_count=_retry_count(getattr(lease, "claim_count", None)),
+                error_category="cancelled",
             )
         return "cancelled"
     except JobPermanentError as exc:
@@ -861,14 +1022,22 @@ def process_job(
                 finished,
                 name="job.failed",
                 status="failed",
-                error_category=(
-                    "index_build_failed"
-                    if exc.error_code == "index_build_failed"
-                    else "validation_failed"
-                ),
+                error_category=_error_category(exc.error_code),
+                duration_ms=_elapsed_ms(started),
+                retry_count=_retry_count(getattr(lease, "claim_count", None)),
             )
         return "failed"
     except JobLeaseLost:
+        _observe(
+            observer,
+            store,
+            lease,
+            name="job.retry",
+            status="retrying",
+            duration_ms=_elapsed_ms(started),
+            retry_count=_retry_count(getattr(lease, "claim_count", None)),
+            error_category="lease_lost",
+        )
         raise
     except Exception:  # noqa: BLE001 - do not expose source or DSNs.
         finished = store.finish_job(
@@ -886,19 +1055,21 @@ def process_job(
                 name="job.failed",
                 status="failed",
                 error_category="other",
+                duration_ms=_elapsed_ms(started),
+                retry_count=_retry_count(getattr(lease, "claim_count", None)),
             )
         return "failed"
 
 
 def process_job_from_environment(job_id: str) -> str:
-    from legal_rag.storage.database import DatabaseSettings, create_database_engine
-
-    from .registry import JobRegistry
-    from .store import JobStore
     from legal_rag.observability.config import (
         close_observer,
         observer_from_environment,
     )
+    from legal_rag.storage.database import DatabaseSettings, create_database_engine
+
+    from .registry import JobRegistry
+    from .store import JobStore
 
     engine = create_database_engine(
         DatabaseSettings.from_env(
