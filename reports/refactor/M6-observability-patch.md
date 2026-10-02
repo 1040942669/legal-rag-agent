@@ -2,7 +2,7 @@
 
 ## 当前状态与范围
 
-状态为 `in_progress`。补丁分支 `codex/m6-observation-completion` 从实时核验的 `origin/master` `0dcafb87dd8537d66f6486febf73fd0d1258b0ed` 创建；不使用过时本地 master。该基线是独立回执 PR #27 的正常 merge，精确 [master CI 36561210905](https://github.com/1040942669/legal-rag-agent/actions/runs/36561210905) 四路通过。
+软件机制已完成，候选为 `ready_for_review`，完整 M6 仍 `in_progress`。补丁分支 `codex/m6-observation-completion` 从实时核验的 `origin/master` `0dcafb87dd8537d66f6486febf73fd0d1258b0ed` 创建；不使用过时本地 master。该基线是独立回执 PR #27 的正常 merge，精确 [master CI 36561210905](https://github.com/1040942669/legal-rag-agent/actions/runs/36561210905) 四路通过。[Draft PR #28](https://github.com/1040942669/legal-rag-agent/pull/28) 已创建，首次冻结代码提交为 `10004b4f7b992f6a192d9b6674108bcea3f7b06d`。本报告的通过记录明确属于该冻结提交，随后仅补入文档；最终文档 head 必须重新本地冻结验证并通过自己的四路 CI，不能沿用旧 head 的绿灯。
 
 此补丁仅完成 MASTER_PLAN §11.6 的原 M6 观测要求，不进入 M7。已发布 `v0.7.0`/`v0.6.0` 均保持原 Tag 目标，完整历史任务可靠性与发布证据保留在 [M6 原验收报告](M6.md) 和 [M6 回执](../../docs/refactor/receipts/M6.json)。软件修补需要新版本 `v0.7.1`，不能伪装成仅更新文档的回执。
 
@@ -28,14 +28,15 @@
 | 最终 jobs/API/M2 定向 | API、jobs、worker、M2 bridge 四组 | `40 passed in 33.57s`，exit 0；增加了完整历史、完成指针、output/usage 一致性验证 |
 | 旧用量构造兼容性 | 既有七个位置参数和不变 snapshot | 新断言先 `1 failed`，修正新增字段顺序后与打包断言共 `8 passed in 0.64s`，exit 0 |
 | 本地 wheel 隔离 smoke | `release_wheel_probe.py`，M6，实际安装、CLI、模块与 migration | passed，version `0.7.1`，101 entries，440990 bytes，SHA-256 `1526add72ce32c5ec8db92fb5aa6fc4e886198328241bdbff5bae4645fc66028`；仅本地 commit 前证据，不替代最终 CI wheel |
+| 冻结代码提交完整离线门禁 | `quality_gate.py --milestone M0 --mode offline`，commit `10004b4`，Windows/Python 3.12.13，UTC `2026-10-02T10:47:05Z` 至 `10:49:22Z` | `7/7 passed`，exit 0，136510 ms；`1013 passed, 157 subtests passed in 132.70s`，JUnit `1170/0/0/0`；版本、CLI、smoke、Markdown links、STATE 与 secret scan passed |
 
 本地 DB 首次运行得到 `3 errors`，因为复用的旧临时 cluster 没有假定的测试角色；已停止该 cluster，改为本补丁显式 provision 的独立 cluster 后重新运行。不是产品通过证据，未触及既有 5432 service，也未上传 DSN 或测试数据库。
 
-全量离线门禁保留了三轮失败：前两轮分别 `1011 passed`、`1012 passed`，均另有 `157 subtests passed`，唯一门禁失败为根目录被忽略的旧 `0.7.0` egg-info 遮蔽版本；旧生成物已可恢复地移到本地临时备份，未删除。第三轮版本通过，但 `1 failed, 1011 passed, 157 subtests passed`，可编辑安装文件清单未包含迁移。没有弱化断言；已改为构建和安装真实 wheel，打包定向断言通过。完整最终候选门禁正在重新运行。
+全量离线门禁保留了三轮失败：前两轮分别 `1011 passed`、`1012 passed`，均另有 `157 subtests passed`，唯一门禁失败为根目录被忽略的旧 `0.7.0` egg-info 遮蔽版本；旧生成物已可恢复地移到本地临时备份，未删除。第三轮版本通过，但 `1 failed, 1011 passed, 157 subtests passed`，可编辑安装文件清单未包含迁移。没有弱化断言；已改为构建和安装真实 wheel，打包定向断言通过。随后重建当前版本的开发元数据并确认测试使用 workspace 源码。
 
 一次开发中组合回归曾 `1 failed, 30 passed`，M2 `evaluation_case_failed`；失败原因未确定，不将推测当结论。冻结实现后的上述 `40 passed` 未改变工件一致性门禁。所有失败均不计入 passed 证据。
 
-第四轮 `1 failed, 1012 passed, 157 subtests passed`，M2 resume 拒绝 `$.code.diff_hash` 改变。此次全量测试期间主执行更新了 tracked 文档，身份覆盖整个仓库而非仅 runtime，因此不能在测试期间修改文档。现已停止所有并行写入、恢复与确认 workspace 源码的可编辑安装，打包与 Harness `8 passed in 0.54s`；全部候选冻结后才重跑。此项失败未绕过严格恢复校验。
+第四轮 `1 failed, 1012 passed, 157 subtests passed`，M2 resume 拒绝 `$.code.diff_hash` 改变。此次全量测试期间主执行更新了 tracked 文档，身份覆盖整个仓库而非仅 runtime，因此不能在测试期间修改文档。停止全部写入并提交后，上表冻结门禁通过。打包与 Harness `8 passed in 0.54s`；此项失败未绕过严格恢复校验。
 
 精确 PR head/master 四路 CI、加强后的真实 worker T07、最终 v0.7.1 CI wheel、Tag、Release 和独立回执：`not_run`，后续只能补入真实结果。Issue #25 与 Milestone 7 保持 open。
 

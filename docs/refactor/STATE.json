@@ -7,8 +7,8 @@
     "observed_default_branch": "master",
     "observed_baseline_commit": "61f1065fc6d5678d0d57114e2e361294d04906b4",
     "observed_on": "2026-10-02",
-    "workspace_head": "0dcafb87dd8537d66f6486febf73fd0d1258b0ed",
-    "workspace_head_note": "M6 observation-completion patch branch starts from verified receipt PR #27 merge commit 0dcafb87dd8537d66f6486febf73fd0d1258b0ed; exact master CI 36561210905 passed four jobs. The v0.7.0 software release and independent receipt are verified, but runtime observation requirements in MASTER_PLAN section 11.6 remain incomplete. Current uncommitted code and documentation work plans v0.7.1; no patch candidate, CI, merge, tag or release is claimed yet.",
+    "workspace_head": "10004b4f7b992f6a192d9b6674108bcea3f7b06d",
+    "workspace_head_note": "10004b4f7b992f6a192d9b6674108bcea3f7b06d is the first frozen local base for the v0.7.1 observation-completion patch, normally pushed to Draft PR #28. Its local M0 gate passed 7/7. This documentation update is not yet committed and does not name its own future SHA; the final candidate must be frozen and pass its own exact-head CI. Initial CI 36997422129 was running on the first frozen base when recorded and is not final documentation-head evidence. M6 remains in progress pending review, merge-target CI, release, independent receipt and governance closure; published v0.7.0 and v0.6.0 remain unchanged.",
     "workspace_branch": "codex/m6-observation-completion",
     "workspace_dirty": true,
     "remote_tags_checked": true
@@ -851,31 +851,64 @@
       },
       "observation_completion_patch": {
         "version": "v0.7.1",
-        "status": "in_progress",
+        "status": "ready_for_review",
+        "review_readiness": "pending_exact_final_ci",
         "branch": "codex/m6-observation-completion",
         "baseline_sha": "0dcafb87dd8537d66f6486febf73fd0d1258b0ed",
+        "first_frozen_local_base_sha": "10004b4f7b992f6a192d9b6674108bcea3f7b06d",
+        "first_frozen_local_base_role": "committed_and_pushed_local_validation_base_not_final_documentation_candidate",
+        "current_documentation_status": "uncommitted_final_candidate_preparation_no_self_referential_sha",
         "plan_requirement": "MASTER_PLAN section 11.6 runtime correlation and execution facts",
         "confirmed_gaps": [
           "Runtime observations omit budget, retry, cache, evidence, model-usage and duration facts that exist only in synthetic serializer tests or separate artifacts.",
           "Idempotent API replay can emit a false queued event for an existing task in another durable status.",
           "M5 online runs and M2 case artifacts are not connected to the common observation correlation contract."
         ],
-        "tests_status": "targeted_passed_final_frozen_gate_pending",
+        "confirmed_gaps_status": "mechanisms_resolved_with_local_runtime_regressions_pending_exact_final_ci_and_release_gates",
+        "tests_status": "first_frozen_local_base_m0_passed_pending_exact_final_ci",
         "local_validation": {
           "targeted_jobs_api_m2": "40 passed in 33.57s",
           "durable_postgresql": "27 passed in 8.23s, isolated PostgreSQL 18",
           "compatibility_and_packaging": "8 passed in 0.54s after positional compatibility regression and metadata repair",
           "wheel_smoke": "local precommit M6 wheel 0.7.1 isolated smoke passed; not final CI package",
+          "precommit_wheel_size_bytes": 440990,
+          "precommit_wheel_sha256": "1526add72ce32c5ec8db92fb5aa6fc4e886198328241bdbff5bae4645fc66028",
+          "precommit_wheel_source_checkout_isolated": true,
+          "precommit_wheel_migration_head": "0007_m6_jobs_outbox",
           "failed_gate_reports": [
             ".tmp/m6-observation-m0-gate.json: stale ignored 0.7.0 metadata",
             ".tmp/m6-observation-frozen-m0-gate.json: same stale metadata; retry stopped and cause diagnosed",
             ".tmp/m6-observation-resolved-m0-gate.json: editable distribution file inventory lacks migrations",
             ".tmp/m6-observation-final-m0-gate.json: M2 resume rejects changed tracked diff_hash during documentation editing"
           ],
-          "final_offline_gate": "pending on frozen candidate; failures preserved, no assertions weakened"
+          "first_frozen_local_base_m0_gate": {
+            "sha": "10004b4f7b992f6a192d9b6674108bcea3f7b06d",
+            "report_path": ".tmp/m6-observation-committed-m0-gate.json",
+            "started_at": "2026-10-02T10:47:05Z",
+            "finished_at": "2026-10-02T10:49:22Z",
+            "status": "passed",
+            "exit_code": 0,
+            "mandatory_checks_passed": 7,
+            "mandatory_checks_total": 7,
+            "duration_ms": 136510,
+            "pytest_passed": 1013,
+            "pytest_subtests_passed": 157,
+            "pytest_duration_seconds": 132.70,
+            "junit_tests": 1170,
+            "junit_failures": 0,
+            "junit_errors": 0,
+            "junit_skipped": 0
+          },
+          "final_offline_gate": "first frozen local base passed; final documentation candidate must be frozen and verified separately; failures preserved and no assertions weakened"
         },
         "candidate_sha": null,
-        "pr_url": null,
+        "pr_url": "https://github.com/1040942669/legal-rag-agent/pull/28",
+        "pr_state": "open",
+        "pr_is_draft": true,
+        "initial_pr_head_sha": "10004b4f7b992f6a192d9b6674108bcea3f7b06d",
+        "branch_pushed": true,
+        "initial_pr_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36997422129",
+        "initial_pr_ci_status": "in_progress_when_recorded_not_final_documentation_head_evidence",
         "final_pr_ci_url": null,
         "merge_sha": null,
         "master_ci_url": null,
@@ -885,8 +918,8 @@
         "live_model_calls": 0
       },
       "release_requirements_remaining": [
-        "Complete truthful runtime observations and production-call-point regressions for jobs, M2 artifacts and M5 runs; preserve null unknown provider usage and current-versus-source cache accounting.",
-        "Run applicable local cumulative gates, freeze the v0.7.1 candidate, pass all four exact-head CI jobs, and normally merge after current review/protection checks.",
+        "Verify the implemented runtime observations and production-call-point regressions for jobs, M2 artifacts and M5 runs on the final candidate CI; preserve null unknown provider usage and current-versus-source cache accounting.",
+        "Freeze the final code and documentation candidate for PR #28, verify its applicable local gates, pass all four exact-head CI jobs, and normally merge after current review/protection checks. The first frozen local base passed M0 but does not replace final documentation-head evidence.",
         "Verify the exact patch merge-target master CI, annotated v0.7.1 tag, published Release and independent documentation receipt without moving v0.7.0.",
         "Close Issue #25 and Milestone 7 only after the complete M6 implementation and patch receipt gates pass; then record governance finalization and stop before M7."
       ],
@@ -917,5 +950,5 @@
       "blockers": []
     }
   ],
-  "next_action": "Complete and verify the M6 runtime observation patch on codex/m6-observation-completion from 0dcafb87dd8537d66f6486febf73fd0d1258b0ed. Existing v0.7.0 software, receipt PR #27 final head and receipt merge-target master CI are verified, but they do not cover the newly confirmed section 11.6 gaps. Record actual patch tests and candidate evidence before proceeding through normal PR/master CI, v0.7.1 software release and its independent receipt. Keep Issue #25/Milestone 7 open until full M6 completion; do not move v0.7.0 or v0.6.0, create a documentation-only software version, or start M7."
+  "next_action": "Freeze the final code and documentation candidate on codex/m6-observation-completion and verify that exact PR #28 head with the applicable local gates and all four CI jobs. First frozen local base 10004b4f7b992f6a192d9b6674108bcea3f7b06d passed M0 7/7 with 1013 tests and 157 subtests; initial CI 36997422129 is not final documentation-head evidence. Do not edit Git-candidate files while gates execute because M2 identity includes the complete tracked diff_hash. After exact final-head gates and review/protection checks, normally merge, verify exact master CI, publish the v0.7.1 software tag/Release and independent receipt, then close Issue #25/Milestone 7 and finalize governance. Keep overall M6 in progress until that chain is complete; do not move v0.7.0 or v0.6.0 or start M7."
 }

@@ -4,11 +4,11 @@
 
 ## 当前事实：M6 运行时观测补全进行中
 
-- 当前里程碑仍为 M6，状态 `in_progress`。`v0.7.0` 软件与其独立回执已经完成；全计划复核确认 `MASTER_PLAN.md` §11.6 的实际运行观测尚有缺口，因此不关闭治理事项，也不把旧门禁通过等同于完整 M6 完成。
-- 当前工作分支 `codex/m6-observation-completion` 从已核验的 `origin/master` `0dcafb87dd8537d66f6486febf73fd0d1258b0ed` 创建。此次状态更新时 HEAD 仍为该基线，运行时代码、测试及交接文档存在未提交修改；补丁尚无 commit/push/PR、精确 candidate CI、merge、Tag/Release 或独立回执的完成声明。
+- 当前里程碑仍为 M6，整体状态 `in_progress`。`v0.7.0` 软件与其独立回执已经完成；此次 `v0.7.1` 补丁已连接 `MASTER_PLAN.md` §11.6 的实际运行观测机制并通过本地运行路径回归，补丁状态为 `ready_for_review / pending_exact_final_ci`。最终候选门禁、发布、独立回执及治理尚未完成，因此不关闭 M6，也不把旧门禁通过等同于完整 M6 完成。
+- 当前工作分支 `codex/m6-observation-completion` 从已核验的 `origin/master` `0dcafb87dd8537d66f6486febf73fd0d1258b0ed` 创建。首个已冻结本地基线 `10004b4f7b992f6a192d9b6674108bcea3f7b06d` 已 commit、正常 push，并建立 open 的 [Draft PR #28](https://github.com/1040942669/legal-rag-agent/pull/28)。该 SHA 只标识首个本地验证基线；本次文档更新尚未提交，不自引用未来提交 SHA，最终候选 SHA 应在冻结后读取并在后续证据中记录。
 - 软件补丁计划为 `v0.7.1`，用于完成 M6 运行时观测及真实性修正，不是只为文档生成软件版本。已经发布的 `v0.7.0` 和 M5 `v0.6.0` 保留原 Tag、目标提交和 Release，不移动或重复发布。
-- 已确认的问题是：typed Observation 的预算、重试、缓存、证据、模型用量与耗时字段主要只在人工构造的测试中出现；M2 工件和 M5 在线 run 缺少统一运行关联；幂等 API 重放可能把既有 running/succeeded/failed/cancelled job 记录成 queued。补丁正在连接实际调用点与可信持久事实，并增加真实运行路径断言。
-- 当前改动包括 `legal_rag/jobs/dispatcher.py`、`handlers.py`、API 装配与状态事件、M5 graph/node/runner 观测、M2/local Trace 关联、provider 用量可用性以及对应观测回归。当前文档改动为 `STATE.json`、本文件、`receipts/M6.json` 和 `receipts/README.md`；其它候选说明、版本与最终证据由主执行流程收口。
+- 原确认缺口包括：typed Observation 的预算、重试、缓存、证据、模型用量与耗时字段主要只在人工构造测试中出现，M2 工件和 M5 在线 run 缺少统一关联，以及幂等 API 重放可能把既有其它状态的 job 误记成 queued。实际调用点和可信持久事实已经连接，并新增运行路径回归；这些机制在本地已验证，仍须通过最终精确候选四路 CI，不提前声称发布完成。
+- 首个冻结基线包含 jobs dispatcher/handlers、API 装配与状态事件、M5 graph/node/runner 观测、M2/local Trace 关联、provider 用量可用性以及对应观测回归。本次只补记 `STATE.json` 与本文件的当前事实；主执行流程负责冻结最终代码及文档候选和收口最终证据。
 - [Issue #25](https://github.com/1040942669/legal-rag-agent/issues/25) 与 GitHub [Milestone 7](https://github.com/1040942669/legal-rag-agent/milestone/7) 于 `2026-10-02` 只读复核仍 open，Milestone 有 1 个 open issue。两者在完整补丁和独立回执通过之前保持 open；M7 未开始，也不在本次授权范围。
 
 ## 已核验的 v0.7.0 软件与独立回执
@@ -20,9 +20,15 @@
 
 ## 当前验证边界与下一条可执行动作
 
-新的 `v0.7.1` 定向 jobs/API/M2 回归 `40 passed in 33.57s`，隔离 PostgreSQL durable 回归 `27 passed in 8.23s`，旧位置参数与打包检查 `8 passed in 0.54s`。本地 commit 前真实 wheel 的 M6 隔离 smoke passed，不是最终 CI wheel。此前全量门禁的旧生成元数据、可编辑安装文件清单及运行期间 tracked diff_hash 漂移失败均保留在 [补丁报告](../../reports/refactor/M6-observability-patch.md)。最终全量门禁待冻结代码与文档后运行，测试期间不得修改任何 Git 候选文件。远端补丁 CI/Release 尚未运行，不得复制旧 `58/58`、`41/0/0/0` 或旧 wheel SHA 作为补丁通过证据。
+新的 `v0.7.1` 定向 jobs/API/M2 回归 `40 passed in 33.57s`，隔离 PostgreSQL durable 回归 `27 passed in 8.23s`，旧位置参数与打包检查 `8 passed in 0.54s`。本地 commit 前真实 wheel 为 `0.7.1`、440990 bytes、SHA-256 `1526add72ce32c5ec8db92fb5aa6fc4e886198328241bdbff5bae4645fc66028`；M6 仓库外隔离 smoke passed，`source_checkout_isolated=true`，新增模块导入及 migration head `0007_m6_jobs_outbox` 均通过。该 wheel 是提交前本地临时证据，不是最终 CI wheel。
 
-先完成 jobs/M2/M5 观测的实际调用点回归，检查真实关联、预算、重试、缓存、证据、耗时及模型用量的 unknown/null 语义，再执行适用的本地累计门禁并冻结候选。随后按 §13 正常 commit/push/PR、精确 head 四路 CI、review/保护规则检查、普通 merge、精确 master CI、annotated `v0.7.1` 和 Release、独立回执及治理收口的顺序推进。任一门禁失败记录真实状态和失败证据；不强推、不 admin merge、不绕过 review。真实或付费模型、远端 Langfuse 实发、私人资料和未授权语料均未获启用。完成 M6 后停止，不进入 M7。
+首个冻结本地基线 `10004b4f7b992f6a192d9b6674108bcea3f7b06d` 的 M0 离线基础门禁已真实通过：`2026-10-02T10:47:05Z` 至 `10:49:22Z`，status `passed`、exit 0、`7/7` mandatory、136510 ms；内部全量 `1013 passed, 157 subtests passed in 132.70s`，JUnit `1170/0/0/0`。结果保留在 ignored `.tmp/m6-observation-committed-m0-gate.json`，不是本次尚未提交文档的最终候选证据。
+
+此前全量门禁的旧生成元数据、可编辑安装文件清单及运行期间 tracked `diff_hash` 漂移失败均保留在 [补丁报告](../../reports/refactor/M6-observability-patch.md)，没有弱化断言。测试期间不得修改任何 Git 候选文件，包括文档，因为 M2 身份绑定整个 tracked diff，而不只运行时代码。
+
+[初始 PR CI 36997422129](https://github.com/1040942669/legal-rag-agent/actions/runs/36997422129) 启动在首个冻结基线 `10004b4...`，记录时仍在运行；即使该轮通过，也不能代替本次最终文档 head 的四路 CI。最终候选尚未冻结，精确 final-head CI、merge/master CI、Tag/Release、独立回执及治理均未完成，不得复制旧 `58/58`、`41/0/0/0` 或旧 wheel SHA 作为补丁通过证据。
+
+下一步先冻结完整代码和本次文档候选，核验适用本地门禁及 PR #28 精确 final head 四路 CI，再按 §13 的 review/保护规则检查、普通 merge、精确 master CI、annotated `v0.7.1` 和 Release、独立回执及治理收口顺序推进。任一门禁失败记录真实状态和失败证据；不强推、不 admin merge、不绕过 review。Issue #25/Milestone 7 在完整链路通过前保持 open。真实或付费模型、远端 Langfuse 实发、私人资料和未授权语料均未获启用。完成 M6 后停止，不进入 M7。
 
 ---
 
