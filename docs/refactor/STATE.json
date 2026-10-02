@@ -827,7 +827,7 @@
         "postgresql_major_version": 18,
         "vector_extension_version": "0.8.6",
         "restart_migration_head": "0007_m6_jobs_outbox",
-        "m5_fault_receipt_schema_head": "0006_m5_recovery",
+        "m5_fault_receipt_schema_head": "0006_m5_harness_recovery",
         "final_head_m6_artifact_id": 11224654642,
         "final_head_m6_artifact_digest": "sha256:449a9832b6c1b5649a293ab753730c21e5c68fd513610c27fedb0e9e598746f2",
         "master_m6_artifact_id": 11226250664,
