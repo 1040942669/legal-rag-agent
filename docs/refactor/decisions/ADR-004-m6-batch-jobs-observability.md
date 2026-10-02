@@ -1,8 +1,8 @@
 # ADR-004: M6 durable batch jobs and redacted observations
 
-- Status: Accepted; v0.7.0 release and receipt verified, v0.7.1 runtime observation completion in progress
+- Status: Accepted; v0.7.0 release and receipt verified, v0.7.1 runtime observation patch published, independent patch receipt pending
 - Date: 2026-10-02 (original decision 2026-09-29)
-- Affected milestone and versions: M6 / released `v0.7.0`, planned correctness patch `v0.7.1`
+- Affected milestone and versions: M6 / released `v0.7.0` and correctness patch `v0.7.1`
 - Base: `76a038936ddfd900f98ad8709fedcc50c07063d3` (`origin/master` after M5 finalization)
 - Tracking: [Issue #25](https://github.com/1040942669/legal-rag-agent/issues/25), GitHub [Milestone 7](https://github.com/1040942669/legal-rag-agent/milestone/7)
 
@@ -39,9 +39,9 @@ M6-T01 through T05 and T07 require real PostgreSQL/Redis/Celery integration, inc
 
 The final requirements audit found that the event schema supported rich facts but production job callbacks did not record them, M5 nodes were not connected, and idempotent submission could emit a false queued event. Green T01-T07 mechanism gates alone did not prove all of plan section 11.6. The alternatives were to narrow that requirement to a schema-only feature, or connect existing execution facts and strengthen its tests. The latter is chosen: it completes the original M6 scope without changing the M5 controller, defaults, durable checkpoint envelope, or queueing online nodes.
 
-The v0.7.1 candidate observes actual validated node/attempt boundaries and immutable artifact lookups. Run/session identifiers come from frozen execution; batch case-attempt IDs are namespaced by the validated experiment. Reserved budgets remain separate from proven client calls. Retry counts come from durable attempts, not a reset local loop. Monotonic current invocation durations and database queue wait retain different meanings. Historical cache source calls and compute durations are not counted as current work. Token components require explicit per-component provider reporting coverage; unknown components and unverified prices stay null. Failure categories are stable allowlisted values, not exception text. Local and remote sinks remain default-off/best-effort, and remote tokens, raw evidence IDs, text and secrets remain excluded.
+The released v0.7.1 patch observes actual validated node/attempt boundaries and immutable artifact lookups. Run/session identifiers come from frozen execution; batch case-attempt IDs are namespaced by the validated experiment. Reserved budgets remain separate from proven client calls. Retry counts come from durable attempts, not a reset local loop. Monotonic current invocation durations and database queue wait retain different meanings. Historical cache source calls and compute durations are not counted as current work. Token components require explicit per-component provider reporting coverage; unknown components and unverified prices stay null. Failure categories are stable allowlisted values, not exception text. Local and remote sinks remain default-off/best-effort, and remote tokens, raw evidence IDs, text and secrets remain excluded.
 
-The cost is additional execution-boundary instrumentation and tests. No new database migration or dependency is required. The already published v0.7.0 annotated Tag/Release remains fixed. v0.7.1 needs its own exact-head/master gates, package proof, ordinary merge, release and independent receipt before M6 can close. See the [patch acceptance report](../../../reports/refactor/M6-observability-patch.md).
+The cost is additional execution-boundary instrumentation and tests. No new database migration or dependency is required. The already published v0.7.0 annotated Tag/Release remains fixed. v0.7.1 passed its own exact-head/master gates, isolated installed-wheel proof and normal merge, and was published on 2026-10-02. Its independent documentation receipt and governance gates must still pass before M6 closes. See the [patch acceptance report](../../../reports/refactor/M6-observability-patch.md).
 
 ## Rollback and replacement conditions
 

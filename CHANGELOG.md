@@ -4,18 +4,23 @@
 
 ## [Unreleased]
 
-M6 `v0.7.1` 观测修补开发中，尚未合并或发布。`v0.7.0` 软件与独立回执 PR #27 已完成，但完整验收复核发现 §11.6 的实际观测接线不足；Issue #25/Milestone 7 保持 open，M6 状态为 `in_progress`。M5 `v0.6.0` 与 M6 `v0.7.0` Tag 不移动，M7 未开始。
+无额外软件变更。M6 `v0.7.1` 已正式发布，当前仅补齐其独立文档回执与治理关闭；M7 未开始。
 
-### Fixed in the v0.7.1 candidate
+## [0.7.1] - 2026-10-02
+
+软件 [PR #28](https://github.com/1040942669/legal-rag-agent/pull/28) 正常 squash 合并为 `582eb8949c1150fc7a12761bd46fbda9c173ef62`。最终 head `d6fc26882237ca149ab38c7e944b32a260e0430b` 的 [CI](https://github.com/1040942669/legal-rag-agent/actions/runs/36998001012) 和实际目标的 [master CI](https://github.com/1040942669/legal-rag-agent/actions/runs/36999853797) 均 4/4 success。annotated Tag object `a4d7c84087ba32ad183efd20275778f5f473bd9c` 固定 peeled 到该软件提交；[Release](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.7.1) 于 `2026-10-02T11:30:49Z` 发布，非 draft、非 prerelease。完整 M6 为 `released_receipt_pending`，独立回执和 Issue #25/Milestone 7 关闭仍须按各自门禁推进；旧 v0.7.0/v0.6.0 Tag 不移动。
+
+### Fixed
 
 - 幂等 job 提交记录返回的持久状态，不再把已运行或已结束任务误报为新 queued；dispatcher 的成功事件描述真实投递，而不是业务重新排队。
 - 当前 worker/item/stage 使用单调时钟记录耗时，重试来源区分 outbox delivery attempts、item attempts 和 worker claims。复用仅记录当前读取，不重放历史计算与调用。
 - 已有 M2 评测 Trace 关联 job/experiment/case-attempt；M5 实际节点、外部动作、持久预算、证据与 artifact cache lookup 接入统一观测。提供方未报告或报告不完整的 token 分量保持 null，费用不估算。
-- 累计 M6 门禁增加实际调用点与真实 PostgreSQL 图执行断言；候选仍需自身 exact-head/master CI、wheel、Release 和独立回执。详见 [观测修补验收报告](reports/refactor/M6-observability-patch.md)。
+- 累计 M6 门禁增加实际调用点与真实 PostgreSQL 图执行断言；精确候选与 master 均 58/58，专项 JUnit 76/0/0/0，完整离线 1013 tests + 157 subtests，M4/M5 JUnit 79/0/0/0、81/0/0/0。0.7.1 wheel 通过隔离 installed-runtime smoke。详见 [观测修补验收报告](reports/refactor/M6-observability-patch.md)。
+- 无新增依赖、migration 或 checkpoint schema；旧 CompletionUsage 位置参数和 snapshot 保持兼容。模型计数是受控客户端调用次数，不证明 HTTP 已发出或已收费。缺失 token 和费用保持未知。
 
 ## [0.7.0] - 2026-09-29
 
-> 软件及独立回执已发布：[PR #26](https://github.com/1040942669/legal-rag-agent/pull/26) final head `b9400ab289618707a53ee6b14f6ac1cee4af2ee1` 的 [四路 CI run 36553279892](https://github.com/1040942669/legal-rag-agent/actions/runs/36553279892) 全部成功；普通 squash merge 和 release target 为 `28517b6f323253baf638ba60c887d10630dd0bf1`，其 [master CI run 36554828645](https://github.com/1040942669/legal-rag-agent/actions/runs/36554828645) 亦为 4/4 success。annotated `v0.7.0` Tag object `f40715c16e90b429a7c49a6347092114fefc787d` 精确 peeled 到该提交，[GitHub Release](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.7.0) 于 `2026-09-29T10:39:52Z` 发布，非 draft、非 prerelease。独立回执 [PR #27](https://github.com/1040942669/legal-rag-agent/pull/27) 和其 [master CI](https://github.com/1040942669/legal-rag-agent/actions/runs/36561210905) 均完成，四路 success；完整 M6 仍需上面的运行时观测修补和治理关闭。
+> 软件及独立回执已发布：[PR #26](https://github.com/1040942669/legal-rag-agent/pull/26) final head `b9400ab289618707a53ee6b14f6ac1cee4af2ee1` 的 [四路 CI run 36553279892](https://github.com/1040942669/legal-rag-agent/actions/runs/36553279892) 全部成功；普通 squash merge 和 release target 为 `28517b6f323253baf638ba60c887d10630dd0bf1`，其 [master CI run 36554828645](https://github.com/1040942669/legal-rag-agent/actions/runs/36554828645) 亦为 4/4 success。annotated `v0.7.0` Tag object `f40715c16e90b429a7c49a6347092114fefc787d` 精确 peeled 到该提交，[GitHub Release](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.7.0) 于 `2026-09-29T10:39:52Z` 发布，非 draft、非 prerelease。独立回执 [PR #27](https://github.com/1040942669/legal-rag-agent/pull/27) 和其 [master CI](https://github.com/1040942669/legal-rag-agent/actions/runs/36561210905) 均完成，四路 success；运行时观测修补已作为上面的 v0.7.1 发布，完整 M6 仍需其独立回执和治理关闭。
 
 ### Added
 
