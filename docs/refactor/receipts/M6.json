@@ -311,20 +311,39 @@
     "Alembic 0007 downgrade rejects nonempty M6 job history. Preserve PostgreSQL state and use a planned forward repair for valuable jobs; deleting Redis or database volumes is not rollback evidence."
   ],
   "receipt_status": "verified_v0_7_0_receipt_milestone_in_progress",
+  "current_release_pointer": {
+    "version": "v0.7.1",
+    "receipt_path": "docs/refactor/receipts/M6-v0.7.1.json",
+    "software_release_verified": true,
+    "milestone_status": "released_receipt_pending",
+    "receipt_status": "awaiting_documentation_pr",
+    "verified_at": "2026-10-02T11:31:17Z",
+    "note": "Top-level v0.7.0 release/receipt fields and their original audit notes are preserved historical evidence. This pointer and milestone_completion describe the current patch; see the versioned receipt for complete v0.7.1 evidence."
+  },
   "milestone_completion": {
-    "status": "in_progress",
+    "status": "released_receipt_pending",
     "planned_patch_version": "v0.7.1",
     "branch": "codex/m6-observation-completion",
     "baseline_sha": "0dcafb87dd8537d66f6486febf73fd0d1258b0ed",
     "reason": "A full-plan audit identified missing runtime observations and false queued telemetry on idempotent replay despite the existing 58-check gate passing.",
-    "tests_status": "not_run",
-    "candidate_sha": null,
-    "pr_url": null,
-    "merge_sha": null,
-    "master_ci_url": null,
-    "tag": null,
-    "release_url": null,
-    "receipt_status": "not_started"
+    "tests_status": "passed_on_exact_final_software_head_and_release_target_master",
+    "candidate_sha": "d6fc26882237ca149ab38c7e944b32a260e0430b",
+    "pr_url": "https://github.com/1040942669/legal-rag-agent/pull/28",
+    "pr_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36998001012",
+    "merge_sha": "582eb8949c1150fc7a12761bd46fbda9c173ef62",
+    "master_ci_url": "https://github.com/1040942669/legal-rag-agent/actions/runs/36999853797",
+    "tag": "v0.7.1",
+    "release_url": "https://github.com/1040942669/legal-rag-agent/releases/tag/v0.7.1",
+    "published_at": "2026-10-02T11:30:49Z",
+    "verified_at": "2026-10-02T11:31:17Z",
+    "software_release_verified": true,
+    "receipt_path": "docs/refactor/receipts/M6-v0.7.1.json",
+    "receipt_branch": "codex/m6-v071-release-receipt",
+    "receipt_status": "awaiting_documentation_pr",
+    "receipt_pr_url": null,
+    "receipt_final_sha": null,
+    "receipt_merge_sha": null,
+    "receipt_master_ci_url": null
   },
   "note": "This record preserves the verified v0.7.0 software release and completed independent receipt PR #27, including its final-head and exact merge-target master CI. Full M6 remains in_progress while a real software patch planned as v0.7.1 completes section 11.6 runtime observations. The old passing evidence does not validate uncommitted patch code. Issue #25 and Milestone 7 remain open. The published v0.7.0 and v0.6.0 tags are not moved; M7 is not started. Patch tests, PR, merge, Release and its own independent receipt must be recorded only after they occur."
 }
