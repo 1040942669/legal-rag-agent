@@ -290,9 +290,11 @@
     "remote_tokens_text_credentials_and_raw_identifiers_excluded": true
   },
   "receipt_branch": "codex/m6-v071-release-receipt",
-  "receipt_pr_url": null,
-  "receipt_pr_state": null,
-  "receipt_candidate_sha": null,
+  "receipt_pr_url": "https://github.com/1040942669/legal-rag-agent/pull/29",
+  "receipt_pr_state": "open",
+  "receipt_pr_is_draft": true,
+  "receipt_candidate_sha": "359def8477a9121f2bbd62ccc97bf4c20df86e16",
+  "receipt_candidate_sha_role": "first_receipt_candidate_not_final_head",
   "receipt_candidate_ci_url": null,
   "receipt_candidate_ci_status": null,
   "receipt_final_sha": null,
@@ -304,7 +306,7 @@
   "receipt_master_ci_sha": null,
   "receipt_master_ci_status": null,
   "receipt_verified_at": null,
-  "receipt_status": "awaiting_documentation_pr",
+  "receipt_status": "awaiting_final_head_gates",
   "milestone_status": "released_receipt_pending",
   "issue_url": "https://github.com/1040942669/legal-rag-agent/issues/25",
   "issue_state": "open",
@@ -315,12 +317,12 @@
   "milestone_closed_at": null,
   "governance_verified_at": "2026-10-02T11:31:17Z",
   "known_limitations": [
-    "Software is released, but the independent documentation PR, its exact-head CI, normal merge, merge-target master CI and Issue/Milestone closure remain pending. Null receipt fields are unknown, not successful.",
+    "Software is released and independent documentation PR #29 exists as an open draft. Its final receipt head, exact final-head CI, normal merge, merge-target master CI and Issue/Milestone closure remain pending. The first receipt candidate is not the final head; null CI and future receipt fields are unverified or unknown, not successful.",
     "CompletionUsage.calls records controlled client invocations, not proof of an HTTP request being sent or charged. Missing or incompletely covered token components and unverified cost remain null; M2 normalized ledgers do not establish per-component token coverage.",
     "The 76-case M6 combined suite includes unit regressions and PostgreSQL tests; it must not be described as 76 real broker scenarios. Only six receipt scenarios use the real broker/worker mechanism.",
     "Langfuse remote export, live or paid models, production capacity, real legal quality and provider exactly-once were not verified. Remote export stays opt-in and redacted.",
     "CI jobs produce distinct wheel byte hashes despite the same version; the authoritative package hash here is the M6 release-target master wheel, not the PR or M4/M5 wheels. GitHub Release currently has no attached assets, and CI artifacts are subject to retention.",
     "Existing bounded outbox redelivery, best-effort cancellation and data-preserving rollback limitations remain. Preserve database and immutable artifacts; no new migration, dependency or M5 checkpoint schema was introduced."
   ],
-  "note": "This is the independent documentation receipt under preparation after the real v0.7.1 software release. It does not name its own future commit or PR. v0.7.0 remains an immutable historical release/receipt in M6.json, and published v0.7.0/v0.6.0 tags are unchanged. Complete this receipt through normal gates before governance closure. Do not move a software tag, create another software version for documentation, or start M7."
+  "note": "This is the independent documentation receipt in actual draft PR #29 after the real v0.7.1 software release. The recorded first receipt candidate is historical, not this document's future final head; final receipt SHA, merge and master CI remain unknown. v0.7.0 remains an immutable historical release/receipt in M6.json, and published v0.7.0/v0.6.0 tags are unchanged. Complete this receipt through normal gates before governance closure. Do not move a software tag, create another software version for documentation, or start M7."
 }

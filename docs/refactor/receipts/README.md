@@ -8,7 +8,7 @@
 
 新候选和 release-target 的 M6 门禁均为 `58/58`、exit 0；合并专项 JUnit 均为 `76/0/0/0`，包含新增真实 PostgreSQL graph 3 用例及真实 worker T07，不能把 76 个合并用例说成 76 个 broker 场景。全量为 `1013 passed + 157 subtests passed`。新回执保存八份 GitHub artifact 的 ID/digest、精确 head/run 绑定、内部 M6 文件 SHA-256 与独立计算的 wheel 哈希。master 的权威 M6 wheel 为 `0.7.1`、438489 bytes、SHA-256 `00a37901b690c8a2059f930c63310de431b2eef7c591c89a40c31580f6259aa3`，13 个 installed-runtime 模块与隔离 smoke 通过。真实/付费模型及远端 Langfuse 实发未运行，不声称生产或法律质量提升。
 
-独立文档回执当前为 `awaiting_documentation_pr`，分支 `codex/m6-v071-release-receipt`；尚未知的 receipt PR、最终文档 SHA、merge 和对应 master CI 均为 null。软件发布已经核验，不回写成“发布失败”；独立回执及治理仍须按门禁完成。[Issue #25](https://github.com/1040942669/legal-rag-agent/issues/25) 与 [Milestone 7](https://github.com/1040942669/legal-rag-agent/milestone/7) 在 `2026-10-02T11:31:17Z` 核验为 open，Milestone 有 1 个 open issue。`M6.json` 的旧软件/回执事实保持不变，通过 current pointer 指向新回执；`v0.7.0` 与 `v0.6.0` Tag 不移动，M7 未开始。
+独立文档回执当前为 `awaiting_final_head_gates`，分支 `codex/m6-v071-release-receipt`，已实际创建 open Draft [PR #29](https://github.com/1040942669/legal-rag-agent/pull/29)。首个已推送候选 `359def8477a9121f2bbd62ccc97bf4c20df86e16` 的角色是 `first_receipt_candidate_not_final_head`，不是最终回执 head；其 CI 在本回执中尚未核验，最终文档 SHA、merge 和对应 master CI 仍为 null。软件发布已经核验，不回写成“发布失败”；独立回执及治理仍须按门禁完成。[Issue #25](https://github.com/1040942669/legal-rag-agent/issues/25) 与 [Milestone 7](https://github.com/1040942669/legal-rag-agent/milestone/7) 在 `2026-10-02T11:31:17Z` 核验为 open，Milestone 有 1 个 open issue。`M6.json` 的旧软件/回执事实保持不变，通过 current pointer 指向新回执；`v0.7.0` 与 `v0.6.0` Tag 不移动，M7 未开始。
 
 每个阶段远程核验发布后，将模板 `../templates/RELEASE_RECEIPT.example.json` 填为 `Mx.json`。
 必须记录实际 Tag 目标 SHA、PR、CI、Release URL、是否 draft 以及发布验证时间。

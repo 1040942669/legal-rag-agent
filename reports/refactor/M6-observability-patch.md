@@ -26,7 +26,7 @@
 | 新旧 M6 durable 回归 | 上述新 Harness DB suite，加 handlers/store/outbox 三文件 | `27 passed in 8.23s`，exit 0；JUnit `.tmp/m6-observation-durable-junit.xml` |
 | 新 Harness/gate/API 定向 | `pytest -q tests/test_m6_harness_observation.py tests/test_m6_quality_gate.py tests/test_m6_api_jobs.py` | `26 passed in 0.86s`，exit 0 |
 | 最终 jobs/API/M2 定向 | API、jobs、worker、M2 bridge 四组 | `40 passed in 33.57s`，exit 0；增加了完整历史、完成指针、output/usage 一致性验证 |
-| 旧用量构造兼容性 | 既有七个位置参数和不变 snapshot | 新断言先 `1 failed`，修正新增字段顺序后与打包断言共 `8 passed in 0.64s`，exit 0 |
+| 旧用量构造兼容性 | 既有七个位置参数和不变 snapshot | 新断言先 `1 failed`，修正新增字段顺序后与打包断言共 `8 passed in 0.54s`，exit 0 |
 | 本地 wheel 隔离 smoke | `release_wheel_probe.py`，M6，实际安装、CLI、模块与 migration | passed，version `0.7.1`，101 entries，440990 bytes，SHA-256 `1526add72ce32c5ec8db92fb5aa6fc4e886198328241bdbff5bae4645fc66028`；仅本地 commit 前证据，不替代最终 CI wheel |
 | 冻结代码提交完整离线门禁 | `quality_gate.py --milestone M0 --mode offline`，commit `10004b4`，Windows/Python 3.12.13，UTC `2026-10-02T10:47:05Z` 至 `10:49:22Z` | `7/7 passed`，exit 0，136510 ms；`1013 passed, 157 subtests passed in 132.70s`，JUnit `1170/0/0/0`；版本、CLI、smoke、Markdown links、STATE 与 secret scan passed |
 | 最终文档 head 完整离线门禁 | 同命令，commit `d6fc268`，UTC `10:53:47Z` 至 `10:55:51Z` | `7/7 passed`，exit 0，123567 ms；`1013 passed, 157 subtests passed in 119.85s`，JUnit `1170/0/0/0` |
@@ -44,7 +44,7 @@
 
 上述软件、CI、wheel、Tag 与 Release 已远端核验；两个独立代理交叉检查前三路 artifact 与摘要，主核验检查 M6 closed receipt、JUnit、实际 wheel 和 provenance。精确 PR/master 四路 artifact digest、关键内部文件 SHA-256 保存在新回执；不同 CI job 的 wheel byte SHA 不同，不声称 byte-for-byte reproducible。
 
-本独立回执尚未 commit/push/PR；它自己的精确 head/master 门禁与 Issue #25/Milestone 7 关闭均未执行，不预写为完成。`2026-10-02T11:31:17Z` 两个治理对象仍 open，milestone open_issues 为 1。回执通过后再关闭，并作非递归文档收口；M7 不开始。
+本独立回执首个候选 `359def8477a9121f2bbd62ccc97bf4c20df86e16` 已 commit、正常 push，并建立 [Draft PR #29](https://github.com/1040942669/legal-rag-agent/pull/29)；该 SHA 不替代最终文档候选。本次更新不自引用未来 SHA，最终 receipt head/master 门禁与 Issue #25/Milestone 7 关闭仍未执行，不预写为完成。`2026-10-02T11:31:17Z` 的历史核验快照中两个治理对象仍 open，milestone open_issues 为 1；关联文档 PR 后当前 open 计数会包含该 PR。回执通过后再关闭，并作非递归文档收口；M7 不开始。
 
 ## 未运行项与回滚
 
