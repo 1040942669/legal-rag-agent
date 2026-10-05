@@ -6,11 +6,18 @@
     "full_name": "1040942669/legal-rag-agent",
     "observed_default_branch": "master",
     "observed_baseline_commit": "61f1065fc6d5678d0d57114e2e361294d04906b4",
-    "observed_on": "2026-10-05",
-    "workspace_head": "4d9546e06cfe8ff44660943ffd2dd353ac2e61cc",
-    "workspace_head_note": "Verified origin/master is the base 4d9546e06cfe8ff44660943ffd2dd353ac2e61cc of the local dirty general evidence improvements. The prior smoke and lexical edits are preserved. This existing PR #30 merge is not a new candidate commit. W1-W8 local implementation, applicable runtime validation and observed result-document static checks are complete; critical runtime files and the original source-scoped identity remain unchanged. Legal quality is not accepted and this is not a new release. M6 remains released; M5/M6 tags, releases, receipts and historical evidence are unchanged. M7 remains required but not_started. No remote writes or new paid calls are authorized by this improvement scope.",
-    "workspace_branch": "codex/general-rag-improvements",
-    "workspace_dirty": true,
+    "observed_on": "2026-10-06",
+    "workspace_head": "04fd389945125c81767745bbdce48137921d26fd",
+    "workspace_head_note": "Observed clean, pushed runtime candidate before this documentation-only result update. origin/master remains 4d9546e06cfe8ff44660943ffd2dd353ac2e61cc. This is a source-candidate snapshot, not a self-referential SHA for the later documentation commit. Prior dirty Smoke, lexical and W1-W8 work was preserved in prerequisite 914a7e322d2787ec99a2fe1f1117ad5906244e02. Current authorization permits commit/push/review PR, not merge/release, model calls or M7. M6 remains released; historical tags, releases and receipts are unchanged.",
+    "workspace_branch": "codex/chinese-bm25-optimization",
+    "workspace_dirty": false,
+    "historical_workspace_before_chinese_retrieval": {
+      "observed_on": "2026-10-05",
+      "head": "4d9546e06cfe8ff44660943ffd2dd353ac2e61cc",
+      "branch": "codex/general-rag-improvements",
+      "dirty": true,
+      "note": "W1-W8 local implementation and applicable engineering validation were complete; legal quality was not accepted. That historical task authorized no remote writes or new paid calls. Its source-scoped evidence and historical nodes below are preserved."
+    },
     "remote_tags_checked": true
   },
   "execution_status": "released",
@@ -26,10 +33,10 @@
     "release_authorized": false,
     "external_model_calls_allowed": false,
     "new_live_model_calls": 0,
-    "implementation_complete": false,
+    "implementation_complete": true,
     "comparison_status": "two_frozen_development_comparisons_completed_no_automatic_promotion",
-    "candidate_commit": "e55a6a42da65549d3d1c2b2e241dd0759cd9f662",
-    "candidate_status": "partial_component_commit_full_integration_still_dirty",
+    "candidate_commit": "04fd389945125c81767745bbdce48137921d26fd",
+    "candidate_status": "runtime_implementation_committed_pushed_local_engineering_verified_default_choice_pending",
     "pushed": true,
     "pr": "https://github.com/1040942669/legal-rag-agent/pull/31",
     "pr_status": "draft",
@@ -43,8 +50,68 @@
     "baseline_mrr_at_5": 0.6101842592592592,
     "default_promoted": false,
     "default_selection_status": "awaiting_user_tradeoff_choice_not_gate_override",
-    "final_candidate_validation": "pending",
-    "note": "This explicit current authorization supersedes prior local-only boundaries for the new task; historical nodes and release receipts retain their original meaning. Preserve prior dirty work in a prerequisite commit. No new search service or shared cache without measured need; no new generic intent/safety framework."
+    "final_candidate_validation": {
+      "source_candidate_sha": "04fd389945125c81767745bbdce48137921d26fd",
+      "identity_basis": "Clean HEAD observed before and after runtime gates; no tracked edits during these gates. Benchmark manifests retain their own earlier source hashes.",
+      "cumulative_m2": {
+        "status": "passed",
+        "mandatory_passed": 25,
+        "mandatory_total": 25,
+        "exit_code": 0,
+        "duration_ms": 234906,
+        "artifact": ".tmp/chinese-04fd389-m2-final.json",
+        "pytest_tests": 2018,
+        "pytest_subtests": 157,
+        "pytest_duration_seconds": 180.49,
+        "warnings": 4,
+        "junit": {"tests": 2175, "failures": 0, "errors": 0, "skipped": 0}
+      },
+      "isolated_postgresql": {
+        "status": "passed",
+        "selected_files": 17,
+        "tests": 93,
+        "duration_seconds": 94.32,
+        "exit_code": 0,
+        "junit": ".tmp/chinese-04fd389-pg-final.xml",
+        "physical_restart_fresh_process": "passed",
+        "migration_head": "0008_execution_money",
+        "receipt": ".tmp/isolated-pg-4b8e87ff08d64607bc0d63d905a2a806/restart-prepared.json",
+        "self_created_cluster_stopped": true
+      },
+      "installed_wheel": {
+        "status": "passed",
+        "artifact": ".tmp/chinese-candidate-wheel-probe.json",
+        "sha256": "cab21c051ed911939f728b2ffd3c29eb02500b5c535e965ab675a442c3f4e78d",
+        "imported_modules": 27,
+        "source_checkout_isolated": true,
+        "runtime_source_files_byte_matched_to_candidate": 110,
+        "migration_head": "0008_execution_money"
+      },
+      "local_linux_broker": "not_run_docker_linux_daemon_unavailable",
+      "ci_run": "37354368069",
+      "ci_status": "passed_four_jobs_exact_source_candidate",
+      "ci_mandatory_counts": {"offline": [25, 25], "m4": [41, 41], "m5": [51, 51], "m6": [58, 58]},
+      "ci_m6_duration_ms": 675759,
+      "ci_m6_worker_junit": {"tests": 76, "failures": 0, "errors": 0, "skipped": 0},
+      "ci_m5_cumulative_junit": {"tests": 81, "failures": 0, "errors": 0, "skipped": 0},
+      "ci_exact_sha_schema8_receipt_validator_errors": [],
+      "ci_m6_artifact_id": 11365171011,
+      "ci_m6_artifact_digest": "sha256:d9959f8105676e817254a0c3de229f64dad0c5deff4484d91a1ffd4ce9e2c11a",
+      "ci_m6_local_evidence": ".tmp/chinese-04fd389-ci-m6",
+      "following_documentation_commit_ci": "separate_future_head_not_covered_by_source_candidate_ci",
+      "result_document_static": {
+        "status": "passed_3_of_3_before_recording_this_result",
+        "artifact": ".tmp/chinese-result-docs-static-final.json",
+        "markdown_files": 46,
+        "json_files": 2,
+        "candidate_text_files": 326,
+        "credential_findings": 0,
+        "metadata_only_closeout_requires_same_checks_before_commit": true
+      },
+      "legal_quality_accepted": false,
+      "independent_holdout_admitted": false
+    },
+    "note": "Current authorization supersedes prior local-only boundaries only for this task; historical nodes and release receipts retain their meaning. Runtime implementation and local engineering validation do not imply accepted default promotion, complete task, legal quality or release. The two-metric promotion guard remains failed. No new shared cache, search service or generic intent/safety framework."
   },
   "general_evidence_improvements": {
     "status": "local_engineering_verified_complete_default_not_promoted_quality_not_accepted",
@@ -1608,5 +1675,6 @@
   "historical_next_action_before_live_smoke_repair": "Stop after the completed local first live smoke and recorded offline validation. The API compatibility probe passed but the first RAG draft failed citation alignment; two attempts cost an estimated 0.0009544 CNY. The fixed authorization ledger already exists; do not delete it, retry, resume with a new output directory, expand to 30 cases or Judge, or start M7. Current changes are uncommitted on codex/live-smoke-qwen35b; no remote writes or new release. Any prompt improvement and new paid round require separate user direction. M5/M6 released tags, receipts and releases remain unchanged.",
   "historical_next_action_before_local_lexical_retrieval": "Stop after the separately authorized citation-prompt repair, bounded live revalidation and actual result handoff. The original patent case and first four drafts live-passed; the repair stopped on fifth-case historical retrieval/response-mode failure: 5 of 9 processed, 4 drafts passed, 4 cases not run. Repair 5 calls plus prior 2 total 7, estimated 0.0070528 CNY, not verified billing. Both fixed ledgers are consumed; do not delete, move, retry or start a third paid run using unused nominal capacity. Final offline M2 gate passed 25/25 with 1191 tests and 157 subtests; the earlier doc-link gate failure remains recorded. Changes remain uncommitted on codex/live-smoke-qwen35b at base 4d9546e06cfe8ff44660943ffd2dd353ac2e61cc; no remote writes or new release. Further retrieval/semantic-evidence work needs separately defined scope and quality evidence; any new paid run requires explicit authorization. Do not expand to 30 cases, Judge, a new model or M7. Existing M5/M6 software tags, receipts and releases remain unchanged.",
   "historical_next_action_before_general_evidence_improvements": "Stop and report the completed local improvements and verification. The frozen candidate passed the cumulative M2 offline gate 25/25 with 1294 tests and 157 subtests; result-document static checks passed 3/3. The provider-free paired experiment completed; four retrieval cases improved and two regressed, so local-lexical-v2 remains explicit opt-in and legacy-v1 stays default. This is not complete live-smoke or legal semantic-quality acceptance. No third paid request, consumed-ledger reuse, remote write, new release, corpus/gold rewrite, verifier weakening or M7. Existing M5/M6 released artifacts and both paid histories remain unchanged.",
-  "next_action": "Report and stop this completed W1-W8 local implementation and applicable engineering verification. Full pytest, cumulative M2, isolated PostgreSQL, real restart, installed wheel, repaired eight-arm development experiment and observed result-document static checks have completed; failures remain preserved and runtime identity is unchanged. Recheck the same static checks after metadata-only closeout without changing runtime code. Legal quality, trusted human review, independent holdout, live checker calibration, real Linux broker, production capacity and remote CI are not accepted. Keep legacy-v1 default and generic-v3 opt-in. Do not inject gold, fabricate review/holdout, send new paid calls, reuse consumed ledgers, read secrets/raw history, upload corpus, write remotely, move M5/M6 tags or start M7. Existing published artifacts remain unchanged."
+  "historical_next_action_before_chinese_retrieval": "Report and stop this completed W1-W8 local implementation and applicable engineering verification. Full pytest, cumulative M2, isolated PostgreSQL, real restart, installed wheel, repaired eight-arm development experiment and observed result-document static checks have completed; failures remain preserved and runtime identity is unchanged. Recheck the same static checks after metadata-only closeout without changing runtime code. Legal quality, trusted human review, independent holdout, live checker calibration, real Linux broker, production capacity and remote CI are not accepted. Keep legacy-v1 default and generic-v3 opt-in. Do not inject gold, fabricate review/holdout, send new paid calls, reuse consumed ledgers, read secrets/raw history, upload corpus, write remotely, move M5/M6 tags or start M7. Existing published artifacts remain unchanged.",
+  "next_action": "Verify and push this documentation-only result update, then report the new document commit and its separate CI status without recursively rewriting its own SHA into this file. Runtime candidate 04fd389 passed local M2, 93 isolated PostgreSQL tests, physical restart, source-matched installed wheel and exact-head four-job CI37354368069, including real Linux broker/worker receipts. Obtain the user's explicit default-selection tradeoff: mature character analysis improves development Hit@5 but regresses MRR and rebuild cost; it failed the unchanged automatic promotion guard. Until chosen, legacy-v1 remains default and modern analyzers are opt-in. Preserve failures, benchmark identities and historical receipts. No new model calls, ledger reuse, corpus upload, merge/release, tag movement or M7."
 }

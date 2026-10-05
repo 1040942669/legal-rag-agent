@@ -8,7 +8,9 @@
 
 ## 项目产出
 
-当前开发分支在进行 [中文BM25组件替换与规则收缩](reports/refactor/CHINESE_BM25_OPTIMIZATION.md)，见 [TODO](docs/refactor/CHINESE_RETRIEVAL_TODO.md) 和 [Draft PR #31](https://github.com/1040942669/legal-rag-agent/pull/31)。现代候选直接使用BM25S评分与成熟jieba/sklearn分析器，不增加购物词表、40/80人工加分或自写BM25公式。固定开发集第二轮中，字符方案Hit@5为83/108（旧76/108），MRR@5为0.5971（旧0.6102），没有满足两项均不回退的自动推广门槛，默认暂未切换。当前全量集成验证仍进行中，不以专项绿色证明法律质量。
+当前开发分支已实现 [中文BM25组件替换与规则收缩](reports/refactor/CHINESE_BM25_OPTIMIZATION.md)，见 [TODO](docs/refactor/CHINESE_RETRIEVAL_TODO.md) 和 [Draft PR #31](https://github.com/1040942669/legal-rag-agent/pull/31)。现代候选直接使用BM25S评分与成熟jieba/sklearn分析器，不增加购物词表、40/80人工加分或自写BM25公式。固定开发集第二轮中，字符方案Hit@5为83/108（旧76/108），MRR@5为0.5971（旧0.6102），没有满足两项均不回退的自动推广门槛。默认仍为 `legacy-v1`，是否接受召回、排名与建库开销的取舍仍待用户选择。
+
+已推送的运行时候选 `04fd389945125c81767745bbdce48137921d26fd` 在本地通过M2累计25/25项检查，其中全量pytest为2018 passed与157 subtests；17文件PostgreSQL回归93 passed，真实停止/启动后新进程核验schema `0008_execution_money` 成功。该源码候选的 [CI 37354368069](https://github.com/1040942669/legal-rag-agent/actions/runs/37354368069) 已四路completed/success：offline 25/25、M4 41/41、M5 51/51、M6 58/58；远端真实broker/worker JUnit为76/0/0/0。本地未运行Linux broker/worker，远端结果不应冒充本地运行。PR #31仍为draft，本轮未合并或发布；后续文档提交须另行确认其精确head的CI。上述结果是工程验证，不证明法律质量、生产容量或真实模型效果。
 
 前轮 [通用证据与受控服务改善](reports/refactor/GENERAL_EVIDENCE_IMPROVEMENTS.md) W1至W8已保存为前置提交，设计见 [ADR-006](docs/refactor/decisions/ADR-006-general-evidence-first-improvements.md)。它的1752+157子测试、M2 25/25、隔离PG150及重启/wheel证据属于原候选，不能替代本轮验收。现代链路保留精确目录身份、快照与权限隔离、证据归属、程序预算和默认禁生成；词命中不是违法意图证明，机械引用存在也不是语义支持。历史lexical-v2、paid Smoke及下文旧基线数字保持原实验身份。独立法律审核、未曝光holdout和生产容量仍未验证，本轮不发版、不进入M7。
 
@@ -17,7 +19,7 @@
 | 数据与索引 | 203 部法律、19,050 个条文级 chunk 的历史实验快照；4 种 chunk 策略；废止法律标记与精确重复条文去重 |
 | 检索能力 | 成熟BM25S＋中文/字符分析候选，历史自写BM25复现；dense、RRF、LlamaIndex对照；可选BGE reranker；版本化配置与ranking trace |
 | 受控 Agent 能力 | 规则 Query Analyzer、严格 JSON normalizer、有限 multi-query planner、证据合并、最多一轮补检索 |
-| 生成边界 | 高风险请求预拒答、证据充分性检查、结构化回答兼容层、引用/范围/行为检查、资料不足或澄清模板、最终交付前复核 |
+| 生成边界 | 现代v3风险词提示与用途不明时的生成前澄清、证据充分性检查、结构化回答兼容层、引用/范围/行为检查、资料不足模板、最终交付前复核 |
 | 评测体系 | 120 条分层评测集、30 条固定生成子集、bootstrap 95% CI、显式行为分母、answer/retrieval/Judge N/A、自动五维实验矩阵 |
 | 工程质量 | M2 `v0.3.0` 为 548 个离线测试、157 个子测试与 25 项累计门禁；M3 `v0.4.0` 的候选和 release target 在 Linux/Python 3.12.13 上均通过 671 个离线测试、157 个子测试、61 项 PostgreSQL integration 与 33/33 累计门禁；M4 `v0.5.0` 的最终 release target 通过 801 个离线测试、157 个子测试、79 项 PostgreSQL integration 与 41/41 累计门禁；M5 `v0.6.0` 的本地精确候选为 921 个测试、157 个子测试，PR head 与 release target 均通过 offline、M4 service、M5 fault 三个 CI jobs，M5 专项 JUnit 为 81/0/0/0、累计门禁 51/51，并验证跨进程 hard kill、真实 PostgreSQL service restart、恢复 demo 与隔离 wheel；M6 `v0.7.0` 的软件 PR head 与 release-target master 均通过四路 CI，真实 PostgreSQL/Redis/Celery worker JUnit 为 41/0/0/0、累计门禁 58/58，0.7.0 wheel 隔离 smoke 通过，未调用 live model |
 
@@ -36,6 +38,8 @@
 因此，本项目把 **评测、失败归因和证据边界** 作为主线，而不是把组件数量当作完成度。
 
 ## 系统架构
+
+下图保留历史v2链路的简化表示，其中风险词预拒答不是现代v3的实际处置。图后的文字说明当前候选的差异。
 
 ```mermaid
 flowchart LR
@@ -60,7 +64,9 @@ flowchart LR
     M -- 其余失败 --> P[记录状态并执行既有处理]
 ```
 
-这是在线问答调用链的简化图。M1 `v0.2.0` 将生成结果适配为结构化回答，分开检查 schema、引用 ID、可见证据范围、回答模式、免责声明和语义状态。M2 不改变这条业务链的安全含义，而是在其外层增加可恢复实验执行器：按阶段记录输入身份、缓存来源、checkpoint、计时和调用账本，再从不可变 case artifact 聚合报告。M3 把 scope、snapshot、profile 与来源关系固化为数据库边界；M4 再把一次调用包装成可鉴权、可幂等、可追踪和可在断线后续读的持久 run。词面启发式最多给出 `uncertain` 或 `not_checked`，仍不证明引用语义支持或法律结论正确。
+这是历史在线问答调用链的简化图。M1 `v0.2.0` 将生成结果适配为结构化回答，分开检查 schema、引用 ID、可见证据范围、回答模式、免责声明和语义状态。M2 不改变这条业务链的安全含义，而是在其外层增加可恢复实验执行器：按阶段记录输入身份、缓存来源、checkpoint、计时和调用账本，再从不可变 case artifact 聚合报告。M3 把 scope、snapshot、profile 与来源关系固化为数据库边界；M4 再把一次调用包装成可鉴权、可幂等、可追踪和可在断线后续读的持久 run。词面启发式最多给出 `uncertain` 或 `not_checked`，仍不证明引用语义支持或法律结论正确。
+
+现代 `general-reference-v3` 绑定 `legal-reference-v3`：只把有界语法内明确正向选择的法名与条号作为硬要求，背景、转述与局部否定不自动成为要求，复杂跨句指代保留未知。明确法条在已鉴权、冻结的scope/snapshot语料内走精确路由；未找到或需澄清时不靠模糊检索或planner伪装满足。风险词只作提示，原文检索不据此提前拒绝；自由生成遇到用途不明信号时，在费用预留和模型调用前程序澄清。服务生成仍默认关闭，显式启用须使用冻结策略和受控调用账本；分数合法、引用存在与工程门禁通过均不等于法律结论正确。
 
 ### 1. 数据驱动的分块
 
@@ -72,7 +78,22 @@ flowchart LR
 - Dense 检索支持本地 sentence-transformers 和 OpenAI-compatible embedding API，并将 query instruction、metadata 拼接作为显式配置。
 - RRF 只基于排名融合不同分值空间，同时保存 BM25/dense 子排名，便于解释每个结果从哪里来。
 - 可选 cross-encoder 对 base retriever 的 top-N 候选做精排，保留原 rank/score，并单独记录候选数和重排耗时。
-- 废止法律默认降权；用户明确查询旧法时不降权，保留历史法律研究能力。
+- 当前legacy默认配置保留废止乘数；现代BM25S候选不施加人工废止降权。既有历史策略中明确查询旧法的行为按原配置保留。
+
+字符分析器可显式试用，但这不改变仓库默认。自定义配置会与公共默认深度合并，因此不能只改profile并继承旧版40/80加分、HMM或0.5废止乘数。将以下完整覆盖项保存到自己的配置文件，例如 `configs/my-char.yaml`：
+
+```yaml
+retrieval:
+  bm25_lexical_profile: bm25s-sklearn-char-v1
+  bm25_hmm: null
+  bm25_law_boost: 0.0
+  bm25_article_boost: 0.0
+  deprecated_penalty: 1.0
+```
+
+已有本地索引时，可使用 `uv run python -m legal_rag.cli --config configs/my-char.yaml chat --chunk-strategy article --retriever bm25 --no-generate`。未覆盖的k1/b仍取公共默认，实际生效参数与依赖身份会被冻结；`--no-generate` 不发送生成模型请求。CLI不提供服务级用户授权边界。
+
+在部署策略允许该selector的新schema2服务中，创建run时可传 `retrieval.lexical_profile: "bm25s-sklearn-char-v1"`。API只接受闭集selector，服务侧从冻结策略经 `for_profile` 构造配置，保留k1/b并将不适用的HMM置为null、人工boost置零、废止乘数置1；请求不能自由覆盖预算或其它冻结参数。旧schema1策略不获得现代profile权限。该选项仍须按本轮已记录的召回、排名和建库开销取舍使用，不代表默认推广。
 
 ### 3. 受控 Adaptive RAG
 
@@ -331,7 +352,7 @@ annotated `v0.4.0` Tag 对象 `1aa41823030681e17b7da70c27b50463d7d997b1` 精确 
 
 ### M4 持久 API、会话与事件流（v0.5.0 与独立回执均已完成）
 
-M4 在 M3 数据边界之外增加一层可选 FastAPI 服务。PostgreSQL 是 session、message、run、result、idempotency key 和 event 的事实来源；HTTP handler 只负责协议与依赖注入，外部检索/生成期间不保持长数据库事务。默认入口使用 `LegalChatRunExecutor(generate=False)` 和冻结 PostgreSQL 语料上的 bound BM25，因此发布验证没有调用真实生成模型或付费服务，也不把 provider-free 结果描述为法律质量提升。
+M4 在 M3 数据边界之外增加一层可选 FastAPI 服务。PostgreSQL 是 session、message、run、result、idempotency key 和 event 的事实来源；HTTP handler 只负责协议与依赖注入，外部检索/生成期间不保持长数据库事务。该已发布M4版本的默认入口使用 `LegalChatRunExecutor(generate=False)` 和冻结 PostgreSQL 语料上的 bound BM25，因此发布验证没有调用真实生成模型或付费服务，也不把 provider-free 结果描述为法律质量提升。
 
 [PR #17](https://github.com/1040942669/legal-rag-agent/pull/17) 的 exact-head CI 成功后正常合并；首次 master [run 36472938508](https://github.com/1040942669/legal-rag-agent/actions/runs/36472938508) 随即以 `78 passed, 1 failed` 暴露一个 150ms 测试预算在慢 runner 上覆盖三个真实 PostgreSQL stage-event 事务的问题，发布因此被阻断。[PR #18](https://github.com/1040942669/legal-rag-agent/pull/18) 只把该测试实例的预算调整为 1s，保留 5s 故障注入、三个 callback、晚写 fence 和生产运行语义；其 exact-head CI 与最终 release target `670e005a081cffa36a75af2b202e50eb2b859c3d` 的 [master run 36475260433](https://github.com/1040942669/legal-rag-agent/actions/runs/36475260433) 均完整成功。annotated `v0.5.0` Tag object `36d6883cc1bc29f09f7be5625db458739bce4335` 精确 peeled 到该 target，GitHub Release 非 draft、非 prerelease、附件 0。独立回执 [PR #19](https://github.com/1040942669/legal-rag-agent/pull/19) final head 的 [run 36480188286](https://github.com/1040942669/legal-rag-agent/actions/runs/36480188286) 与 receipt merge commit 的 [master run 36481058959](https://github.com/1040942669/legal-rag-agent/actions/runs/36481058959) 也均完整成功；Issue #16 与 Milestone 5 随后按顺序关闭，M4 状态为 `released`。
 
@@ -458,7 +479,7 @@ HTTP 接受事务同时写入 `jobs` 与 `job_outbox`，因此 202 **不是**“
 }
 ```
 
-已发布 M6 的 migration head 是 `0007_m6_jobs_outbox`；当前未提交改善候选追加 `0008_execution_money`，所以在当前 checkout 运行 `legal-rag-api --migrate` 会显式升级到0008，不应把历史0007回执当作新候选数据库事实。普通 API 启动不静默建表。配置 `LEGAL_RAG_DATABASE_URL`、`LEGAL_RAG_REDIS_URL` 与 registry 后，分别运行 `legal-rag-jobs worker` 和 `legal-rag-jobs dispatch --poll 1`。部署时先启动数据库、Redis、worker 和 dispatcher，再接收新 job；worker 停止后应保留 PostgreSQL 状态和 artifact，不能删卷伪造回滚。`legal-rag-jobs dispatch --once` 适合手动检查单轮投递。更多安全与恢复边界见 [ADR-004](docs/refactor/decisions/ADR-004-m6-batch-jobs-observability.md)，历史结果见 [M6 验收报告](reports/refactor/M6.md)，当前独立候选见 [改善记录](reports/refactor/GENERAL_EVIDENCE_IMPROVEMENTS.md)。
+已发布 M6 的 migration head 是 `0007_m6_jobs_outbox`；本轮已提交候选包含前置改善追加的 `0008_execution_money`，所以在当前 checkout 运行 `legal-rag-api --migrate` 会显式升级到0008，不应把历史0007回执当作新候选数据库事实，也不应把候选描述为新的Release。普通 API 启动不静默建表。配置 `LEGAL_RAG_DATABASE_URL`、`LEGAL_RAG_REDIS_URL` 与 registry 后，分别运行 `legal-rag-jobs worker` 和 `legal-rag-jobs dispatch --poll 1`。部署时先启动数据库、Redis、worker 和 dispatcher，再接收新 job；worker 停止后应保留 PostgreSQL 状态和 artifact，不能删卷伪造回滚。`legal-rag-jobs dispatch --once` 适合手动检查单轮投递。更多安全与恢复边界见 [ADR-004](docs/refactor/decisions/ADR-004-m6-batch-jobs-observability.md)，历史结果见 [M6 验收报告](reports/refactor/M6.md)，前置改善见 [改善记录](reports/refactor/GENERAL_EVIDENCE_IMPROVEMENTS.md)，本轮候选见 [中文检索记录](reports/refactor/CHINESE_BM25_OPTIMIZATION.md)。
 
 新观测 `Observation` 是本地可核对执行事实，不是隐藏推理内容。`LEGAL_RAG_OBSERVATION_JSONL_PATH` 可启用本地绝对路径 JSONL。Langfuse 远端导出默认关闭；只有显式设置 `LEGAL_RAG_LANGFUSE_ENABLED=1`、`LEGAL_RAG_LANGFUSE_EXPORT_ACK=1` 和 `LANGFUSE_BASE_URL/PUBLIC_KEY/SECRET_KEY` 才开启。远端字段白名单会伪名化关联 ID，不导出 query、答案/证据全文、凭证、token 或个人信息；导出队列满/失败不能改变主任务结果。启用前必须确认远端数据目的地和当地政策，密钥只放部署环境，不写入 registry 或 Git。
 
@@ -470,7 +491,7 @@ HTTP 接受事务同时写入 `jobs` 与 `job_outbox`，因此 202 **不是**“
 
 首轮暴露了回答正文缺少同句引用的问题。用户另行授权修复与复测后，仅补足提示词中的引用布局要求，不放宽 verifier、不自动补引用；复测前 4 题草稿通过，包括原失败题。第 5 题因已有检索未命中导致回答模式不符，整轮停止，剩余 4 题未运行。新增 5 次、累计 7 次调用，累计估算 0.0070528 元，未核实账单；固定账本不允许补跑。真实结果与未解决的质量边界单独记录在 [引用格式修复复测](reports/refactor/LIVE_SMOKE_QWEN35B_REPAIR.md)，不覆盖首轮失败证据或改变既有发布状态。
 
-历史局部修复增加了显式可选的 `local-lexical-v2`：连续汉字片段内生成二元词、查询特征去重、只为明确实物购买补少量完整词，不注入 gold 法名、条号、期限或答案。当时的历史 evidence 合同同时修正单法律与条号跨结果拼接、相关法律名冒充同名法律和无效分数，并为纯 BM25 v2 的退货题加词面必要性闸门；该闸门不是语义证明，也不是当前现代 evidence 默认。当前新 `general-reference-v2` 使用类型化引用关系、原文与来源范围，不按购物对象验充分；`generic-v3` 不含购物扩展，显式配置见 [通用候选示例](configs/generic-v3.yaml)。未推广排名默认，不放宽引用、权限或回答模式规则。
+历史局部修复增加了显式可选的 `local-lexical-v2`：连续汉字片段内生成二元词、查询特征去重、只为明确实物购买补少量完整词，不注入 gold 法名、条号、期限或答案。当时的历史 evidence 合同同时修正单法律与条号跨结果拼接、相关法律名冒充同名法律和无效分数，并为纯 BM25 v2 的退货题加词面必要性闸门；该闸门不是语义证明，也不是当前现代 evidence 默认。当前 `general-reference-v3` 使用类型化引用关系、原文与来源范围，不按购物对象验充分，也不把统一原始分数阈值当成跨引擎质量证明；历史v2按冻结规则兼容。`generic-v3` 不含购物扩展，显式配置见 [通用候选示例](configs/generic-v3.yaml)。未推广排名默认，不放宽引用、权限或回答模式规则。
 
 固定 `offline_lexical_ab_20261004_first` 的 108 条检索题命中数为 `76/108 -> 78/108`，网购退货题变为第 1 位；但有 4 题改善、2 题回退，配对差异区间跨 0，因此默认仍为 `legacy-v1`。12 条检索前拒答两臂均通过；16 条补充案例是合成检查而非法律 holdout。无真实模型调用，不把这次结果当作原 9 题 live Smoke 通过。完整回退、身份和验收边界见 [本地检索修复报告](reports/refactor/LOCAL_LEXICAL_RETRIEVAL.md)及[ADR-005](docs/refactor/decisions/ADR-005-local-lexical-retrieval.md)。
 
@@ -630,7 +651,7 @@ legal_rag/                         核心实现
 │   ├── retrieval.py               filter-before-limit 的 exact pgvector 检索
 │   ├── catalog.py                 精确法名/条号/版本目录与原子快照切换
 │   ├── ann.py                     显式实验 HNSW、typed underfill 与 exact fallback
-│   └── alembic/versions/           0001-0008 可打包数据库迁移（0008为当前未提交候选）
+│   └── alembic/versions/           0001-0008 可打包数据库迁移（0008已提交于候选，尚未发布）
 ├── harness/                        M5 有界图、严格 state、预算、工具与 PostgreSQL checkpoint
 ├── services/                       M4-M5 RunService、执行器、检索装配、resume 与 supervisor
 ├── api/                            M4-M6 FastAPI、Bearer 鉴权、schema、配置与入口

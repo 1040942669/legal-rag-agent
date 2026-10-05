@@ -1,6 +1,6 @@
 # 中文 BM25 组件替换与规则收缩
 
-日期：2026-10-06。状态：进行中，尚未完成最终默认选型、全量门禁或合并发布。
+日期：2026-10-06。状态：运行时实现、最终本地工程门禁与源码候选四路CI已通过；默认选型仍待确认。本轮不合并发布。
 
 ## 范围与研究结论
 
@@ -63,25 +63,45 @@ char是已测试现代候选中召回最高者，较legacy为9改善/2回退，�
 - T5新尺度反例先6 failed/7 passed，`.tmp/chinese-score-red.xml`；新v2机械分数合同及显式v1历史分派27 passed。BM25/RRF/exact的非正值仍按各自正匹配合同拒绝，signed dense分数不套统一阈值；数值合法不等于语义正确。
 - T6 parser默认v3，硬要求需要正向选择；旧v2源码冻结并按原身份重放。新选择与配对54 passed；旧解析156项显式绑定v2通过。基础直接引用和并列列表后置询问仍测试现代版本，不能整体移到旧版本掩盖退化。
 - 接线初轮14 failed/92 passed，第二轮4 failed/102 passed；修复纯引用列表作用域，显式保留旧跨句推断测试并新增现代未知行为，升级规则版本期望；最新116 passed/2.87s，`.tmp/chinese-evidence-integration-green.xml`。同一次命令随后读取汇总的临时表达式有SyntaxError，使外层exit1；pytest本身退出0且JUnit116/0/0/0，二者不混写。
-- T7标题可用性先真实RED；保留原完整目录与证据，仅隔离不受支持的query grammar提示。普通查询、支持的exact、unsupported明确unknown等50项passed，`.tmp/chinese-catalog-title-root-green.xml`；新增4项真实PG测试尚未执行。
+- T7标题可用性先真实RED；保留原完整目录与证据，仅隔离不受支持的query grammar提示。普通查询、支持的exact、unsupported明确unknown等50项passed，`.tmp/chinese-catalog-title-root-green.xml`；该开发时点新增4项真实PG尚未执行，后续失败、修复与最终93项结果分别记录如下。
 
 - 字符adapter先15 failed/51 passed，再66 passed/19.88s，分别为`.tmp/chinese-bm25-character-red.xml`与`...-green.xml`。原jieba完整身份保持不变，char实际HMM为null，显式无效HMM参数拒绝。
-- 第二协议的失败/超时/缺结果/源码漂移/重复不一致/非回退推广门槛等16项通过，`.tmp/chinese-script-entry-green.xml`。PR中间head `c562eec9e67dd36376be24d7a39bb3c7d79da84a` 的CI run `37350033614` 首先因pytest脚本入口找不到scripts模块收集失败；显式测试pythonpath后，本地相同脚本入口16项通过，尚待后续候选CI。
+- 第二协议的失败/超时/缺结果/源码漂移/重复不一致/非回退推广门槛等16项通过，`.tmp/chinese-script-entry-green.xml`。PR中间head `c562eec9e67dd36376be24d7a39bb3c7d79da84a` 的CI run `37350033614` 首先因pytest脚本入口找不到scripts模块收集失败；显式测试pythonpath后，本地相同脚本入口16项通过。此处保留中间失败，最终候选CI单独记录。
 - 开发中首次累计扫描119 failed/1855 passed +157 subtests/141.18s，`.tmp/chinese-full-first.xml`。包含尚在RED阶段的15项字符候选和旧规则版本/fixture错配，不能作为冻结候选验收。相关失败由各工作项独立修复，不覆盖原日志。
-- T7首次真实隔离PG4项失败，`.tmp/chinese-catalog-pg-first.xml`，证实`lookup_run_article`尚把存储标题套用有界query语法，修复与复验待完成。自建临时PG已停止，日志保留。
+- T7首次真实隔离PG4项失败，`.tmp/chinese-catalog-pg-first.xml`，证实`lookup_run_article`尚把存储标题套用有界query语法；当时修复与复验待完成，后续已修复并通过下列复验，不覆盖原失败。自建临时PG已停止，日志保留。
 - BM25/RRF/hybrid实际成熟子路、API闭集selector、M2实际引擎漂移拒绝及分数尺度共27项通过，`.tmp/chinese-wiring-score-first.xml`。
 
 ## 整体接线与独立复核
 
-T4至T7已实现，默认策略选择仍待确认，完整最终门禁尚待收口。配置身份、历史v2、机械v2/现代general-v3、目录边界和风险处置的职责见 [ADR-007](../../docs/refactor/decisions/ADR-007-chinese-bm25-and-bounded-rules.md)。
+T4至T7已实现并保存为运行时提交`04fd389945125c81767745bbdce48137921d26fd`，默认策略选择仍待确认。配置身份、历史v2、机械v2/现代general-v3、目录边界和风险处置的职责见 [ADR-007](../../docs/refactor/decisions/ADR-007-chinese-bm25-and-bounded-rules.md)。
 
 独立审查不是仅看现有测试：实际补出了条款局部选择被法名跨度遮盖、异常`条之二之三`截断、继承排除遮盖后续未知、输出v2冒充v3、阶段指纹遗漏、未冻结历史参数及公共profile被服务强制切回legacy等反例。修复分别约束跨度/完整标签、冻结版本/依赖身份和共用有效配置，没有加入购物词表或用gold修运行逻辑。未知跨句指代仍未知，未命中风险词仍不代表安全确认。
 
 - T6当前17文件522 passed +100 subtests，`.tmp/reference-risk-complete-migrations-reviewed-final.xml`；独立风险15项通过。原parser基础测试继续跑现代版本，改变的收缩语义同时断言v2原行为，旧模块SHA保持`2e52d6f0e694c8819827e7b9ee3906b055e3071037f1c3a345de5649bb9da420`。
 - M2历史修复过程分别63 failed/71 passed、5 failed/129 passed，源于未显式版本和旧manifest缺query_analysis被错误索引；真实修复后六文件135 passed，但随后公共profile又有新修复，不能累加或借用它当最终门禁。公共profile真实RED1 failed/3 passed，修后80 passed。新schema2共享公共默认；schema1原payload/fingerprint与1.0乘数保持不变。
 - T4/T5独立63项通过，`.tmp/chinese-t4-t5-independent-reviewed-green.xml`；真实合成RRF k=200的2/201分数不再被现代0.01阈值误拒，仍semantic not_checked。M2公共解码/implicit-BM25身份14项独立通过，`.tmp/chinese-output-final-frozen-green.xml`。公共测试第一次5失败是新增fixture参数错误，含red文件名的implicit测试实际上12通过，都不冒充产品RED。
-- 第二次PG17文件93 passed/95.96s，`.tmp/chinese-service-pg-second.xml`，并完成实际stop/start与独立进程schema8恢复，receipt在`.tmp/isolated-pg-716819adf1e44a9685e02d5cd3bc5cc1/restart-prepared.json`。该轮早于最后公共profile修复，最终候选需复跑。
+- 第二次PG17文件93 passed/95.96s，`.tmp/chinese-service-pg-second.xml`，并完成实际stop/start与独立进程schema8恢复，receipt在`.tmp/isolated-pg-716819adf1e44a9685e02d5cd3bc5cc1/restart-prepared.json`。该轮早于最后公共profile修复，不冒充最终候选；最终复跑见下一节。
 - 第一轮累计M2为24/25、exit1、234409ms，`.tmp/chinese-candidate-m2-first.json`。唯一失败检查是全量pytest中2个CLI trace测试替身未带实际助手的evidence_rules_version字段；生产链路不放松，修复替身后CLI+版本专项17 passed，`.tmp/chinese-cli-version-final-green.xml`。
 - 当前wheel实际仓库外安装成功，27模块/schema8 smoke通过，`.tmp/chinese-candidate-wheel-probe.json`，wheel SHA256 `cab21c051ed911939f728b2ffd3c29eb02500b5c535e965ab675a442c3f4e78d`。随后逐文件比较110个包源码模块，全部与当前候选相同。wheel合同fixture新增模块前1 failed/23 passed，补齐真实新模块后24 passed，不取消缺文件检查。
 
-未完成：默认策略的明确选择、完整冻结候选累计门禁、最终PG复跑、新候选CI及最终交接。上述重叠专项不相加为最终总数，工程通过不替代法律独立holdout。真实模型新增调用和费用均0。
+## 最终运行时候选验证与交付
+
+运行时候选为`04fd389945125c81767745bbdce48137921d26fd`。本地门禁开始前后观察到同一clean HEAD，运行期间没有编辑tracked文件，远端同名分支已核验指向该提交。下面是这一候选的验证，不将较早比较manifest改绑为它，也不把后续仅文档提交冒充已运行的源码身份。
+
+| 检查 | 实际结果 | 证据与边界 |
+| --- | --- | --- |
+| 累计M2离线门禁 | 25/25 passed，exit0，234906ms | `.tmp/chinese-04fd389-m2-final.json`；UTC18:14:03至18:17:59 |
+| 门禁内全量pytest | 2018 passed +157 subtests，180.49s | JUnit2175/0/0/0，jieba上游4项警告；不是模型质量测试 |
+| 17文件隔离PostgreSQL | 93 passed，94.32s，exit0 | `.tmp/chinese-04fd389-pg-final.xml`，合成隔离数据 |
+| 数据库物理重启 | stop/start后新进程核验passed，head0008 | `.tmp/isolated-pg-4b8e87ff08d64607bc0d63d905a2a806/restart-prepared.json`；自建cluster已停止，日志保留 |
+| 安装包隔离检查 | 27模块及schema0008通过 | 上节wheel实际安装；110源码模块逐字节与此候选一致，非仅在checkout导入 |
+| 本地Linux broker/worker | not_run | 当前Docker Linux daemon不可用；不得用本地PG替代真实broker证明 |
+| 精确源码候选远端CI | run37354368069四路completed/success | [04fd389 CI](https://github.com/1040942669/legal-rag-agent/actions/runs/37354368069)，不替代后续文档head的CI |
+
+远端结果已实际下载并解析：offline/M4/M5/M6累计门禁为25/25、41/41、51/51、58/58，全部exit0；M6累计675759ms，真实worker JUnit76/0/0/0，累计M5 JUnit81/0/0/0。M5/M6回执以预期源码SHA `04fd389...` 与schema `0008_execution_money` 做严格validator复验，errors均为`[]`，无live调用。M6制品ID `11365171011`，API digest `sha256:d9959f8105676e817254a0c3de229f64dad0c5deff4484d91a1ffd4ce9e2c11a`，本地保留`.tmp/chinese-04fd389-ci-m6/`。本地未跑Linux broker与远端实际已跑是不同事实。
+
+已推送的提交顺序：`914a7e3`保存前置改动、`c562eec`成熟中文组件和负结果、`e55a6a4`字符对照与推广门槛、`04fd389`统一配置和规则收缩。[PR31](https://github.com/1040942669/legal-rag-agent/pull/31)仍为Draft，未合并；master仍为`4d9546e06cfe8ff44660943ffd2dd353ac2e61cc`。现有v0.6.0/v0.7.1 Tag及Release不变，本轮不创建Release、不进入M7。应用内PR附件工具两次返回参数错误，停止重试；GitHub PR本身已实际创建和读取核验。
+
+结果文档静态3/3在最终CI回填前后分别通过，artifacts为`.tmp/chinese-result-docs-static-first.json`与`.tmp/chinese-result-docs-static-final.json`，覆盖46份Markdown、2份JSON、326份候选文本，无高置信凭证形状，diff检查通过。记录此结果后的纯元数据收口在提交前重验同组静态。本文是文档提交前快照，后续纯文档提交的SHA/CI通过GitHub读取并在交接回复中报告，不递归创建新的回执提交。
+
+尚待用户对默认取舍的选择；本次文档提交推送后仍须独立读取其head CI状态。没有通过改门槛宣布字符方案自动胜出；未回复时`legacy-v1`仍是默认、成熟候选显式opt-in。没有独立未曝光集、人工法律验收、真实模型质量或生产容量结论。上述重叠专项不相加为最终分母。真实模型新增调用和费用均0，既有付费历史及账本未改动。

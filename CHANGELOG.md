@@ -4,11 +4,11 @@
 
 ## [Unreleased]
 
-中文检索与规则收缩正在 [Draft PR #31](https://github.com/1040942669/legal-rag-agent/pull/31) 开发，不是新的软件发布。M6 `v0.7.1` 与既有Tag/回执不变，M7未开始。
+中文检索与规则收缩的运行时候选 `04fd389945125c81767745bbdce48137921d26fd` 已提交并推送，见 [Draft PR #31](https://github.com/1040942669/legal-rag-agent/pull/31)，不是新的软件发布。该源码候选的 [CI 37354368069](https://github.com/1040942669/legal-rag-agent/actions/runs/37354368069) 已四路completed/success（offline 25/25、M4 41/41、M5 51/51、M6 58/58），远端真实broker/worker已验证。PR仍为draft，本轮未合并或发布，后续文档提交须另行验证其精确head的CI。M6 `v0.7.1` 与既有Tag/回执不变，M7未开始。
 
-- 增加成熟BM25S及显式jieba/sklearn字符分析器，记录完整依赖/参数身份，不新增场景词典或手写评分公式。两组固定开发集对照保留负结果与取舍；char的83/108召回优于旧76/108，但MRR回退，尚未自动推广默认。
-- CLI、API和M2统一冻结实际检索配置；现代证据合同移除统一0.01原始分数阈值，历史v2工件保留原判定。风险词只作提示信号，不能证明违法意图；自由生成遇到用途不明信号先澄清。
-- 明确引用的选择与法条所有权分离，复杂意图不伪造硬要求；目录保留完整标题，有界查询语法不支持不等于存储身份无效。相关累计验证仍进行中，详见 [验收记录](reports/refactor/CHINESE_BM25_OPTIMIZATION.md)，专项绿色不等于最终验收或法律质量。
+- 增加成熟BM25S及显式jieba/sklearn字符分析器，记录完整依赖/参数身份，不新增场景词典或手写评分公式。两组固定开发集对照保留负结果与取舍；char的83/108召回优于旧76/108，但MRR回退。默认仍为 `legacy-v1`，用户是否接受取舍尚待确认，不自动推广默认。
+- CLI、API和M2统一冻结实际检索配置；现代 `general-reference-v3` / `reference-evidence-v2` 合同移除统一0.01原始分数阈值，历史 `general-reference-v2` / `reference-evidence-v1` 工件保留原判定。现代风险词只作提示信号，不能证明违法意图；原文检索不据此预拒答，自由生成遇到用途不明信号先澄清。
+- 明确引用的选择与法条所有权分离，复杂意图不伪造硬要求；目录保留完整标题，有界查询语法不支持不等于存储身份无效。本地M2累计25/25项检查通过，其中全量pytest为2018 passed与157 subtests（180.49秒，4条jieba警告）；17文件PostgreSQL回归93 passed（94.32秒），真实重启后的新进程核验schema0008成功。详见 [验收记录](reports/refactor/CHINESE_BM25_OPTIMIZATION.md)，上述本地工程结果不等于法律质量、生产容量或真实模型验收。
 
 ## [0.7.1] - 2026-10-02
 

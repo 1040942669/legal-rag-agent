@@ -4,13 +4,17 @@
 
 2026-10-06 用户授权先研究中文 BM25、编写 TODO、逐项实施并推送 GitHub。当前任务以 `STATE.json.chinese_retrieval_optimization` 和 [优化清单](CHINESE_RETRIEVAL_TODO.md) 为准。下文 local-only 是前轮历史范围，不限制本次已明确授权的 commit/push/review PR；本次不新建 Release、不移动 Tag、不进入 M7、不进行真实模型调用。
 
-开始时核验 HEAD、origin/master 及远端默认 master 均为 `4d9546e06cfe8ff44660943ffd2dd353ac2e61cc`。已有 Smoke、lexical、W1-W8 改动完整保存为前置提交 `914a7e322d2787ec99a2fe1f1117ad5906244e02`。本轮分支 `codex/chinese-bm25-optimization`，最新已核验推送 `e55a6a42da65549d3d1c2b2e241dd0759cd9f662`，对应 [Draft PR #31](https://github.com/1040942669/legal-rag-agent/pull/31)；尚有T4-T7接线未提交，不把阶段性head当最终候选。
+开始时核验 HEAD、origin/master 及远端默认 master 均为 `4d9546e06cfe8ff44660943ffd2dd353ac2e61cc`。已有 Smoke、lexical、W1-W8 改动完整保存为前置提交 `914a7e322d2787ec99a2fe1f1117ad5906244e02`。本轮分支 `codex/chinese-bm25-optimization`，运行时最终候选 `04fd389945125c81767745bbdce48137921d26fd` 已提交且核验推送，T4-T7接线均已包含，对应 [Draft PR #31](https://github.com/1040942669/legal-rag-agent/pull/31)。本节回填为其后的纯结果文档更新，不虚填自身未来commit身份。
 
 两次预冻结比较已完成，见 [本轮报告](../../reports/refactor/CHINESE_BM25_OPTIMIZATION.md)。首轮jieba search72/108低于legacy76/108；第二轮成熟sklearn char83/108，但MRR@5 .597065低于legacy .610184，不满足预声明自动推广条件。已询问用户是否接受维护/召回与排序取舍、保留候选或继续SmartCN；未回复前默认未变。真实模型新调用0，没有动旧输出或gold。
 
-当前重点：完成现代配置身份、历史规则分派、风险advisory、引用局部选择、目录完整标题修复后的累计门禁和隔离PG恢复；最后更新README/CHANGELOG/STATE/报告并commit/push。`c562eec`的CI因测试入口路径失败已定位，本地脚本入口16项通过；`e55a6a4`的CI `37352214591` 正在运行，不能标绿。原失败证据均保留。
+最终候选本地累计M2为25/25 passed、234906ms，其中全量2018 passed+157子测试、180.49s、JUnit2175/0/0/0；17文件隔离PG为93 passed/94.32s，并完成真实stop/start与新进程schema0008恢复。实际仓库外installed-wheel27模块通过，110个包源码模块与候选逐字节一致。原失败及各自身份见验收报告，不合并专项分母。
 
-只读审计已复现风险词误拒、引用后置否定/转述误归属、分数重标度导致充分性翻转，以及目录与查询标题合同不一致。现有相关五个测试文件216 passed，不覆盖新增反例。实施收敛为成熟评分/分词组件、必要配置与版本适配、规则裁决权收缩；不添加通用意图框架或未经性能测量支持的共享缓存。
+源码候选 [04fd389精确CI37354368069](https://github.com/1040942669/legal-rag-agent/actions/runs/37354368069) 四路全部completed/success；已下载核验offline/M4/M5/M6累计门禁分别25/25、41/41、51/51、58/58。真实Linux worker JUnit76/0/0/0、累计M5为81/0/0/0，回执严格绑定04fd389与schema0008。仅本地Linux broker因Docker daemon不可用not_run，不能把它与远端实际验证混淆。`c562eec`测试入口收集失败及后续修复原样保留。
+
+下一步是完成这次纯结果文档静态检查及push，报告该文档提交自身的CI状态，不递归回填其未来SHA。默认取舍仍待用户选择；源码候选CI不自动代表后续文档head已通过。PR保持Draft，不合并发布。
+
+最初审计复现的风险词误拒、引用后置否定/转述误归属、分数尺度误判及目录标题合同不一致均按机制修复并增加反例；初始216项旧测试不是修复验收。实施收敛为成熟评分/分析组件、配置与历史身份、规则裁决权收缩，不添加通用意图框架或共享缓存。每run仍重建索引，char已加载后约1.62至1.66秒，legacy约1.06至1.08秒，热查询更快不能称API端到端更快。复杂指代未知、风险无信号不等于安全、机械通过不等于法律语义支持，详见 [ADR-007](decisions/ADR-007-chinese-bm25-and-bounded-rules.md)。
 
 > 以下是前轮历史状态，以各自原始权限和提交时点解释；当前任务只以最上面的中文检索节点为准。M6 保持 released，M7 未开始；旧发布与门禁不能替代当前候选验证。
 
