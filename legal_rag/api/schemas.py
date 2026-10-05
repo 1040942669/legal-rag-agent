@@ -46,6 +46,7 @@ class MessagePageResponse(StrictModel):
 
 class RetrievalOptions(StrictModel):
     top_k: int = Field(default=5, ge=1, le=20)
+    lexical_profile: Literal["legacy-v1", "local-lexical-v2", "generic-v3"] | None = None
 
 
 class RunCreateRequest(StrictModel):

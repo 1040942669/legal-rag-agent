@@ -331,7 +331,9 @@ def test_commit_materializes_telemetry_before_any_state_change() -> None:
     generated = assistant.generate_turn(retrieved, generate=True)
     poisoned_retrieved = replace(retrieved, source_id_map=_ExplodingMapping())
     poisoned_generated = replace(generated, retrieved=poisoned_retrieved)
-    poisoned_verified = assistant.verify_turn(poisoned_generated)
+    # Introduce the hostile mapping after verification to exercise commit's
+    # materialization fence; verification itself now rejects it even earlier.
+    poisoned_verified = replace(assistant.verify_turn(generated), generated=poisoned_generated)
 
     with pytest.raises(RuntimeError, match="synthetic mapping failure"):
         assistant.commit_turn(poisoned_verified)

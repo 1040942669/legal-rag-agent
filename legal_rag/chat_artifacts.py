@@ -26,6 +26,8 @@ from .chat import (
     render_retrieval_only_answer,
     safe_terminal_answer,
     should_refuse_before_retrieval,
+    validate_reference_route,
+    constrain_reference_route,
 )
 from .evaluation_artifacts import (
     _retrieval_boundary_from_payload,
@@ -49,7 +51,9 @@ from .models import (
 from .query import QueryAnalysis, analyze_query
 from .retrieval import assert_results_match_boundary
 from .retrieval_contracts import RetrievalBoundary
+from .retrieval_outcomes import RetrievalOutcome
 from .verifier import parse_structured_answer
+from .semantic import SemanticAssessment, validate_semantic_execution_record
 
 
 CHAT_STAGE_ARTIFACT_SCHEMA_VERSION = 1
@@ -144,10 +148,10 @@ def _string_list(name: str, value: Any) -> list[str]:
     return [_string(f"{name}[{index}]", item) for index, item in enumerate(value)]
 
 
-def _artifact(kind: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+def _artifact(kind: str, payload: Mapping[str, Any], *, schema_version: int = 1) -> dict[str, Any]:
     return _json_copy(
         {
-            "artifact_schema_version": CHAT_STAGE_ARTIFACT_SCHEMA_VERSION,
+            "artifact_schema_version": schema_version,
             "artifact_kind": kind,
             "payload": dict(payload),
         }
@@ -160,7 +164,7 @@ def _artifact_payload(kind: str, artifact: Mapping[str, Any]) -> dict[str, Any]:
     if (
         isinstance(schema_version, bool)
         or not isinstance(schema_version, int)
-        or schema_version != CHAT_STAGE_ARTIFACT_SCHEMA_VERSION
+        or schema_version not in ({1, 2} if kind in {"retrieved_turn", "generated_turn"} else {1})
     ):
         raise ValueError(f"{kind} artifact schema is unsupported")
     if envelope["artifact_kind"] != kind:
@@ -327,17 +331,66 @@ def _evidence_check_payload(check: EvidenceCheck) -> dict[str, Any]:
         field.name: getattr(check, field.name) for field in fields(EvidenceCheck)
     }
     restored = _evidence_check_from_payload(payload)
-    return _json_copy(
-        {field.name: getattr(restored, field.name) for field in fields(EvidenceCheck)}
-    )
+    serialized = {field.name: getattr(restored, field.name) for field in fields(EvidenceCheck)}
+    if restored.rules_version == "legacy-hints-and-return-v1":
+        # Version 1 is historical display/replay, not an upgraded safety claim.
+        # Keep its exact evidence field identity for linked artifact hashes.
+        serialized.pop("rules_version")
+        serialized.pop("mechanical_check")
+    return _json_copy(serialized)
 
 
 def _evidence_check_from_payload(value: Any) -> EvidenceCheck:
+    expected = {field.name for field in fields(EvidenceCheck)}
+    legacy_fields = expected - {"rules_version", "mechanical_check"}
+    if isinstance(value, Mapping) and set(value) == legacy_fields:
+        value = {**value, "rules_version": "legacy-hints-and-return-v1", "mechanical_check": None}
     payload = _exact_mapping(
         "evidence check",
         value,
-        {field.name for field in fields(EvidenceCheck)},
+        expected,
     )
+    rules_version = _string("evidence.rules_version", payload["rules_version"], non_empty=True)
+    if rules_version not in {"general-reference-v2", "legacy-hints-and-return-v1"}:
+        raise ValueError("evidence rules version is unsupported")
+    mechanical = payload["mechanical_check"]
+    if rules_version == "general-reference-v2" and payload["sufficient"] is True and mechanical is None:
+        raise ValueError("sufficient modern evidence requires a mechanical assessment")
+    if mechanical is not None:
+        if rules_version != "general-reference-v2":
+            raise ValueError("legacy evidence cannot acquire a modern mechanical check")
+        mechanical = _exact_mapping("mechanical check", mechanical, {
+            "rules_version", "candidate_available", "scores_valid", "scope_status",
+            "reference_coverage_status", "missing_pairs", "missing_laws", "reasons",
+            "checked_result_count", "analysis_fingerprint", "sufficient", "semantic_support_status",
+        })
+        if mechanical["rules_version"] != "reference-evidence-v1" or mechanical["semantic_support_status"] != "not_checked":
+            raise ValueError("mechanical evidence cannot prove semantics")
+        if mechanical["scope_status"] not in {"not_configured", "valid", "invalid"} or mechanical["reference_coverage_status"] not in {
+            "complete", "missing", "unresolved", "not_requested",
+        }:
+            raise ValueError("mechanical evidence status is invalid")
+        _boolean("mechanical.candidate_available", mechanical["candidate_available"])
+        _boolean("mechanical.scores_valid", mechanical["scores_valid"])
+        _boolean("mechanical.sufficient", mechanical["sufficient"])
+        _integer("mechanical.checked_result_count", mechanical["checked_result_count"])
+        _digest("mechanical.analysis_fingerprint", mechanical["analysis_fingerprint"])
+        _string_list("mechanical.missing_laws", mechanical["missing_laws"])
+        reasons = _string_list("mechanical.reasons", mechanical["reasons"])
+        if mechanical["sufficient"] != (mechanical["candidate_available"] and mechanical["scores_valid"] and not reasons):
+            raise ValueError("mechanical sufficient flag is inconsistent")
+        if payload["sufficient"] is True and not mechanical["sufficient"]:
+            raise ValueError("mechanical failure cannot become overall sufficient")
+        if not isinstance(mechanical["missing_pairs"], list):
+            raise ValueError("mechanical missing pairs must be a list")
+        for pair in mechanical["missing_pairs"]:
+            item = _exact_mapping("mechanical missing pair", pair, {"law_title", "article_number", "span"})
+            _string("pair.law_title", item["law_title"], non_empty=True)
+            _string("pair.article_number", item["article_number"], non_empty=True)
+            if not isinstance(item["span"], list) or len(item["span"]) != 2:
+                raise ValueError("mechanical pair span is invalid")
+            if _integer("pair.span.end", item["span"][1]) < _integer("pair.span.start", item["span"][0]):
+                raise ValueError("mechanical pair span is reversed")
     return EvidenceCheck(
         sufficient=_boolean("evidence.sufficient", payload["sufficient"]),
         missing_facts=_string_list("evidence.missing_facts", payload["missing_facts"]),
@@ -358,6 +411,8 @@ def _evidence_check_from_payload(value: Any) -> EvidenceCheck:
         covered_articles=_string_list(
             "evidence.covered_articles", payload["covered_articles"]
         ),
+        rules_version=rules_version,
+        mechanical_check=mechanical,
     )
 
 
@@ -792,6 +847,7 @@ _LEGACY_RETRIEVED_PAYLOAD_FIELDS = {
     "terminal_expected_answer_mode",
 }
 _RETRIEVED_PAYLOAD_FIELDS = _LEGACY_RETRIEVED_PAYLOAD_FIELDS | {"retrieval_boundary"}
+_ROUTED_RETRIEVED_PAYLOAD_FIELDS = _RETRIEVED_PAYLOAD_FIELDS | {"route_outcome"}
 
 
 def _validate_scope_filtered_retrieval_mapping(
@@ -915,6 +971,15 @@ def _validate_retrieved_relationships(turn: RetrievedTurn) -> None:
     evidence = turn.evidence_check
     results = tuple(turn.results)
     boundary = turn.retrieval_boundary
+    route = turn.route_outcome
+    if route is not None:
+        if not isinstance(route, RetrievalOutcome) or route.results != results:
+            raise ValueError("retrieved route is not bound to its evidence snapshot")
+        validate_reference_route(route, turn.prepared.standalone_question)
+        if evidence is None or evidence.rules_version != "general-reference-v2":
+            raise ValueError("routed retrieval requires modern evidence")
+        if constrain_reference_route(evidence, route) != evidence:
+            raise ValueError("exact route authority cannot be overridden by evidence heuristics")
     if boundary is not None and not isinstance(boundary, RetrievalBoundary):
         raise ValueError("retrieved boundary is invalid")
     try:
@@ -989,6 +1054,9 @@ def _validate_retrieved_relationships(turn: RetrievedTurn) -> None:
         raise ValueError("successful retrieval contains a terminal contract")
 
 
+validate_retrieved_turn_contract = _validate_retrieved_relationships
+
+
 def retrieved_turn_to_artifact(turn: RetrievedTurn) -> dict[str, Any]:
     if not isinstance(turn, RetrievedTurn):
         raise ValueError("turn must be a RetrievedTurn")
@@ -1033,7 +1101,11 @@ def retrieved_turn_to_artifact(turn: RetrievedTurn) -> dict[str, Any]:
             turn.terminal_expected_answer_mode,
         ),
     }
-    return _artifact("retrieved_turn", payload)
+    modern = turn.route_outcome is not None or (
+        turn.evidence_check is not None and turn.evidence_check.rules_version == "general-reference-v2")
+    if modern:
+        payload["route_outcome"] = turn.route_outcome.to_dict() if turn.route_outcome is not None else None
+    return _artifact("retrieved_turn", payload, schema_version=2 if modern else 1)
 
 
 def retrieved_turn_from_artifact(
@@ -1046,9 +1118,14 @@ def retrieved_turn_from_artifact(
     prepared_copy = deepcopy(prepared)
     raw_payload = _artifact_payload("retrieved_turn", artifact)
     payload_fields = set(raw_payload)
-    if payload_fields == _RETRIEVED_PAYLOAD_FIELDS:
+    modern = artifact["artifact_schema_version"] == 2
+    if modern and payload_fields != _ROUTED_RETRIEVED_PAYLOAD_FIELDS:
+        raise ValueError("modern retrieved turn fields are invalid")
+    if not modern and "route_outcome" in raw_payload:
+        raise ValueError("legacy retrieved artifact cannot carry modern route authority")
+    if payload_fields in (_RETRIEVED_PAYLOAD_FIELDS, _ROUTED_RETRIEVED_PAYLOAD_FIELDS):
         payload = _exact_mapping(
-            "retrieved turn", raw_payload, _RETRIEVED_PAYLOAD_FIELDS
+            "retrieved turn", raw_payload, _ROUTED_RETRIEVED_PAYLOAD_FIELDS if modern else _RETRIEVED_PAYLOAD_FIELDS
         )
         serialized_boundary = (
             None
@@ -1080,6 +1157,10 @@ def retrieved_turn_from_artifact(
     evidence = (
         None if raw_evidence is None else _evidence_check_from_payload(raw_evidence)
     )
+    if evidence is not None and (evidence.rules_version == "general-reference-v2") != modern:
+        raise ValueError("retrieved artifact schema and evidence rules disagree")
+    route = (RetrievalOutcome.from_dict(payload["route_outcome"], results=results)
+             if modern and payload["route_outcome"] is not None else None)
     if adaptive is not None:
         if adaptive.analysis != prepared_copy.analysis:
             raise ValueError("adaptive analysis is not bound to the prepared question")
@@ -1100,9 +1181,10 @@ def retrieved_turn_from_artifact(
         evidence_check=evidence,
         retrieval_boundary=(
             serialized_boundary
-            if payload_fields == _RETRIEVED_PAYLOAD_FIELDS
+            if "retrieval_boundary" in payload
             else _retrieval_boundary_from_results(results)
         ),
+        route_outcome=route,
         rejected_source_ids=tuple(
             _string_list(
                 "retrieved.rejected_source_ids", payload["rejected_source_ids"]
@@ -1158,6 +1240,8 @@ def _strip_search_result_provenance(value: Any) -> None:
 def _retrieved_artifact_hash_candidates(turn: RetrievedTurn) -> set[str]:
     current = retrieved_turn_to_artifact(turn)
     candidates = {canonical_hash(current)}
+    if current["artifact_schema_version"] == 2:
+        return candidates
     adaptive_results = (
         () if turn.adaptive_result is None else tuple(turn.adaptive_result.results)
     )
@@ -1183,6 +1267,9 @@ _GENERATED_PAYLOAD_FIELDS = {
     "expected_answer_mode",
     "raw_response",
     "parser_version",
+}
+_BOUND_GENERATED_PAYLOAD_FIELDS = _GENERATED_PAYLOAD_FIELDS | {
+    "semantic_assessment", "semantic_policy_fingerprint", "semantic_error",
 }
 
 
@@ -1222,7 +1309,22 @@ def _raw_response_from_payload(
 
 
 def _validate_generated_relationships(turn: GeneratedTurn) -> None:
+    validate_semantic_execution_record(turn.semantic_policy_fingerprint, turn.semantic_assessment, turn.semantic_error)
     retrieved = turn.retrieved
+    semantic_present = any(value is not None for value in (
+        turn.semantic_assessment, turn.semantic_policy_fingerprint, turn.semantic_error,
+    ))
+    if semantic_present:
+        if turn.kind != "model" or turn.semantic_policy_fingerprint is None:
+            raise ValueError("semantic artifact requires a model draft and frozen policy")
+        _digest("generated.semantic_policy_fingerprint", turn.semantic_policy_fingerprint)
+        if turn.semantic_error not in {None, "checker_error", "checker_unavailable", "input_invalid"}:
+            raise ValueError("semantic error code is invalid")
+        if turn.semantic_assessment is not None and (
+            not isinstance(turn.semantic_assessment, SemanticAssessment)
+            or turn.semantic_assessment.policy_fingerprint != turn.semantic_policy_fingerprint
+        ):
+            raise ValueError("semantic assessment does not match draft policy")
     terminal_kinds = {"pre_retrieval_refusal", "evidence_limited"}
     if turn.kind == "retrieval_only":
         expected_text = append_disclaimer(
@@ -1334,6 +1436,14 @@ def generated_turn_to_artifact(turn: GeneratedTurn) -> dict[str, Any]:
             "generated.parser_version", turn.parser_version
         ),
     }
+    if turn.semantic_policy_fingerprint is not None:
+        payload.update({
+            "semantic_assessment": (turn.semantic_assessment.to_dict()
+                                    if turn.semantic_assessment is not None else None),
+            "semantic_policy_fingerprint": turn.semantic_policy_fingerprint,
+            "semantic_error": turn.semantic_error,
+        })
+        return _artifact("generated_turn", payload, schema_version=2)
     return _artifact("generated_turn", payload)
 
 
@@ -1345,10 +1455,11 @@ def generated_turn_from_artifact(
     if not isinstance(retrieved, RetrievedTurn):
         raise ValueError("retrieved must be a RetrievedTurn")
     retrieved_copy = deepcopy(retrieved)
+    bound_schema = artifact.get("artifact_schema_version") == 2
     payload = _exact_mapping(
         "generated turn",
         _artifact_payload("generated_turn", artifact),
-        _GENERATED_PAYLOAD_FIELDS,
+        _BOUND_GENERATED_PAYLOAD_FIELDS if bound_schema else _GENERATED_PAYLOAD_FIELDS,
     )
     retrieved_hash = _digest("generated.retrieved_sha256", payload["retrieved_sha256"])
     if retrieved_hash not in _retrieved_artifact_hash_candidates(retrieved_copy):
@@ -1373,6 +1484,10 @@ def generated_turn_from_artifact(
         parser_version=_optional_string(
             "generated.parser_version", payload["parser_version"]
         ),
+        semantic_assessment=(SemanticAssessment.from_dict(payload["semantic_assessment"])
+                             if bound_schema and payload["semantic_assessment"] is not None else None),
+        semantic_policy_fingerprint=(payload["semantic_policy_fingerprint"] if bound_schema else None),
+        semantic_error=(payload["semantic_error"] if bound_schema else None),
     )
     _validate_generated_relationships(restored)
     return restored
@@ -1469,6 +1584,8 @@ def verified_turn_to_artifact(turn: VerifiedTurn) -> dict[str, Any]:
 
 def _generated_artifact_hash_candidates(turn: GeneratedTurn) -> set[str]:
     current = generated_turn_to_artifact(turn)
+    if turn.semantic_policy_fingerprint is not None:
+        return {canonical_hash(current)}
     candidates: set[str] = set()
     for retrieved_hash in _retrieved_artifact_hash_candidates(turn.retrieved):
         candidate = deepcopy(current)

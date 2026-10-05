@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Callable
+from typing import Any
 
 from sqlalchemy import Engine, select
 
 from legal_rag.chat import LegalChatAssistant
 from legal_rag.embedding_contracts import EmbeddingProfileIdentity
 from legal_rag.models import VerificationContext
+from legal_rag.llm import SiliconFlowClient
 from legal_rag.retrieval import BM25Retriever
 from legal_rag.retrieval_contracts import RetrievalBoundary
 from legal_rag.storage.retrieval import (
@@ -14,8 +17,11 @@ from legal_rag.storage.retrieval import (
     PostgresExactRetrievalRepository,
 )
 from legal_rag.storage.schema import embedding_profiles
+from legal_rag.storage.catalog import PostgresLegalCatalogRepository
 
 from .run_executor import ExecutionFailure, RunExecutionInput
+from .execution_policy import GenerationPolicy, ServiceExecutionPolicy
+from .exact_retrieval import ExactReferenceRetriever
 
 
 class _ProviderDisabledCompletionClient:
@@ -26,16 +32,19 @@ class _ProviderDisabledCompletionClient:
 
 @dataclass(frozen=True, slots=True)
 class PostgresAssistantFactory:
-    """Create one database-bound, provider-free assistant for each M4 run.
+    """Create one database-bound assistant from the run's frozen server policy.
 
     The factory reloads the immutable snapshot/profile named on the run rather
     than following the current active pointer.  PostgreSQL applies every hard
-    boundary before BM25 sees the corpus.  Generation remains disabled by the
-    corresponding ``LegalChatRunExecutor(generate=False)`` configuration.
+    boundary before BM25 sees the corpus. Generation defaults to disabled; an
+    enabled policy creates a lazy adapter (or an explicitly trusted test fake).
+    The graph runner, not this factory, supplies lease/epoch authority and the
+    shared monetary invoker before generation or semantic checking can execute.
     """
 
     engine: Engine
     memory_token_limit: int = 2_000
+    completion_client_factory: Callable[[GenerationPolicy], Any] | None = None
 
     def __post_init__(self) -> None:
         if self.engine.dialect.name != "postgresql":
@@ -48,6 +57,7 @@ class PostgresAssistantFactory:
             raise ValueError("memory_token_limit must be a positive integer")
 
     def __call__(self, execution: RunExecutionInput) -> LegalChatAssistant:
+        policy = ServiceExecutionPolicy.from_dict(dict(execution.execution_policy)) if execution.execution_policy is not None else ServiceExecutionPolicy.historical()
         boundary = RetrievalBoundary(
             scope_id=execution.scope_id,
             snapshot_id=execution.snapshot_id,
@@ -101,22 +111,39 @@ class PostgresAssistantFactory:
             expected_profile=profile,
         )
         retriever = BoundaryBoundRetriever(
-            BM25Retriever(corpus.chunks),
+            BM25Retriever(corpus.chunks, lexical_profile=policy.lexical_profile),
             corpus=corpus,
         )
+        if policy.exact_reference_routing:
+            retriever = ExactReferenceRetriever(
+                corpus=corpus, lexical=retriever,
+                catalog=PostgresLegalCatalogRepository(self.engine),
+                pointer_revision=execution.snapshot_revision, activation_id=execution.activation_id,
+            )
         top_k = execution.request_options.get("top_k", 5)
         if isinstance(top_k, bool) or not isinstance(top_k, int) or not 1 <= top_k <= 20:
             raise ExecutionFailure(code="invalid_top_k", stage="assistant_factory")
+        generation = policy.generation
+        client = _ProviderDisabledCompletionClient()
+        if generation.enabled:
+            if execution.scope_id not in generation.allowed_scope_ids:
+                raise ExecutionFailure(code="egress_scope_not_authorized", stage="assistant_factory")
+            client = self.completion_client_factory(generation) if self.completion_client_factory else SiliconFlowClient(
+                model=generation.model, base_url=generation.base_url, api_key_env=generation.api_key_env,
+                request_timeout=30, max_tokens=generation.max_output_tokens, enable_thinking=False,
+                response_format="json_object", follow_redirects=False, load_environment_file=False,
+            )
         return LegalChatAssistant(
             retriever,
-            model="service-provider-disabled",
+            model=generation.model if generation.enabled else "service-provider-disabled",
             top_k=top_k,
             memory_token_limit=self.memory_token_limit,
             verification_context=VerificationContext(
                 snapshot_id=execution.snapshot_id,
                 allowed_scope_ids=[execution.scope_id],
             ),
-            completion_client=_ProviderDisabledCompletionClient(),
+            completion_client=client,
+            semantic_policy=policy.semantic_policy,
         )
 
 

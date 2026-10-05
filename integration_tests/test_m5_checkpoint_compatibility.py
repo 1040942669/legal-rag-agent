@@ -72,6 +72,7 @@ def test_m5_t07_old_checkpoint_fails_closed_or_enters_explicit_migration_state(
     assert resume_requested_at is None
     case.service.cancel_run(case.boundary.owner, case.run_id)
     record_scenario(
+        migrated_engine,
         "M5-T07",
         {
             "incompatible_checkpoint_rejected": True,

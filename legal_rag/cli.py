@@ -1088,6 +1088,9 @@ def create_retriever(
             bm25_article_boost=float(
                 config["retrieval"].get("bm25_article_boost", 80.0)
             ),
+            bm25_lexical_profile=config["retrieval"].get(
+                "bm25_lexical_profile", "legacy-v1"
+            ),
             deprecated_penalty=float(
                 config["retrieval"].get("deprecated_penalty", 1.0)
             ),
@@ -1201,6 +1204,7 @@ def retrieval_metadata(config: dict[str, Any]) -> dict[str, Any]:
         "bm25_b": float(retrieval.get("bm25_b", 0.75)),
         "bm25_law_boost": float(retrieval.get("bm25_law_boost", 40.0)),
         "bm25_article_boost": float(retrieval.get("bm25_article_boost", 80.0)),
+        "bm25_lexical_profile": retrieval.get("bm25_lexical_profile", "legacy-v1"),
     }
 
 

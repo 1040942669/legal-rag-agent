@@ -697,6 +697,13 @@ class PgVectorExactRetriever:
         return self._boundary.fingerprint
 
     @property
+    def known_law_hints(self) -> tuple[str, ...]:
+        from ..legal_references import canonical_law_title
+        return tuple(sorted({canonical_law_title(article.title)
+                             for entry in self._entries.values()
+                             for article in entry.provenance.articles}))
+
+    @property
     def profile(self) -> EmbeddingProfileIdentity:
         return self._profile
 

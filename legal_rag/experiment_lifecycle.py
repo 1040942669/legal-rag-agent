@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, Sequence
 
-from .chat import LegalChatAssistant
+from .chat import STRUCTURED_QA_PROMPT_VERSION, LegalChatAssistant
 from .chunking import build_chunks
 from .data import discover_law_files, parse_law_file, stable_id
 from .experiment_adapter import EvaluationRuntimeSpec, LegalEvaluationRuntimeFactory
@@ -43,7 +43,7 @@ from .experiment_runtime import (
 from .experiment_store import ArtifactConflictError, ExperimentStore
 from .llm import CompletionUsage
 from .models import Chunk, LawArticle
-from .retrieval import BM25Retriever
+from .retrieval import BM25Retriever, DEFAULT_BM25_LEXICAL_PROFILE, bm25_text_versions
 
 
 LIFECYCLE_PLAN_SCHEMA_VERSION = 1
@@ -240,6 +240,11 @@ _IMPLEMENTATION_FILES: Mapping[str, tuple[str, ...]] = {
         "legal_rag/query_understanding.py",
         "legal_rag/adaptive.py",
         "legal_rag/planning.py",
+        "legal_rag/models.py",
+        "legal_rag/legal_references.py",
+        "legal_rag/reference_evidence.py",
+        "legal_rag/retrieval_contracts.py",
+        "legal_rag/retrieval_outcomes.py",
         "legal_rag/chat_artifacts.py",
         "legal_rag/experiment_adapter.py",
     ),
@@ -247,6 +252,14 @@ _IMPLEMENTATION_FILES: Mapping[str, tuple[str, ...]] = {
     "retrieval": (
         "legal_rag/retrieval.py",
         "legal_rag/evidence.py",
+        "legal_rag/adaptive.py",
+        "legal_rag/models.py",
+        "legal_rag/legal_references.py",
+        "legal_rag/reference_evidence.py",
+        "legal_rag/retrieval_contracts.py",
+        "legal_rag/retrieval_outcomes.py",
+        "legal_rag/evaluation_artifacts.py",
+        "legal_rag/chat_artifacts.py",
         "legal_rag/experiment_adapter.py",
     ),
     "rerank": ("legal_rag/rerank.py",),
@@ -254,11 +267,28 @@ _IMPLEMENTATION_FILES: Mapping[str, tuple[str, ...]] = {
         "legal_rag/chat.py",
         "legal_rag/chat_artifacts.py",
         "legal_rag/llm.py",
+        "legal_rag/models.py",
+        "legal_rag/semantic.py",
+        "legal_rag/json_utils.py",
+        "legal_rag/verifier.py",
+        "legal_rag/retrieval_contracts.py",
+        "legal_rag/retrieval_outcomes.py",
+        "legal_rag/evaluation_artifacts.py",
+        "legal_rag/provider_errors.py",
+        "legal_rag/experiment_runner.py",
         "legal_rag/experiment_adapter.py",
     ),
     "verification": (
         "legal_rag/verifier.py",
         "legal_rag/evidence.py",
+        "legal_rag/models.py",
+        "legal_rag/semantic.py",
+        "legal_rag/json_utils.py",
+        "legal_rag/legal_references.py",
+        "legal_rag/reference_evidence.py",
+        "legal_rag/retrieval_contracts.py",
+        "legal_rag/retrieval_outcomes.py",
+        "legal_rag/evaluation_artifacts.py",
         "legal_rag/chat_artifacts.py",
         "legal_rag/experiment_adapter.py",
     ),
@@ -424,6 +454,7 @@ def _resolve_input_path(value: str | Path, repository_root: Path) -> Path:
 
 
 def _manifest_contracts(*, top_k: int, judge_enabled: bool) -> dict[str, Any]:
+    query_version, document_version = bm25_text_versions(DEFAULT_BM25_LEXICAL_PROFILE)
     return {
         "chunking": {"strategy": "article", "version": "article-v1"},
         "embedding": {
@@ -431,8 +462,8 @@ def _manifest_contracts(*, top_k: int, judge_enabled: bool) -> dict[str, Any]:
             "revision": "provider-free-v1",
             "dimension": 1,
             "normalized": False,
-            "query_text_version": "bm25-tokenize-v1",
-            "document_text_version": "bm25-tokenize-v1",
+            "query_text_version": query_version,
+            "document_text_version": document_version,
         },
         "retrieval": {
             "kind": "bm25",
@@ -449,10 +480,10 @@ def _manifest_contracts(*, top_k: int, judge_enabled: bool) -> dict[str, Any]:
         "generation": {
             "model": PROVIDER_FREE_MODEL,
             "revision": "unconfigured-provider-v1",
-            "prompt_version": "m1-structured-answer-v1",
+            "prompt_version": STRUCTURED_QA_PROMPT_VERSION,
             "parameters": {"temperature": 0.0},
         },
-        "verification": {"schema_version": 2, "rules_version": "m1"},
+        "verification": {"schema_version": 2, "rules_version": "general-bound-v2"},
         "judge": (
             {
                 "enabled": True,
@@ -548,6 +579,7 @@ def build_lifecycle_plan(
         "adaptive_per_plan_top_k": None,
         "adaptive_normalizer_retries": 0,
         "condense_with_llm": False,
+        "semantic_policy": None,
         "provider_timeouts": {"assistant": None, "judge": None, "adaptive": None},
     }
     runtime = {

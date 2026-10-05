@@ -283,7 +283,7 @@ def _manifest(
                 "prompt_version": "prompt-v1",
                 "parameters": {"temperature": 0},
             },
-            "verification": {"schema_version": 2, "rules_version": "m1"},
+            "verification": {"schema_version": 2, "rules_version": "general-bound-v2"},
             "judge": {"enabled": False},
         },
         runtime={

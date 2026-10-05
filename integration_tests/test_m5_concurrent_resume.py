@@ -52,6 +52,7 @@ def test_m5_t06_two_processes_resume_one_run_only_one_gets_execution_lease(
         assert running.lease_epoch == 1
         case.service.cancel_run(case.boundary.owner, case.run_id)
         record_scenario(
+            migrated_engine,
             "M5-T06",
             {"single_owner": True, "contender_pids": contender_pids},
         )
@@ -193,6 +194,7 @@ def test_m5_t06_stale_owner_is_fenced_after_lease_takeover(
         assert results_after == results_before
         case.service.cancel_run(case.boundary.owner, case.run_id)
         record_scenario(
+            migrated_engine,
             "M5-T06",
             {
                 "stale_owner_fenced": True,

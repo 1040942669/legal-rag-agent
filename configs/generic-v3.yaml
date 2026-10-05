@@ -1,0 +1,5 @@
+# Local-only ranking candidate without shopping aliases or evidence anchors.
+# Keep generation/Judge disabled by omitting the corresponding CLI opt-ins.
+# This does not promote a new default or certify semantic/legal quality.
+retrieval:
+  bm25_lexical_profile: generic-v3

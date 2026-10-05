@@ -192,6 +192,108 @@ def _assistant(
     )
 
 
+def test_linear_executor_has_explicit_offline_semantic_stage_without_repeated_checker():
+    from legal_rag.semantic import SemanticPolicy, SemanticAssessment, SegmentAssessment
+    policy = SemanticPolicy("offline-fixture", "r1", "p1", "a" * 64, True)
+    class Client:
+        def complete(self, prompt):
+            return json.dumps({"answer_text": "合成主体应当遵守合成义务[S1]。", "answer_mode": "evidence_answer",
+                "claims": [{"claim_id": "c1", "text": "合成主体应当遵守合成义务", "source_ids": ["S1"]}],
+                "limitations": [], "clarification_question": None}, ensure_ascii=False)
+    class Checker:
+        def __init__(self):
+            self.policy, self.calls = policy, 0
+        def assess(self, request):
+            self.calls += 1
+            return SemanticAssessment(request.fingerprint, policy.fingerprint, policy.checker_id,
+                policy.checker_revision, policy.prompt_version, tuple(SegmentAssessment(segment.segment_id,
+                "supported", segment.source_ids, ()) for segment in request.segments))
+    checker = Checker()
+    assistant = LegalChatAssistant(_BoundRetriever(results=(_bound_result(),)), model="offline-fixture",
+        completion_client=Client(), semantic_policy=policy, semantic_checker=checker)
+    result = LegalChatRunExecutor(lambda _: assistant).execute(_execution_input())
+    assert result.verification_payload["semantic_support_status"] == "supported"
+    assert checker.calls == 1
+
+
+def test_linear_executor_rejects_ungoverned_completion_checker_before_any_request():
+    from legal_rag.semantic import SemanticPolicy, CompletionSemanticChecker
+    policy = SemanticPolicy("completion-checker", "r1", "p1", "a" * 64, True)
+    client = _NoCompletionClient()
+    assistant = LegalChatAssistant(_BoundRetriever(results=(_bound_result(),)), model="offline-fixture",
+        completion_client=client, semantic_policy=policy, semantic_checker=CompletionSemanticChecker(policy, client))
+    with pytest.raises(ExecutionFailure, match="ungoverned_checker_disabled"):
+        LegalChatRunExecutor(lambda _: assistant).execute(_execution_input())
+
+
+def test_linear_executor_rejects_paid_policy_instead_of_ignoring_missing_lease_authority():
+    from dataclasses import replace
+    from legal_rag.services.execution_policy import ServiceExecutionPolicy, GenerationPolicy
+    policy = ServiceExecutionPolicy(generation=GenerationPolicy(enabled=True, model="Qwen/test",
+        allowed_scope_ids=("scope-a",), pricing_acknowledged=True, egress_acknowledged=True,
+        price_revision="fixture-r1", input_rate="0.4", output_rate="3.2", budget="1"))
+    assistant = _assistant(_BoundRetriever(results=(_bound_result(),)))
+    with pytest.raises(ExecutionFailure, match="paid_policy_requires_graph"):
+        LegalChatRunExecutor(lambda _: assistant).execute(replace(_execution_input(), execution_policy=policy.to_dict()))
+
+
+@pytest.mark.parametrize("status", ["unsupported", "uncertain", "not_checked", "error"])
+def test_graph_required_semantic_fallback_records_limited_completion_and_safe_rejection(monkeypatch, status):
+    from datetime import datetime, timedelta, timezone
+    from types import SimpleNamespace
+    from legal_rag.harness.nodes import BoundedHarnessNodes, NodeArtifactRef
+    from legal_rag.harness.state import HARNESS_GRAPH_VERSION, new_harness_state
+    from legal_rag.semantic import SemanticPolicy, SemanticAssessment, SegmentAssessment
+    policy = SemanticPolicy("offline-fixture", "r1", "p1", "a" * 64, True)
+    class Client:
+        governed = True  # Fake only: this unit checks status, not monetary authority.
+        def complete(self, prompt):
+            return json.dumps({"answer_text": "合成主体应当遵守合成义务[S1]。", "answer_mode": "evidence_answer",
+                "claims": [{"claim_id": "c1", "text": "合成主体应当遵守合成义务", "source_ids": ["S1"]}],
+                "limitations": [], "clarification_question": None}, ensure_ascii=False)
+    class Checker:
+        def __init__(self):
+            self.policy, self.calls = policy, 0
+        def assess(self, request):
+            self.calls += 1
+            return SemanticAssessment(request.fingerprint, policy.fingerprint, policy.checker_id,
+                policy.checker_revision, policy.prompt_version, tuple(SegmentAssessment(segment.segment_id,
+                status, segment.source_ids, ("model_private_reason",)) for segment in request.segments))
+    class Persistence:
+        payload = None
+        def has_outcome_unknown(self, *args, **kwargs):
+            return False
+        def save_node_artifact(self, *args, payload, **kwargs):
+            self.payload = payload
+            return NodeArtifactRef("safe-result", "f" * 64)
+        def get_budget(self, run_id):
+            return SimpleNamespace(retrieval_rounds_used=1, model_attempts_used=2,
+                                   tool_attempts_used=1, embedding_attempts_used=0)
+    checker, persistence = Checker(), Persistence()
+    assistant = LegalChatAssistant(_BoundRetriever(results=(_bound_result(),)), model="offline-fixture",
+        completion_client=Client(), semantic_policy=policy, semantic_checker=checker)
+    execution_input = _execution_input()
+    retrieved = assistant.retrieve_turn(assistant.prepare_question(execution_input.question))
+    monkeypatch.setattr(BoundedHarnessNodes, "_retrieved", lambda self, state: retrieved)
+    nodes = BoundedHarnessNodes(assistant, execution_input, persistence, "worker-fixture", 1,
+                               lambda *_: None, generate_enabled=True)
+    state = new_harness_state(run_id=execution_input.run_id, session_id="session-fixture", user_id="owner-fixture",
+        graph_version=HARNESS_GRAPH_VERSION, retrieval_config_hash="d" * 64,
+        question=execution_input.question, bounded_history_refs=[], snapshot_id=BOUNDARY.snapshot_id,
+        embedding_profile_id=PROFILE_ID, execution_deadline_at=datetime.now(timezone.utc) + timedelta(minutes=1))
+    state["completion_status"], state["stop_reason"] = "succeeded", "sufficient"
+    changed = nodes.generate(state)
+    assert checker.calls == 1
+    assert changed["completion_status"] == "completed_with_limits"
+    assert changed["stop_reason"] == "semantic_not_supported_or_unknown"
+    rejected = persistence.payload["verification_payload"]["rejected_draft_check"]
+    assert rejected["schema_version"] == 1 and rejected["passed"] is False
+    assert rejected["structural_passed"] is True and rejected["semantic_check_required"] is True
+    assert rejected["semantic_support_status"] == status
+    assert "model_private_reason" not in json.dumps(persistence.payload)
+    assert persistence.payload["answer_payload"]["answer_mode"] == "insufficient_evidence"
+
+
 def _public_wire_payload(result, events) -> str:
     return json.dumps(
         {
@@ -204,6 +306,34 @@ def _public_wire_payload(result, events) -> str:
         ensure_ascii=False,
         sort_keys=True,
     )
+
+
+def test_safe_result_legacy_payload_does_not_acquire_modern_gate_and_rejection_summary_is_strict():
+    from legal_rag.services.run_executor import SafeRunResult
+    result = LegalChatRunExecutor(lambda _: _assistant(_BoundRetriever(results=(_bound_result(),))),
+                                  generate=False).execute(_execution_input())
+    payload = {"answer_text": result.answer_text, "answer_payload": dict(result.answer_payload),
+               "evidence_payload": dict(result.evidence_payload), "verification_payload": dict(result.verification_payload)}
+    restored = SafeRunResult(**payload)
+    assert restored.verification_payload == result.verification_payload
+    assert "rejected_draft_check" not in restored.verification_payload
+    assert "semantic_support_status" not in restored.verification_payload
+    valid = {"schema_version": 1, "passed": False, "structural_passed": True,
+             "semantic_check_required": True, "semantic_support_status": "unsupported",
+             "failure_reasons": ["semantic_unsupported"]}
+    modern = deepcopy(payload)
+    modern["verification_payload"].update(fallback_used=True, rejected_draft_check=valid)
+    assert SafeRunResult(**modern).verification_payload["rejected_draft_check"] == valid
+    from legal_rag.services.run_service import _coerce_safe_result, UnsafePayloadError
+    assert _coerce_safe_result(modern).verification_payload["rejected_draft_check"] == valid
+    for change in ({"schema_version": 2}, {"passed": True}, {"failure_reasons": [DRAFT_MARKER]},
+                   {"failure_reasons": [[]]}, {"semantic_support_status": {}}, {"claim_text": DRAFT_MARKER}):
+        invalid = deepcopy(modern)
+        invalid["verification_payload"]["rejected_draft_check"].update(change)
+        with pytest.raises(ValueError, match="rejected draft check"):
+            SafeRunResult(**invalid)
+        with pytest.raises(UnsafePayloadError, match="rejected draft check"):
+            _coerce_safe_result(invalid)
 
 
 def test_deterministic_executor_emits_safe_output_in_fixed_order() -> None:

@@ -416,6 +416,7 @@ def test_m5_t04_clarification_followup_creates_new_parent_bound_run(
         assert service.cancel_run(boundary.owner, child_run_id).status == "cancelled"
 
     record_scenario(
+        migrated_engine,
         "M5-T04",
         {
             "clarification_followup_created_new_run": True,

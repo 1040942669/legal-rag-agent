@@ -515,7 +515,7 @@ def _manifest(
                 "prompt_version": "prompt-v1",
                 "parameters": {"temperature": 0},
             },
-            "verification": {"schema_version": 2, "rules_version": "m1"},
+            "verification": {"schema_version": 2, "rules_version": "general-bound-v2"},
             "judge": (
                 {
                     "enabled": True,
@@ -2044,7 +2044,7 @@ def test_stop_before_provider_dispatch_does_not_cache_or_commit_generation(
             "token_usage_calls": 0,
             "latency_ms": 0.0,
         }
-        for role in ("assistant", "normalizer", "judge")
+        for role in ("assistant", "normalizer", "semantic", "judge")
     }
     assert len(list((tmp_path / "cache" / "query_analysis").glob("*.json"))) == 1
     assert len(list((tmp_path / "cache" / "retrieval").glob("*.json"))) == 1

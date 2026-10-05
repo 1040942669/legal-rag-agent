@@ -671,7 +671,16 @@ def test_empty_bound_retrieval_artifact_preserves_captured_boundary() -> None:
     generated = assistant.generate_turn(restored, generate=True)
     assert generated.kind == "evidence_limited"
 
+    incomplete_modern = deepcopy(artifact)
+    incomplete_modern["payload"].pop("retrieval_boundary")
+    with pytest.raises(ValueError, match="modern"):
+        retrieved_turn_from_artifact(incomplete_modern, prepared=prepared)
     legacy = deepcopy(artifact)
+    legacy["artifact_schema_version"] = 1
+    legacy["payload"].pop("route_outcome")
+    for check in (legacy["payload"]["evidence_check"], legacy["payload"]["adaptive_result"]["evidence_check"]):
+        check.pop("rules_version")
+        check.pop("mechanical_check")
     legacy["payload"].pop("retrieval_boundary")
     legacy_restored = retrieved_turn_from_artifact(legacy, prepared=prepared)
     assert legacy_restored.retrieval_boundary is None
@@ -684,6 +693,11 @@ def test_complete_m2_artifact_hash_chain_remains_readable() -> None:
     original, _, artifacts = _round_trip_full_turn(assistant)
     prepared, _, _, verified = original
     legacy_retrieved = deepcopy(artifacts[1])
+    legacy_retrieved["artifact_schema_version"] = 1
+    legacy_retrieved["payload"].pop("route_outcome")
+    for check in (legacy_retrieved["payload"]["evidence_check"], legacy_retrieved["payload"]["adaptive_result"]["evidence_check"]):
+        check.pop("rules_version")
+        check.pop("mechanical_check")
     legacy_retrieved["payload"].pop("retrieval_boundary")
 
     def strip_provenance(value) -> None:

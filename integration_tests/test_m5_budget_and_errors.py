@@ -189,6 +189,7 @@ def test_m5_t04_adversarial_followup_requests_stop_at_durable_global_budgets(
     assert [row["operation_kind"] for row in attempts].count("tool") == 2
     assert [row["operation_name"] for row in attempts].count("plan_followup") == 1
     record_scenario(
+        migrated_engine,
         "M5-T04",
         {
             "global_budget_enforced": True,
@@ -260,6 +261,7 @@ def test_m5_t05_transient_429_and_timeout_retry_once_with_global_budget(
     assert all(row["reserved_at"] <= row["dispatched_at"] for row in attempts)
     assert service.get_budget(case.run_id).model_attempts_used == 2
     record_scenario(
+        migrated_engine,
         "M5-T05",
         {
             "transient_retry_bounded": True,
@@ -321,6 +323,7 @@ def test_m5_t05_400_and_401_are_terminal_without_retry(
     assert service.get_budget(case.run_id).model_attempts_used == 1
     service.cancel_run(case.boundary.owner, case.run_id)
     record_scenario(
+        migrated_engine,
         "M5-T05",
         {
             "permanent_error_retried": False,

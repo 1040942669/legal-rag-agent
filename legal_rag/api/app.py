@@ -72,6 +72,7 @@ from .settings import ServiceSettings
 
 M5_ALEMBIC_HEAD = "0006_m5_harness_recovery"
 M6_ALEMBIC_HEAD = "0007_m6_jobs_outbox"
+CURRENT_ALEMBIC_HEAD = "0008_execution_money"
 # Kept as an import-compatible alias for M4 clients and tests.
 M4_ALEMBIC_HEAD = M5_ALEMBIC_HEAD
 STREAM_END_RUN_STATUSES = frozenset(
@@ -420,7 +421,7 @@ def create_app(
             migration = connection.scalar(
                 text("SELECT version_num FROM alembic_version")
             )
-            if migration != M6_ALEMBIC_HEAD:
+            if migration != CURRENT_ALEMBIC_HEAD:
                 return False
             for principal in authenticator.principals:
                 configured = connection.scalar(
@@ -747,6 +748,31 @@ def create_app(
         record = await run_in_threadpool(service.get_run, principal, run_id)
         evidence = dict(record.result.evidence_payload) if record.result else None
         return {"run_id": record.run_id, "evidence": evidence}
+
+    @app.get("/api/v1/runs/{run_id}/articles", name="lookup_run_article")
+    async def lookup_run_article_route(
+        run_id: str,
+        law_title: str = Query(min_length=1, max_length=300),
+        article_number: str = Query(min_length=1, max_length=128),
+        law_id: str | None = Query(default=None, max_length=255),
+        version_id: str | None = Query(default=None, max_length=255),
+        effective_on: str | None = Query(default=None, max_length=10),
+        principal: ServicePrincipal = Depends(principal_dependency),
+    ) -> dict[str, Any]:
+        from dataclasses import asdict
+        from fastapi.encoders import jsonable_encoder
+        from legal_rag.storage.catalog import CatalogContractError
+        try:
+            lookup = await run_in_threadpool(service.lookup_run_article, principal, run_id,
+                law_title=law_title, article_number=article_number, law_id=law_id,
+                version_id=version_id, effective_on=effective_on)
+        except CatalogContractError:
+            raise HTTPException(status_code=422, detail={"code": "invalid_article_reference"}) from None
+        return jsonable_encoder({"run_id": run_id, "status": lookup.status,
+            "reason": lookup.reason, "request": lookup.request.trace_payload(),
+            "article": asdict(lookup.match) if lookup.match is not None else None,
+            "candidates": [asdict(candidate) for candidate in lookup.candidates],
+            "evidence_kind": "authoritative_article", "synthetic_chunk": False})
 
     @app.post(
         "/api/v1/runs/{run_id}/cancel",

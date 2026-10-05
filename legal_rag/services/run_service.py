@@ -59,6 +59,8 @@ from legal_rag.storage.schema import (
     run_checkpoints,
     run_events,
     run_external_attempts,
+    run_execution_policies,
+    run_monetary_attempts,
     run_node_artifacts,
     run_results,
     runs,
@@ -149,6 +151,7 @@ _REQUEST_RESERVED_FIELDS = frozenset(
         "scope_id",
         "snapshot_revision",
         "user_id",
+        "execution_policy", "generation", "api_key", "base_url", "provider",
     }
 )
 _SAFE_ANSWER_FIELDS = frozenset(
@@ -222,6 +225,7 @@ _SAFE_VERIFICATION_FIELDS = frozenset(
         "refusal_required",
         "reason_codes",
         "required_checks",
+        "rejected_draft_check",
         "response_mode_valid",
         "schema_valid",
         "schema_errors",
@@ -719,6 +723,7 @@ class FrozenRunInput:
     checkpoint_namespace: str | None
     last_checkpoint_id: str | None
     completed_history: tuple[MessageRecord, ...]
+    execution_policy: JSONMapping | None = None
 
     @property
     def history(self) -> tuple[MessageRecord, ...]:
@@ -751,6 +756,7 @@ class FrozenRunInput:
             profile_id=self.profile_id,
             boundary_fingerprint=self.boundary_fingerprint,
             request_options=self.request_options,
+            execution_policy=self.execution_policy,
         )
 
 
@@ -852,6 +858,14 @@ def _coerce_safe_result(value: Any) -> _PreparedSafeRunResult:
         raise UnsafePayloadError(
             "verification_payload.passed must be true before final publication"
         )
+    if "rejected_draft_check" in safe_verification:
+        # This is a versioned safe gate summary, not the old rejected draft.
+        # Validate modern summaries without reinterpreting historical results.
+        from .run_executor import SafeRunResult as ExecutionSafeRunResult
+        try:
+            ExecutionSafeRunResult(answer_text, safe_answer, safe_evidence, safe_verification)
+        except (TypeError, ValueError):
+            raise UnsafePayloadError("rejected draft check is invalid") from None
     return _PreparedSafeRunResult(
         answer_text=answer_text,
         answer_payload=safe_answer,
@@ -943,6 +957,7 @@ class RunService:
         history_message_limit: int = DEFAULT_HISTORY_MESSAGES,
         history_character_limit: int = DEFAULT_HISTORY_CHARACTERS,
         budget_config: HarnessBudgetConfig | None = None,
+        execution_policy: Any | None = None,
     ) -> None:
         if not isinstance(engine, Engine):
             raise TypeError("engine must be a SQLAlchemy Engine")
@@ -967,6 +982,10 @@ class RunService:
         if not isinstance(budget_config, HarnessBudgetConfig):
             raise TypeError("budget_config must be a HarnessBudgetConfig")
         self.budget_config = budget_config
+        from .execution_policy import ServiceExecutionPolicy
+        if execution_policy is not None and not isinstance(execution_policy, ServiceExecutionPolicy):
+            raise ServiceContractError("invalid server execution policy")
+        self.execution_policy = execution_policy
 
     def create_session(
         self,
@@ -1222,6 +1241,24 @@ class RunService:
                     evidence_top_k=self.budget_config.evidence_top_k,
                 )
             )
+            if self.execution_policy is not None:
+                from dataclasses import replace
+                if set(retrieval_config) - {"top_k", "lexical_profile"}:
+                    raise ServiceContractError("retrieval options cannot override execution authority")
+                selector = retrieval_config.get("lexical_profile", self.execution_policy.lexical_profile)
+                if selector not in self.execution_policy.allowed_lexical_profiles:
+                    raise ServiceContractError("lexical selector is not allowed by deployment")
+                frozen_policy = replace(self.execution_policy, lexical_profile=selector)
+                if frozen_policy.generation.enabled and bound.scope_id not in frozen_policy.generation.allowed_scope_ids:
+                    raise ServiceContractError("scope is not authorized for generation egress")
+                connection.execute(insert(run_execution_policies).values(
+                    run_id=run_id, policy=frozen_policy.to_dict(), policy_hash=frozen_policy.fingerprint,
+                ))
+                connection.execute(update(runs).where(runs.c.run_id == run_id).values(
+                    retrieval_config_hash=canonical_json_sha256({
+                        "retrieval": retrieval_config, "execution_policy": frozen_policy.to_dict(),
+                    }),
+                ))
             connection.execute(
                 insert(messages).values(
                     message_id=message_id,
@@ -1282,6 +1319,44 @@ class RunService:
         """Authorization helper with the same non-enumerating not-found result."""
 
         return self.get_run(principal, run_id)
+
+    def lookup_run_article(self, principal: ServicePrincipal, run_id: str, *,
+                           law_title: str, article_number: str, law_id: str | None = None,
+                           version_id: str | None = None, effective_on: str | None = None) -> Any:
+        """Full authoritative article capability, distinct from chunk citations.
+
+        The caller must own the run and the current principal must still have
+        its frozen scope. Active pointers and request-supplied snapshots are
+        never consulted or accepted as replacement authority.
+        """
+        from legal_rag.legal_references import canonical_law_title, canonical_article_number
+        from legal_rag.storage.catalog import ArticleLookupBoundary, ArticleLookupRequest, PostgresLegalCatalogRepository
+        from legal_rag.storage.schema import law_versions, law_articles, chunk_articles, snapshot_chunks, corpus_snapshots
+        record = self.get_run(principal, run_id)
+        if principal.scope_id != record.scope_id:
+            raise ResourceNotFoundError()
+        title = canonical_law_title(law_title)
+        number = canonical_article_number(article_number)
+        if not title or not number:
+            raise ServiceContractError("invalid exact article reference")
+        # Resolve aliases using ONLY SQL-selected authorized snapshot titles.
+        with self.engine.connect() as connection:
+            titles = connection.execute(select(law_versions.c.title).distinct().select_from(
+                law_versions.join(law_articles, law_articles.c.version_id == law_versions.c.version_id)
+                .join(chunk_articles, chunk_articles.c.article_id == law_articles.c.article_id)
+                .join(snapshot_chunks, snapshot_chunks.c.chunk_id == chunk_articles.c.chunk_id)
+                .join(corpus_snapshots, corpus_snapshots.c.snapshot_id == snapshot_chunks.c.snapshot_id)
+            ).where(snapshot_chunks.c.snapshot_id == record.snapshot_id, corpus_snapshots.c.scope_id == record.scope_id)).scalars().all()
+        matching = tuple(stored for stored in titles if canonical_law_title(stored) == title)
+        if len(matching) > 1:
+            raise ServiceContractError("law title is ambiguous within the frozen snapshot")
+        request = ArticleLookupRequest(
+            ArticleLookupBoundary(record.scope_id, record.snapshot_id,
+                                  pointer_revision=record.snapshot_revision, activation_id=record.activation_id),
+            matching[0] if matching else law_title, number, law_id=law_id,
+            version_id=version_id, effective_on=effective_on,
+        )
+        return PostgresLegalCatalogRepository(self.engine).lookup_article(request)
 
     def list_events(
         self,
@@ -1618,6 +1693,48 @@ class RunService:
                 recovered.append(self._run_record(connection, changed))
             return tuple(recovered)
 
+    def _execution_policy(self, connection: Connection, run_id: str) -> JSONMapping | None:
+        run_row = self._run_row(connection, run_id)
+        if run_row is None:
+            raise ResourceNotFoundError()
+        row = connection.execute(select(run_execution_policies).where(
+            run_execution_policies.c.run_id == run_id,
+        )).mappings().one_or_none()
+        if row is None:
+            if canonical_json_sha256(_retrieval_configuration(run_row["request_payload"])) != run_row["retrieval_config_hash"]:
+                raise CheckpointCompatibilityError("frozen execution policy is missing")
+            return None
+        from .execution_policy import ServiceExecutionPolicy
+        try:
+            policy = ServiceExecutionPolicy.from_dict(row["policy"])
+        except (ValueError, TypeError):
+            raise CheckpointCompatibilityError("invalid frozen execution policy") from None
+        expected_config = canonical_json_sha256({
+            "retrieval": _retrieval_configuration(run_row["request_payload"]),
+            "execution_policy": policy.to_dict(),
+        })
+        if policy.fingerprint != row["policy_hash"] or expected_config != run_row["retrieval_config_hash"]:
+            raise CheckpointCompatibilityError("execution policy identity mismatch")
+        return MappingProxyType(policy.to_dict())
+
+    def get_execution_policy(self, run_id: str) -> Any:
+        from .execution_policy import ServiceExecutionPolicy
+        with self.engine.connect() as connection:
+            value = self._execution_policy(connection, run_id)
+        return ServiceExecutionPolicy.from_dict(dict(value)) if value is not None else ServiceExecutionPolicy.historical()
+
+    def monetary_snapshot(self, run_id: str) -> dict[str, Any]:
+        from decimal import Decimal
+        with self.engine.connect() as connection:
+            records = connection.execute(select(run_monetary_attempts).where(
+                run_monetary_attempts.c.run_id == run_id,
+            )).mappings().all()
+        known = sum((record["known_cost"] or Decimal(0) for record in records), Decimal(0))
+        unresolved = sum((record["reserved_cost"] for record in records if record["cost_status"] in {"reserved", "unknown"}), Decimal(0))
+        return {"currency": "CNY", "known_estimated_cost": str(known), "unresolved_reserved_cost": str(unresolved),
+                "has_unknown_cost": any(record["cost_status"] in {"reserved", "unknown"} for record in records),
+                "attempts": len(records), "billing_guarantee": False}
+
     def load_execution_input(
         self,
         run_id: str,
@@ -1710,6 +1827,7 @@ class RunService:
                 checkpoint_namespace=row["checkpoint_namespace"],
                 last_checkpoint_id=row["last_checkpoint_id"],
                 completed_history=history,
+                execution_policy=self._execution_policy(connection, resolved_run_id),
             )
 
     def heartbeat_run(
@@ -1895,6 +2013,7 @@ class RunService:
         operation_kind: str,
         operation_name: str,
         request_hash: str,
+        monetary_reservation: Any | None = None,
     ) -> AttemptReservation:
         """Durably consume one global attempt before any external dispatch."""
 
@@ -1918,6 +2037,37 @@ class RunService:
                 lease_epoch=resolved_epoch,
             )
             self._assert_execution_deadline(run_row, now)
+            policy_value = self._execution_policy(connection, resolved_run_id)
+            monetary_policy = None
+            if policy_value is not None:
+                from .execution_policy import ServiceExecutionPolicy
+                monetary_policy = ServiceExecutionPolicy.from_dict(dict(policy_value)).generation
+            if monetary_reservation is not None:
+                from decimal import Decimal
+                if (not isinstance(monetary_reservation, Decimal) or not monetary_reservation.is_finite()
+                    or monetary_reservation <= 0 or operation_kind != "model"
+                    or monetary_policy is None or not monetary_policy.enabled
+                    or run_row["scope_id"] not in monetary_policy.allowed_scope_ids):
+                    raise ServiceContractError("invalid monetary reservation authority")
+                monetary_rows = connection.execute(select(run_monetary_attempts).where(
+                    run_monetary_attempts.c.run_id == resolved_run_id,
+                )).mappings().all()
+                if any(item["policy_hash"] != canonical_json_sha256(dict(policy_value))
+                       or item["currency"] != monetary_policy.currency for item in monetary_rows):
+                    raise CheckpointCompatibilityError("monetary pricing identity differs from frozen policy")
+                if any(item["cost_status"] in {"reserved", "unknown", "overrun"} for item in monetary_rows):
+                    raise BudgetExhausted("external_outcome_unknown")
+                if connection.scalar(select(func.count()).select_from(run_external_attempts).where(
+                    run_external_attempts.c.run_id == resolved_run_id,
+                    run_external_attempts.c.operation_kind == "model",
+                    run_external_attempts.c.status == "outcome_unknown",
+                )):
+                    raise BudgetExhausted("external_outcome_unknown")
+                committed = sum((item["known_cost"] for item in monetary_rows), Decimal(0))
+                if committed + monetary_reservation > monetary_policy.budget:
+                    raise BudgetExhausted("monetary_budget_exhausted")
+            elif operation_kind == "model" and monetary_policy is not None and monetary_policy.enabled:
+                raise ServiceContractError("paid operation requires atomic monetary reservation")
             ledger = (
                 connection.execute(
                     select(run_budget_ledgers)
@@ -1981,6 +2131,12 @@ class RunService:
                     reserved_at=now,
                 )
             )
+            if monetary_reservation is not None:
+                connection.execute(insert(run_monetary_attempts).values(
+                    attempt_id=attempt_id, run_id=resolved_run_id,
+                    policy_hash=canonical_json_sha256(dict(policy_value)), currency=monetary_policy.currency,
+                    reserved_cost=monetary_reservation, cost_status="reserved",
+                ))
             return AttemptReservation(
                 attempt_id=attempt_id,
                 run_id=resolved_run_id,
@@ -2003,6 +2159,13 @@ class RunService:
         resolved_worker = _canonical_identifier(worker_id, "worker_id", 128)
         resolved_epoch = _canonical_positive_integer(lease_epoch, "lease_epoch")
         with self.engine.begin() as connection:
+            attempt_run_id = connection.scalar(select(run_external_attempts.c.run_id).where(
+                run_external_attempts.c.attempt_id == resolved_attempt_id,
+            ))
+            if attempt_run_id is None:
+                raise ResourceNotFoundError()
+            # All writers acquire run then attempt, matching reservation/recovery.
+            run_row = self._run_row(connection, attempt_run_id, for_update=True)
             attempt = (
                 connection.execute(
                     select(run_external_attempts)
@@ -2014,7 +2177,6 @@ class RunService:
             )
             if attempt is None:
                 raise ResourceNotFoundError()
-            run_row = self._run_row(connection, attempt["run_id"], for_update=True)
             if run_row is None:
                 raise ResourceNotFoundError()
             now = self._database_now(connection)
@@ -2058,6 +2220,8 @@ class RunService:
         result_ref: str | None = None,
         result_hash: str | None = None,
         possible_duplicate_cost: bool = False,
+        monetary_usage: tuple[int, int] | None = None,
+        monetary_unknown_reason: str | None = None,
     ) -> None:
         resolved_attempt_id = _canonical_identifier(attempt_id, "attempt_id", 36)
         resolved_worker = _canonical_identifier(worker_id, "worker_id", 128)
@@ -2066,6 +2230,13 @@ class RunService:
             raise ServiceContractError("attempt completion status is invalid")
         if type(possible_duplicate_cost) is not bool:
             raise ServiceContractError("possible_duplicate_cost must be a boolean")
+        if monetary_unknown_reason is not None:
+            monetary_unknown_reason = _canonical_error_code(monetary_unknown_reason)
+        if monetary_usage is not None and (
+            not isinstance(monetary_usage, tuple) or len(monetary_usage) != 2
+            or any(type(count) is not int or not 0 <= count <= 1000000000 for count in monetary_usage)
+        ):
+            raise ServiceContractError("invalid monetary usage")
         values: dict[str, Any] = {"status": status}
         if status == "succeeded":
             if result_hash is None:
@@ -2088,6 +2259,12 @@ class RunService:
                 result_hash=None,
             )
         with self.engine.begin() as connection:
+            attempt_run_id = connection.scalar(select(run_external_attempts.c.run_id).where(
+                run_external_attempts.c.attempt_id == resolved_attempt_id,
+            ))
+            if attempt_run_id is None:
+                raise ResourceNotFoundError()
+            run_row = self._run_row(connection, attempt_run_id, for_update=True)
             attempt = (
                 connection.execute(
                     select(run_external_attempts)
@@ -2099,7 +2276,6 @@ class RunService:
             )
             if attempt is None:
                 raise ResourceNotFoundError()
-            run_row = self._run_row(connection, attempt["run_id"], for_update=True)
             if run_row is None:
                 raise ResourceNotFoundError()
             now = self._database_now(connection)
@@ -2111,10 +2287,38 @@ class RunService:
             )
             if int(attempt["lease_epoch"]) != resolved_epoch:
                 raise WorkerLeaseLostError("attempt belongs to an older lease epoch")
+            monetary_row = connection.execute(select(run_monetary_attempts).where(
+                run_monetary_attempts.c.attempt_id == resolved_attempt_id,
+            )).mappings().one_or_none()
             if attempt["status"] == status:
+                # Idempotence is exact, not permission to rewrite settled usage.
+                if attempt["result_hash"] != values.get("result_hash") or attempt["error_code"] != values.get("error_code"):
+                    raise InvalidRunStateError("attempt completion differs from recorded result")
+                if monetary_row is not None and (
+                    (monetary_usage is None and monetary_row["known_cost"] is not None)
+                    or (monetary_usage is not None and (monetary_row["input_tokens"], monetary_row["output_tokens"]) != monetary_usage)
+                ):
+                    raise InvalidRunStateError("monetary completion differs from recorded usage")
                 return
             if attempt["status"] != "dispatched":
                 raise InvalidRunStateError("attempt was not dispatched")
+            if monetary_row is not None:
+                from .execution_policy import ServiceExecutionPolicy
+                policy = ServiceExecutionPolicy.from_dict(dict(self._execution_policy(connection, attempt["run_id"]))).generation
+                if monetary_row["policy_hash"] != canonical_json_sha256(dict(self._execution_policy(connection, attempt["run_id"]))) or monetary_row["currency"] != policy.currency:
+                    raise CheckpointCompatibilityError("monetary pricing identity differs from frozen policy")
+                if monetary_usage is None:
+                    monetary_values = {"cost_status": "unknown", "error_code": monetary_unknown_reason or "usage_unknown"}
+                else:
+                    inputs, outputs = monetary_usage
+                    cost = policy.cost(inputs, outputs)
+                    overrun = cost > monetary_row["reserved_cost"] or outputs > policy.max_output_tokens
+                    monetary_values = {"cost_status": "overrun" if overrun else "known", "known_cost": cost,
+                                       "input_tokens": inputs, "output_tokens": outputs,
+                                       "error_code": "usage_exceeds_reservation" if overrun else monetary_unknown_reason}
+                connection.execute(update(run_monetary_attempts).where(
+                    run_monetary_attempts.c.attempt_id == resolved_attempt_id,
+                ).values(**monetary_values))
             values["completed_at"] = now
             connection.execute(
                 update(run_external_attempts)

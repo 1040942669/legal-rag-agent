@@ -11,6 +11,7 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 from alembic.runtime.migration import MigrationContext
+from alembic.script import ScriptDirectory
 from sqlalchemy import func, select, text
 
 from legal_rag.chunking import article_chunks
@@ -30,7 +31,7 @@ from legal_rag.storage.ann import (
 from legal_rag.storage.catalog import PostgresLegalCatalogRepository
 from legal_rag.storage.contracts import LawVersionSpec, build_storage_import_bundle
 from legal_rag.storage.database import DatabaseSettings, create_database_engine
-from legal_rag.storage.migrations import upgrade_database
+from legal_rag.storage.migrations import alembic_config, upgrade_database
 from legal_rag.storage.repository import PostgresCorpusRepository
 from legal_rag.storage.retrieval import (
     PostgresExactRetrievalRepository,
@@ -45,7 +46,6 @@ from legal_rag.storage.schema import (
 )
 
 RECEIPT_SCHEMA_VERSION = 1
-EXPECTED_MIGRATION_REVISION = "0007_m6_jobs_outbox"
 FIXTURE_PREFIX = "m3-restart"
 FIXTURE_SCOPE_ID = "scope-m3-service-restart"
 FIXTURE_SNAPSHOT_ID = "snapshot-m3-service-restart-v1"
@@ -141,16 +141,17 @@ def _fixture_bundle():
 
 
 def _database_facts(engine) -> dict[str, Any]:
+    expected_revision = ScriptDirectory.from_config(alembic_config()).get_current_head()
     with engine.connect() as connection:
         revision = MigrationContext.configure(connection).get_current_revision()
         pgvector_version = connection.scalar(
             text("SELECT extversion FROM pg_extension WHERE extname = 'vector'")
         )
         server_version_num = connection.scalar(text("SHOW server_version_num"))
-    if revision != EXPECTED_MIGRATION_REVISION:
+    if revision != expected_revision:
         raise RuntimeError(
             f"unexpected migration revision: {revision!r}; "
-            f"expected {EXPECTED_MIGRATION_REVISION!r}"
+            f"expected {expected_revision!r}"
         )
     if not isinstance(pgvector_version, str) or not pgvector_version:
         raise RuntimeError("pgvector extension version is unavailable")

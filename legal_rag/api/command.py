@@ -41,6 +41,7 @@ def main(argv: list[str] | None = None) -> int:
     from legal_rag.observability.config import observer_from_environment
     from legal_rag.services.run_executor import LegalChatRunExecutor
     from legal_rag.services.run_service import RunService
+    from legal_rag.services.execution_policy import ServiceExecutionPolicy
     from legal_rag.services.service_retrieval import PostgresAssistantFactory
     from legal_rag.services.supervisor import RunSupervisor
     from legal_rag.storage.database import create_database_engine
@@ -50,6 +51,9 @@ def main(argv: list[str] | None = None) -> int:
     from .settings import load_environment_configuration
 
     database, authenticator, settings = load_environment_configuration()
+    execution_policy = ServiceExecutionPolicy.from_environment()
+    if execution_policy.generation.enabled and settings.graph_version != HARNESS_GRAPH_VERSION:
+        raise SystemExit("enabled generation requires the governed M5 graph")
     engine = create_database_engine(database)
     if args.migrate:
         upgrade_database(engine)
@@ -72,6 +76,7 @@ def main(argv: list[str] | None = None) -> int:
             execution_deadline_seconds=settings.execution_deadline_seconds,
             evidence_top_k=settings.evidence_top_k,
         ),
+        execution_policy=execution_policy,
     )
     assistant_factory = PostgresAssistantFactory(engine)
     job_observer = observer_from_environment()

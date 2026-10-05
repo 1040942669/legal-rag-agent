@@ -99,6 +99,18 @@ M6_SMOKE_MODULES: Final = (
     "legal_rag.observability.tracing",
     "legal_rag.storage.alembic.versions.0007_m6_jobs_outbox",
 )
+GENERAL_MIGRATION_HEAD: Final = "0008_execution_money"
+GENERAL_SMOKE_MODULES: Final = (
+    "legal_rag.legal_references", "legal_rag.reference_evidence",
+    "legal_rag.retrieval_outcomes", "legal_rag.semantic",
+    "legal_rag.evaluation_governance", "legal_rag.governed_protocol",
+    "legal_rag.services.execution_policy", "legal_rag.services.governed_calls",
+    "legal_rag.services.exact_retrieval",
+    "legal_rag.storage.alembic.versions.0008_execution_money",
+)
+GENERAL_REQUIRED_RUNTIME_FILES: Final = frozenset(
+    name.replace(".", "/") + ".py" for name in GENERAL_SMOKE_MODULES
+)
 _EXTRA_ONLY_MARKER = re.compile(
     r'(?:extra\s*==\s*["\'](?P<right>[A-Za-z0-9][A-Za-z0-9._-]*)["\']|'
     r'["\'](?P<left>[A-Za-z0-9][A-Za-z0-9._-]*)["\']\s*==\s*extra)',
@@ -450,6 +462,7 @@ def _smoke_m6_installed_wheel(
     expected_version: str,
     timeout_seconds: int,
     temp_root: Path | None,
+    expected_migration_head: str = "0007_m6_jobs_outbox",
 ) -> dict[str, Any]:
     """Install the M6 wheel outside the checkout and exercise its jobs runtime."""
 
@@ -533,10 +546,13 @@ def _smoke_m6_installed_wheel(
                 "locked_runtime_unavailable",
                 "The locked M6 probe runtime is unavailable.",
             )
+        smoke_modules = M6_SMOKE_MODULES + (
+            GENERAL_SMOKE_MODULES if expected_migration_head == GENERAL_MIGRATION_HEAD else ()
+        )
         imports = ";".join(
             f"m=importlib.import_module({module_name!r});"
             "pathlib.Path(m.__file__).resolve().relative_to(r)"
-            for module_name in M6_SMOKE_MODULES
+            for module_name in smoke_modules
         )
         provenance_code = (
             "import importlib,importlib.metadata as md,pathlib,sys;"
@@ -547,7 +563,7 @@ def _smoke_m6_installed_wheel(
             "from alembic.script import ScriptDirectory;"
             "from legal_rag.storage.migrations import alembic_config;"
             "assert ScriptDirectory.from_config(alembic_config()).get_current_head() "
-            "== '0007_m6_jobs_outbox'"
+            f"== {expected_migration_head!r}"
         )
         _m4._run_quiet(
             (str(python), "-I", "-c", provenance_code),
@@ -571,10 +587,10 @@ def _smoke_m6_installed_wheel(
         "status": "passed",
         "candidate_package_source": "installed_wheel",
         "dependency_source": "locked_probe_runtime",
-        "module_import_count": len(M6_SMOKE_MODULES),
+        "module_import_count": len(smoke_modules),
         "api_module_imported": True,
         "jobs_cli_help": "passed",
-        "migration_head": "0007_m6_jobs_outbox",
+        "migration_head": expected_migration_head,
         "source_checkout_isolated": True,
     }
 
@@ -587,6 +603,7 @@ def probe_release_wheel(
     smoke: bool = False,
     timeout_seconds: int = 120,
     temp_root: str | os.PathLike[str] | None = None,
+    expected_migration_head: str | None = None,
 ) -> dict[str, Any]:
     """Probe an M4, M5, or M6 release wheel and return a sanitized receipt."""
 
@@ -596,6 +613,13 @@ def probe_release_wheel(
             "unsupported_release_profile",
             "The requested release-wheel profile is unsupported.",
         )
+    if expected_migration_head is not None and (
+        normalized_profile != "M6" or expected_migration_head not in {
+            "0007_m6_jobs_outbox", GENERAL_MIGRATION_HEAD,
+        }
+    ):
+        raise ProbeFailure("invalid_migration_contract", "The explicit migration contract is unsupported.")
+    migration_head = expected_migration_head or "0007_m6_jobs_outbox"
     version = expected_version or DEFAULT_VERSIONS[normalized_profile]
     path = Path(wheel_path).expanduser().resolve()
 
@@ -626,6 +650,12 @@ def probe_release_wheel(
             _require_m6_runtime_files(names)
             _require_m6_jobs_entry_point(path)
             _require_m6_jobs_dependencies(metadata)
+            if migration_head == GENERAL_MIGRATION_HEAD:
+                if not GENERAL_REQUIRED_RUNTIME_FILES.issubset(names):
+                    raise ProbeFailure("general_required_runtime_file_missing",
+                                       "The wheel is missing the modern execution runtime.")
+                receipt["checks"]["general_runtime_files"] = "passed"
+                receipt["expected_migration_head"] = migration_head
             receipt["checks"].update(
                 {
                     "m6_runtime_files": "passed",
@@ -663,6 +693,7 @@ def probe_release_wheel(
                         expected_version=version,
                         timeout_seconds=timeout_seconds,
                         temp_root=Path(temp_root) if temp_root is not None else None,
+                        expected_migration_head=migration_head,
                     )
                 )
     return receipt
@@ -685,6 +716,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--expected-version",
         default=None,
         help="Required distribution version; defaults from --profile.",
+    )
+    parser.add_argument(
+        "--expected-migration-head", choices=["0007_m6_jobs_outbox", GENERAL_MIGRATION_HEAD],
+        default=None, help="Explicit M6 migration contract; defaults to historical 0007.",
     )
     parser.add_argument(
         "--smoke",
@@ -724,6 +759,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.wheel,
             profile=args.profile,
             expected_version=args.expected_version,
+            expected_migration_head=args.expected_migration_head,
             smoke=args.smoke,
             timeout_seconds=args.timeout_seconds,
             temp_root=args.temp_root,

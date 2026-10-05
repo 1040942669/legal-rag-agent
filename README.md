@@ -8,6 +8,8 @@
 
 ## 项目产出
 
+当前未提交工作区已完成独立的 [通用证据与受控服务改善](reports/refactor/GENERAL_EVIDENCE_IMPROVEMENTS.md) 的W1至W8本地实施及所列适用运行验证，设计见 [ADR-006](docs/refactor/decisions/ADR-006-general-evidence-first-improvements.md)。它不是新M6发布，也不进入M7：明确法名/条号逐pair核验，数据库精确路由不以模糊结果冒充未命中，完整可见输出绑定语义判定，服务默认禁生成并冻结外发与费用策略。完整离线1752+157子测试、累计M2 25/25、隔离PG150、真实PG重启与仓库外wheel已通过；八臂消融中无购物扩展的generic-v3仅76/108到77/108，仍opt-in，排名默认legacy-v1。下面lexical-v2和paid Smoke保留为历史。工程通过不等于法律质量：实际法律审核/独立holdout/checker校准、真实Linuxbroker与生产容量未验证，最终文档静态结果见验收记录。
+
 | 维度 | 已完成产出 |
 | --- | --- |
 | 数据与索引 | 203 部法律、19,050 个条文级 chunk 的历史实验快照；4 种 chunk 策略；废止法律标记与精确重复条文去重 |
@@ -454,13 +456,33 @@ HTTP 接受事务同时写入 `jobs` 与 `job_outbox`，因此 202 **不是**“
 }
 ```
 
-`legal-rag-api --migrate` 显式升级到 Alembic `0007_m6_jobs_outbox`；普通 API 启动不静默建表。配置 `LEGAL_RAG_DATABASE_URL`、`LEGAL_RAG_REDIS_URL` 与 registry 后，分别运行 `legal-rag-jobs worker` 和 `legal-rag-jobs dispatch --poll 1`。部署时先启动数据库、Redis、worker 和 dispatcher，再接收新 job；worker 停止后应保留 PostgreSQL 状态和 artifact，不能删卷伪造回滚。`legal-rag-jobs dispatch --once` 适合手动检查单轮投递。更多安全与恢复边界见 [ADR-004](docs/refactor/decisions/ADR-004-m6-batch-jobs-observability.md)，测试结果见 [M6 验收报告](reports/refactor/M6.md)。
+已发布 M6 的 migration head 是 `0007_m6_jobs_outbox`；当前未提交改善候选追加 `0008_execution_money`，所以在当前 checkout 运行 `legal-rag-api --migrate` 会显式升级到0008，不应把历史0007回执当作新候选数据库事实。普通 API 启动不静默建表。配置 `LEGAL_RAG_DATABASE_URL`、`LEGAL_RAG_REDIS_URL` 与 registry 后，分别运行 `legal-rag-jobs worker` 和 `legal-rag-jobs dispatch --poll 1`。部署时先启动数据库、Redis、worker 和 dispatcher，再接收新 job；worker 停止后应保留 PostgreSQL 状态和 artifact，不能删卷伪造回滚。`legal-rag-jobs dispatch --once` 适合手动检查单轮投递。更多安全与恢复边界见 [ADR-004](docs/refactor/decisions/ADR-004-m6-batch-jobs-observability.md)，历史结果见 [M6 验收报告](reports/refactor/M6.md)，当前独立候选见 [改善记录](reports/refactor/GENERAL_EVIDENCE_IMPROVEMENTS.md)。
 
 新观测 `Observation` 是本地可核对执行事实，不是隐藏推理内容。`LEGAL_RAG_OBSERVATION_JSONL_PATH` 可启用本地绝对路径 JSONL。Langfuse 远端导出默认关闭；只有显式设置 `LEGAL_RAG_LANGFUSE_ENABLED=1`、`LEGAL_RAG_LANGFUSE_EXPORT_ACK=1` 和 `LANGFUSE_BASE_URL/PUBLIC_KEY/SECRET_KEY` 才开启。远端字段白名单会伪名化关联 ID，不导出 query、答案/证据全文、凭证、token 或个人信息；导出队列满/失败不能改变主任务结果。启用前必须确认远端数据目的地和当地政策，密钥只放部署环境，不写入 registry 或 Git。
 
 已发布的 `v0.7.1` 补齐了实际接线：同一观测配置覆盖 API 默认 M5 graph 和 batch worker。在线记录冻结的 session/run、实际节点与工具尝试、持久预算、重试、当前耗时、artifact cache lookup 和证据 ID；评测记录命名空间化的 experiment/job/case-attempt。预留预算不等于已发出的模型请求，模型计数仅证明受控客户端调用，历史 cache source 调用不计入当前消耗；未报告或不完整的 token 分量保持 null，费用不推算。详见 [补丁报告](reports/refactor/M6-observability-patch.md) 和 [v0.7.1 回执](docs/refactor/receipts/M6-v0.7.1.json)，独立回执的完成状态另行核验。
 
 ## 测试与复现边界
+
+新增的 [首轮真实模型 smoke](docs/LIVE_MODEL_SMOKE.md) 是独立、显式 opt-in 的本地实验，不改变默认离线入口。固定 Qwen3.5-35B、article + BM25、至多 10 次尝试和 2 元费用政策预算，禁止隐藏重试、重定向、换输出目录重开额度；原始回答仅留本地 ignored artifacts。实际执行状态、失败与费用口径见 [首轮验收记录](reports/refactor/LIVE_SMOKE_QWEN35B.md)，不能把小样本结构检查解释为法律质量或 M7 完成。
+
+首轮暴露了回答正文缺少同句引用的问题。用户另行授权修复与复测后，仅补足提示词中的引用布局要求，不放宽 verifier、不自动补引用；复测前 4 题草稿通过，包括原失败题。第 5 题因已有检索未命中导致回答模式不符，整轮停止，剩余 4 题未运行。新增 5 次、累计 7 次调用，累计估算 0.0070528 元，未核实账单；固定账本不允许补跑。真实结果与未解决的质量边界单独记录在 [引用格式修复复测](reports/refactor/LIVE_SMOKE_QWEN35B_REPAIR.md)，不覆盖首轮失败证据或改变既有发布状态。
+
+历史局部修复增加了显式可选的 `local-lexical-v2`：连续汉字片段内生成二元词、查询特征去重、只为明确实物购买补少量完整词，不注入 gold 法名、条号、期限或答案。当时的历史 evidence 合同同时修正单法律与条号跨结果拼接、相关法律名冒充同名法律和无效分数，并为纯 BM25 v2 的退货题加词面必要性闸门；该闸门不是语义证明，也不是当前现代 evidence 默认。当前新 `general-reference-v2` 使用类型化引用关系、原文与来源范围，不按购物对象验充分；`generic-v3` 不含购物扩展，显式配置见 [通用候选示例](configs/generic-v3.yaml)。未推广排名默认，不放宽引用、权限或回答模式规则。
+
+固定 `offline_lexical_ab_20261004_first` 的 108 条检索题命中数为 `76/108 -> 78/108`，网购退货题变为第 1 位；但有 4 题改善、2 题回退，配对差异区间跨 0，因此默认仍为 `legacy-v1`。12 条检索前拒答两臂均通过；16 条补充案例是合成检查而非法律 holdout。无真实模型调用，不把这次结果当作原 9 题 live Smoke 通过。完整回退、身份和验收边界见 [本地检索修复报告](reports/refactor/LOCAL_LEXICAL_RETRIEVAL.md)及[ADR-005](docs/refactor/decisions/ADR-005-local-lexical-retrieval.md)。
+
+若要显式比较候选，使用 [词汇候选配置](configs/lexical-v2.yaml)，不传 `--generate`。例如在已有本地 article 索引上运行：
+
+```powershell
+.venv\Scripts\python.exe -B -m legal_rag.cli --config configs/lexical-v2.yaml evaluate `
+  --chunk-strategy article --retriever bm25 --cases eval_cases/legal_eval_cases_v3.jsonl
+
+# 严格复现 paired 实验需使用新的唯一 run-id；脚本禁用生成、Judge、embedding 和 followup。
+.venv\Scripts\python.exe -B scripts/offline_retrieval_ab.py --run-id offline_lexical_ab_new_run
+```
+
+上面 CLI 的既有 followup 设置与专用脚本的固定 0 轮不是同一实验口径，不能混比。配置不授权任何付费请求或远端操作；旧账本、失败报告、M5/M6 Tag / Release 和 M7 状态保留。
 
 ```powershell
 uv run --offline --frozen --no-sync python scripts/quality_gate.py --milestone M2 --mode offline
@@ -606,7 +628,7 @@ legal_rag/                         核心实现
 │   ├── retrieval.py               filter-before-limit 的 exact pgvector 检索
 │   ├── catalog.py                 精确法名/条号/版本目录与原子快照切换
 │   ├── ann.py                     显式实验 HNSW、typed underfill 与 exact fallback
-│   └── alembic/versions/           0001-0007 可打包数据库迁移
+│   └── alembic/versions/           0001-0008 可打包数据库迁移（0008为当前未提交候选）
 ├── harness/                        M5 有界图、严格 state、预算、工具与 PostgreSQL checkpoint
 ├── services/                       M4-M5 RunService、执行器、检索装配、resume 与 supervisor
 ├── api/                            M4-M6 FastAPI、Bearer 鉴权、schema、配置与入口

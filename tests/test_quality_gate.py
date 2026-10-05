@@ -1096,6 +1096,33 @@ def test_m4_gate_fails_closed_before_pytest_when_database_is_missing(
     )
 
 
+def test_modern_m5_compatibility_receipt_requires_explicit_current_migration(tmp_path: Path) -> None:
+    payload = _valid_m5_fault_receipt()
+    payload["database"]["migration_head"] = "0008_execution_money"
+    assert gate.validate_m5_fault_receipt_payload(payload, expected_sha="a" * 40)
+    assert gate.validate_m5_fault_receipt_payload(
+        payload, expected_sha="a" * 40, expected_migration_head="0008_execution_money",
+    ) == []
+    path = tmp_path / "current-fault.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    assert gate.validate_m5_fault_receipt_file(
+        path, expected_sha="a" * 40, expected_migration_head="0008_execution_money",
+    ) == []
+    assert gate.validate_m5_fault_receipt_payload(_valid_m5_fault_receipt(), expected_sha="a" * 40) == []
+    assert gate.validate_m5_fault_receipt_payload(
+        _valid_m5_fault_receipt(), expected_sha="a" * 40, expected_migration_head="0008_execution_money",
+    )
+
+
+def test_modern_m5_receipt_rejects_unrecognized_self_selected_migration() -> None:
+    payload = _valid_m5_fault_receipt()
+    payload["database"]["migration_head"] = "invented_head"
+    errors = gate.validate_m5_fault_receipt_payload(
+        payload, expected_sha="a" * 40, expected_migration_head="invented_head",
+    )
+    assert "M5 fault receipt expected migration contract is invalid" in errors
+
+
 def test_valid_m5_fault_receipt_binds_exact_head_and_all_scenarios() -> None:
     payload = _valid_m5_fault_receipt("f" * 40)
 
@@ -1346,6 +1373,8 @@ def test_m5_acceptance_validates_receipt_before_running_exact_selectors(
     monkeypatch.setenv("ALLOW_LIVE_MODEL_CALLS", "false")
     monkeypatch.setattr(gate, "_git_head_sha", lambda repo_root: candidate_sha)
     monkeypatch.setattr(gate, "_m5_selector_contract_errors", lambda repo_root: [])
+    # This test represents the published M5 graph, not the current checkout.
+    monkeypatch.setattr(gate, "candidate_migration_head", lambda repo_root: "0006_m5_harness_recovery")
     calls: list[tuple[str, tuple[str, ...], str]] = []
 
     def fake_pytest_check(**kwargs):

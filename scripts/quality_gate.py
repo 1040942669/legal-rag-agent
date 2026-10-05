@@ -1977,8 +1977,14 @@ def validate_m5_fault_receipt_payload(
     payload: Any,
     *,
     expected_sha: str,
+    expected_migration_head: str = "0006_m5_harness_recovery",
 ) -> list[str]:
     """Validate the sanitized, exact-commit M5 fault-injection evidence contract."""
+
+    if not isinstance(expected_migration_head, str) or expected_migration_head not in {
+        "0006_m5_harness_recovery", "0007_m6_jobs_outbox", "0008_execution_money",
+    }:
+        return ["M5 fault receipt expected migration contract is invalid"]
 
     if not isinstance(payload, dict):
         return ["M5 fault receipt root must be an object"]
@@ -2036,8 +2042,10 @@ def validate_m5_fault_receipt_payload(
                 "M5 fault receipt must prove the checkpointer is not in-memory"
             )
         migration_head = database.get("migration_head")
-        if migration_head != "0006_m5_harness_recovery":
-            errors.append("M5 fault receipt must identify the 0006 migration head")
+        if migration_head != expected_migration_head:
+            errors.append("M5 fault receipt must identify the 0006 migration head"
+                          if expected_migration_head == "0006_m5_harness_recovery" else
+                          "M5 fault receipt migration head does not match the expected candidate contract")
 
     redaction = payload.get("redaction")
     required_redaction_fields = (
@@ -2148,6 +2156,7 @@ def validate_m5_fault_receipt_file(
     receipt_path: Path,
     *,
     expected_sha: str,
+    expected_migration_head: str = "0006_m5_harness_recovery",
 ) -> list[str]:
     """Read a bounded UTF-8 receipt and validate it without exposing its values."""
 
@@ -2174,17 +2183,39 @@ def validate_m5_fault_receipt_file(
     ):
         return ["M5 fault receipt is not valid bounded UTF-8 JSON"]
     try:
-        return validate_m5_fault_receipt_payload(payload, expected_sha=expected_sha)
+        return validate_m5_fault_receipt_payload(
+            payload, expected_sha=expected_sha, expected_migration_head=expected_migration_head,
+        )
     except (RecursionError, MemoryError):
         return ["M5 fault receipt is not valid bounded UTF-8 JSON"]
+
+
+def candidate_migration_head(repo_root: Path) -> str:
+    """Read the candidate graph without database access or environment loading."""
+    try:
+        from alembic.config import Config
+        from alembic.script import ScriptDirectory
+
+        config = Config()
+        config.set_main_option("script_location", str(repo_root / "legal_rag/storage/alembic"))
+        head = ScriptDirectory.from_config(config).get_current_head()
+    except Exception:
+        raise GateConfigurationError("candidate Alembic migration graph is unavailable") from None
+    if head not in {"0006_m5_harness_recovery", "0007_m6_jobs_outbox", "0008_execution_money"}:
+        raise GateConfigurationError("candidate M5/M6 migration contract is unsupported")
+    return head
 
 
 def validate_m6_worker_receipt_payload(
     payload: Any,
     *,
     expected_sha: str,
+    expected_migration_head: str = "0007_m6_jobs_outbox",
 ) -> list[str]:
     """Validate sanitized real-broker evidence for the exact checked-out commit."""
+
+    if not isinstance(expected_migration_head, str) or expected_migration_head not in {"0007_m6_jobs_outbox", "0008_execution_money"}:
+        return ["M6 worker receipt expected migration contract is invalid"]
 
     if not isinstance(payload, dict):
         return ["M6 worker receipt root must be an object"]
@@ -2192,6 +2223,8 @@ def validate_m6_worker_receipt_payload(
         return ["M6 worker receipt exceeds the maximum allowed nesting depth"]
 
     errors: list[str] = []
+    if expected_migration_head not in {"0007_m6_jobs_outbox", "0008_execution_money"}:
+        errors.append("M6 worker receipt expected migration contract is invalid")
     if _unexpected_fields(
         payload,
         frozenset(
@@ -2239,8 +2272,8 @@ def validate_m6_worker_receipt_payload(
             errors.append("M6 worker receipt database has unexpected fields")
         if database.get("backend") != "postgresql":
             errors.append("M6 worker receipt database backend must be postgresql")
-        if database.get("migration_head") != "0007_m6_jobs_outbox":
-            errors.append("M6 worker receipt must identify the 0007 migration head")
+        if database.get("migration_head") != expected_migration_head:
+            errors.append("M6 worker receipt migration head does not match the expected candidate contract")
 
     broker = payload.get("broker")
     if not isinstance(broker, dict):
@@ -2346,6 +2379,7 @@ def validate_m6_worker_receipt_file(
     receipt_path: Path,
     *,
     expected_sha: str,
+    expected_migration_head: str = "0007_m6_jobs_outbox",
 ) -> list[str]:
     """Load a bounded M6 receipt; reject duplicate keys and non-finite values."""
 
@@ -2371,7 +2405,9 @@ def validate_m6_worker_receipt_file(
     ):
         return ["M6 worker receipt is not valid bounded UTF-8 JSON"]
     try:
-        return validate_m6_worker_receipt_payload(payload, expected_sha=expected_sha)
+        return validate_m6_worker_receipt_payload(
+            payload, expected_sha=expected_sha, expected_migration_head=expected_migration_head,
+        )
     except (RecursionError, MemoryError):
         return ["M6 worker receipt is not valid bounded UTF-8 JSON"]
 
@@ -2394,11 +2430,15 @@ def _m5_fault_injection_preflight_errors(
         return errors
     try:
         expected_sha = _git_head_sha(repo_root)
+        expected_migration_head = candidate_migration_head(repo_root)
     except GateConfigurationError as exc:
         errors.append(str(exc))
         return errors
     errors.extend(
-        validate_m5_fault_receipt_file(fault_receipt, expected_sha=expected_sha)
+        validate_m5_fault_receipt_file(
+            fault_receipt, expected_sha=expected_sha,
+            expected_migration_head=expected_migration_head,
+        )
     )
     return errors
 
@@ -2424,11 +2464,14 @@ def _m6_fault_injection_preflight_errors(
         return errors
     try:
         expected_sha = _git_head_sha(repo_root)
+        expected_migration_head = candidate_migration_head(repo_root)
     except GateConfigurationError as exc:
         errors.append(str(exc))
         return errors
     errors.extend(
-        validate_m6_worker_receipt_file(worker_receipt, expected_sha=expected_sha)
+        validate_m6_worker_receipt_file(
+            worker_receipt, expected_sha=expected_sha, expected_migration_head=expected_migration_head,
+        )
     )
     return errors
 

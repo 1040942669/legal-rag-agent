@@ -15,7 +15,7 @@ ANSWER_MODES = frozenset(
     }
 )
 SEMANTIC_SUPPORT_STATUSES = frozenset(
-    {"supported", "unsupported", "uncertain", "not_checked"}
+    {"supported", "unsupported", "uncertain", "not_checked", "error"}
 )
 EVALUATION_METRICS_SCHEMA_VERSION = 2
 
@@ -119,6 +119,8 @@ class EvidenceCheck:
     checked_result_count: int
     covered_laws: list[str] = field(default_factory=list)
     covered_articles: list[str] = field(default_factory=list)
+    rules_version: str = "general-reference-v2"
+    mechanical_check: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -131,6 +133,8 @@ class EvidenceCheck:
             "checked_result_count": self.checked_result_count,
             "covered_laws": self.covered_laws,
             "covered_articles": self.covered_articles,
+            "rules_version": self.rules_version,
+            "mechanical_check": self.mechanical_check,
         }
 
 
@@ -218,6 +222,15 @@ class VerificationResult:
     unsupported_claims: list[str]
     refusal_correct: bool | None
     failure_reasons: list[str] = field(default_factory=list)
+
+    @property
+    def structural_passed(self) -> bool:
+        """Structural/behavioral success, independent of the bound semantic gate."""
+        return not any(not reason.startswith("semantic_") for reason in self.failure_reasons)
+
+    @property
+    def semantic_check_required(self) -> bool:
+        return "semantic_support" in self.required_checks
 
     @property
     def citation_valid(self) -> bool:

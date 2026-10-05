@@ -13,6 +13,7 @@ from sqlalchemy import (
     Index,
     Integer,
     MetaData,
+    Numeric,
     String,
     Table,
     Text,
@@ -1345,3 +1346,35 @@ DROP_EMBEDDING_DIMENSION_TRIGGER_SQL = """
 DROP TRIGGER IF EXISTS trg_chunk_embeddings_profile_dimension ON chunk_embeddings;
 DROP FUNCTION IF EXISTS legal_rag_enforce_embedding_profile_dimension();
 """
+
+# Post-M6 additive contracts. Historical migrations and rows remain unchanged.
+run_execution_policies = Table(
+    "run_execution_policies", metadata,
+    Column("run_id", String(36), ForeignKey("runs.run_id", ondelete="CASCADE"), primary_key=True),
+    Column("policy", JSONB, nullable=False),
+    Column("policy_hash", String(64), nullable=False),
+    CheckConstraint("jsonb_typeof(policy) = 'object'", name="ck_execution_policy_object"),
+    CheckConstraint("policy_hash ~ '^[0-9a-f]{64}$'", name="ck_execution_policy_hash"),
+)
+
+run_monetary_attempts = Table(
+    "run_monetary_attempts", metadata,
+    Column("attempt_id", String(36), ForeignKey("run_external_attempts.attempt_id", ondelete="CASCADE"), primary_key=True),
+    Column("run_id", String(36), ForeignKey("runs.run_id", ondelete="CASCADE"), nullable=False),
+    Column("policy_hash", String(64), nullable=False),
+    Column("currency", String(3), nullable=False),
+    Column("reserved_cost", Numeric(24, 12), nullable=False),
+    Column("known_cost", Numeric(24, 12), nullable=True),
+    Column("input_tokens", BigInteger, nullable=True),
+    Column("output_tokens", BigInteger, nullable=True),
+    Column("cost_status", String(32), nullable=False),
+    Column("error_code", String(64), nullable=True),
+    CheckConstraint("reserved_cost > 0", name="ck_monetary_reserved_positive"),
+    CheckConstraint("known_cost IS NULL OR known_cost >= 0", name="ck_monetary_known_nonnegative"),
+    CheckConstraint("currency = 'CNY'", name="ck_monetary_currency"),
+    CheckConstraint("cost_status IN ('reserved','known','unknown','overrun')", name="ck_monetary_status"),
+    CheckConstraint("input_tokens IS NULL OR input_tokens >= 0", name="ck_monetary_inputs"),
+    CheckConstraint("output_tokens IS NULL OR output_tokens >= 0", name="ck_monetary_outputs"),
+    CheckConstraint("(cost_status IN ('known','overrun')) = (known_cost IS NOT NULL)", name="ck_monetary_known_status"),
+)
+Index("ix_monetary_run", run_monetary_attempts.c.run_id)

@@ -395,7 +395,7 @@ def test_m6_downgrade_refuses_to_discard_job_history(
                 )
         with engine.connect() as connection:
             assert MigrationContext.configure(connection).get_current_revision() == (
-                "0007_m6_jobs_outbox"
+                "0008_execution_money"
             )
             assert (
                 connection.scalar(
@@ -422,5 +422,5 @@ def test_empty_m6_tables_can_downgrade_and_upgrade(
         upgrade_database(engine)
         with engine.connect() as connection:
             assert MigrationContext.configure(connection).get_current_revision() == (
-                "0007_m6_jobs_outbox"
+                "0008_execution_money"
             )

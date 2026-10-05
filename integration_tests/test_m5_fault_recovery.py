@@ -100,6 +100,7 @@ def test_m5_t01_kill_after_retrieval_checkpoint_resumes_without_retrieval(
         )
 
         record_scenario(
+            migrated_engine,
             "M5-T01",
             {
                 "hard_kill_observed": True,
@@ -558,6 +559,7 @@ def test_m5_t02_kill_after_model_dispatch_records_unknown_outcome_and_keeps_rese
         assert final_planner_checkpoint["model_attempts_used"] == 1
 
         record_scenario(
+            migrated_engine,
             "M5-T02",
             {
                 "hard_kill_observed": True,
@@ -666,6 +668,7 @@ def test_m5_t03_kill_after_result_commit_reconciles_without_duplicate_answer(
             )
 
         record_scenario(
+            migrated_engine,
             "M5-T03",
             {
                 "hard_kill_observed": True,
@@ -730,6 +733,7 @@ def test_m5_t09_resume_after_absolute_deadline_finishes_without_new_dispatch(
     assert terminal.status == "completed_with_limits"
     assert terminal.stop_reason == "deadline_exceeded"
     record_scenario(
+        migrated_engine,
         "M5-T09",
         {
             "deadline_preserved": True,
@@ -773,6 +777,7 @@ def test_m5_t10_new_process_cannot_pass_recovery_acceptance_with_in_memory_saver
             "inherited_sensitive_environment": False,
         }
         record_scenario(
+            migrated_engine,
             "M5-T10",
             {
                 "in_memory_rejected": True,

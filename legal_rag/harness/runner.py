@@ -88,6 +88,10 @@ class GraphRunExecutor:
             raise ExecutionFailure(code="invalid_event_callback", stage="input")
 
         execution_input = frozen.to_execution_input()
+        if execution_input.execution_policy is not None:
+            persisted_policy = self.service.get_execution_policy(frozen.run_id)
+            if persisted_policy.to_dict() != dict(execution_input.execution_policy):
+                raise ExecutionFailure(code="checkpoint_incompatible", stage="execution_policy")
         if self._deadline_expired(frozen.execution_deadline_at):
             self.service.publish_terminal_result(
                 frozen.run_id,
@@ -109,6 +113,31 @@ class GraphRunExecutor:
                 code="invalid_assistant_factory",
                 stage="assistant_factory",
             )
+        generate_enabled = self.generate
+        if execution_input.execution_policy is not None:
+            from legal_rag.services.execution_policy import ServiceExecutionPolicy
+            from legal_rag.services.governed_calls import GovernedCompletionClient
+            from legal_rag.semantic import CompletionSemanticChecker
+            policy = ServiceExecutionPolicy.from_dict(dict(execution_input.execution_policy))
+            generate_enabled = policy.generation.enabled
+            assistant.semantic_policy = policy.semantic_policy
+            assistant.semantic_checker = None
+            if self.followup_planner is not None:
+                # A default-off modern policy is not permission for a plugin
+                # to bypass destination, money, usage or unknown-result rules.
+                # Existing deterministic followup_queries need no such client.
+                raise ExecutionFailure(code="ungoverned_planner_disabled", stage="assistant_factory")
+            if generate_enabled:
+                assistant.llm = GovernedCompletionClient(
+                    assistant.llm, service=self.service, policy=policy.generation,
+                    run_id=frozen.run_id, worker_id=worker_id, lease_epoch=frozen.lease_epoch,
+                    fault_hook=(lambda point: self.fault_hook(point, state)) if self.fault_hook else None,
+                )
+                if policy.semantic_policy is not None:
+                    assistant.semantic_checker = CompletionSemanticChecker(
+                        policy.semantic_policy,
+                        assistant.llm.operation_view("semantic_check", identity=policy.semantic_policy.fingerprint),
+                    )
         restore_completed_history(assistant, execution_input)
         observation_adapter = (
             HarnessObservationAdapter(
@@ -121,6 +150,8 @@ class GraphRunExecutor:
             if self.observer is not None
             else None
         )
+        if getattr(assistant.llm, "governed", False):
+            assistant.llm.set_observation_adapter(observation_adapter)
         nodes = BoundedHarnessNodes(
             assistant=assistant,
             execution_input=execution_input,
@@ -128,7 +159,7 @@ class GraphRunExecutor:
             worker_id=worker_id,
             lease_epoch=frozen.lease_epoch,
             emit_event=emit_event,
-            generate_enabled=self.generate,
+            generate_enabled=generate_enabled,
             followup_planner=self.followup_planner,
             retry_unknown_external=self.retry_unknown_external,
             fault_hook=self.fault_hook,

@@ -1,0 +1,5 @@
+# Explicit local retrieval experiment, not a new default or live-model permission.
+# All other settings inherit the existing defaults. Use without --generate.
+retrieval:
+  default: bm25
+  bm25_lexical_profile: local-lexical-v2

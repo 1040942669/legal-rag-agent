@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, BinaryIO
 
-from sqlalchemy import Engine, func, select, update
+from sqlalchemy import Engine, func, select, text, update
 
 from integration_tests.m4_support import (
     SeededBoundary,
@@ -349,7 +349,7 @@ def stop_child(child: ChildProcess) -> None:
         child.log_handle.close()
 
 
-def record_scenario(test_id: str, evidence: dict[str, Any]) -> None:
+def record_scenario(engine: Engine, test_id: str, evidence: dict[str, Any]) -> None:
     target = os.environ.get("LEGAL_RAG_M5_FAULT_RECEIPT", "").strip()
     if not target:
         return
@@ -377,7 +377,7 @@ def record_scenario(test_id: str, evidence: dict[str, Any]) -> None:
         f".{receipt_path.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp"
     )
     try:
-        payload = _load_or_create_receipt(receipt_path, candidate_sha)
+        payload = _load_or_create_receipt(receipt_path, candidate_sha, engine=engine)
         scenarios = payload["scenarios"]
         current = scenarios.get(test_id)
         merged = dict(current["evidence"]) if isinstance(current, dict) else {}
@@ -399,6 +399,7 @@ def record_scenario(test_id: str, evidence: dict[str, Any]) -> None:
             validation_errors = validate_m5_fault_receipt_payload(
                 payload,
                 expected_sha=candidate_sha,
+                expected_migration_head=payload["database"]["migration_head"],
             )
             if validation_errors:
                 raise AssertionError(
@@ -416,11 +417,30 @@ def record_scenario(test_id: str, evidence: dict[str, Any]) -> None:
         lock_path.unlink(missing_ok=True)
 
 
-def _load_or_create_receipt(path: Path, candidate_sha: str) -> dict[str, Any]:
+def _database_migration_head(engine: Engine) -> str:
+    """Observe the database used by this test, not the checkout's target head."""
+    with engine.connect() as connection:
+        heads = connection.execute(text("SELECT version_num FROM alembic_version")).scalars().all()
+    if (
+        len(heads) != 1
+        or not isinstance(heads[0], str)
+        or re.fullmatch(r"[a-z0-9_]{1,64}", heads[0]) is None
+    ):
+        raise AssertionError("M5 receipt requires a unique database migration head")
+    return heads[0]
+
+
+def _load_or_create_receipt(
+    path: Path, candidate_sha: str, *, engine: Engine
+) -> dict[str, Any]:
+    migration_head = _database_migration_head(engine)
     if path.is_file():
         payload = json.loads(path.read_text(encoding="utf-8"))
         if payload.get("candidate_sha") != candidate_sha:
             raise AssertionError("M5 receipt candidate SHA changed during the suite")
+        database = payload.get("database")
+        if not isinstance(database, dict) or database.get("migration_head") != migration_head:
+            raise AssertionError("M5 receipt database migration head changed during the suite")
         return payload
     return {
         "schema_version": 1,
@@ -433,7 +453,7 @@ def _load_or_create_receipt(path: Path, candidate_sha: str) -> dict[str, Any]:
             "checkpointer_backend": "langgraph-postgresql",
             "persistent": True,
             "in_memory": False,
-            "migration_head": "0006_m5_harness_recovery",
+            "migration_head": migration_head,
         },
         "scenarios": {},
         "redaction": {
