@@ -8,9 +8,10 @@ from sqlalchemy import Engine, select
 
 from legal_rag.chat import LegalChatAssistant
 from legal_rag.embedding_contracts import EmbeddingProfileIdentity
+from legal_rag.evidence import reference_rules_for_evidence
 from legal_rag.models import VerificationContext
 from legal_rag.llm import SiliconFlowClient
-from legal_rag.retrieval import BM25Retriever
+from legal_rag.bm25_settings import build_bm25_retriever
 from legal_rag.retrieval_contracts import RetrievalBoundary
 from legal_rag.storage.retrieval import (
     BoundaryBoundRetriever,
@@ -111,7 +112,7 @@ class PostgresAssistantFactory:
             expected_profile=profile,
         )
         retriever = BoundaryBoundRetriever(
-            BM25Retriever(corpus.chunks, lexical_profile=policy.lexical_profile),
+            build_bm25_retriever(corpus.chunks, policy.resolved_bm25_settings),
             corpus=corpus,
         )
         if policy.exact_reference_routing:
@@ -119,6 +120,7 @@ class PostgresAssistantFactory:
                 corpus=corpus, lexical=retriever,
                 catalog=PostgresLegalCatalogRepository(self.engine),
                 pointer_revision=execution.snapshot_revision, activation_id=execution.activation_id,
+                reference_rules_version=reference_rules_for_evidence(policy.evidence_rules_version),
             )
         top_k = execution.request_options.get("top_k", 5)
         if isinstance(top_k, bool) or not isinstance(top_k, int) or not 1 <= top_k <= 20:
@@ -144,6 +146,7 @@ class PostgresAssistantFactory:
             ),
             completion_client=client,
             semantic_policy=policy.semantic_policy,
+            evidence_rules_version=policy.evidence_rules_version,
         )
 
 

@@ -5,8 +5,10 @@ import hashlib
 import json
 import os
 import re
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, fields, replace
 from decimal import Decimal, InvalidOperation, ROUND_CEILING
+
+from legal_rag.bm25_settings import BM25Settings, BM25_PROFILES, LEGACY_BM25_PROFILES, MODERN_BM25_PROFILES, resolve_bm25_settings
 
 
 def _decimal(value: object, name: str) -> Decimal:
@@ -109,22 +111,52 @@ class GenerationPolicy:
 
 @dataclass(frozen=True, slots=True)
 class ServiceExecutionPolicy:
-    lexical_profile: str = "legacy-v1"
-    allowed_lexical_profiles: tuple[str, ...] = ("legacy-v1", "generic-v3")
+    lexical_profile: str | None = None
+    allowed_lexical_profiles: tuple[str, ...] | None = None
     exact_reference_routing: bool = True
     generation: GenerationPolicy = GenerationPolicy()
     semantic_policy: object | None = None
-    schema_version: int = 1
+    schema_version: int = 2
+    bm25_settings: BM25Settings | None = None
+    evidence_rules_version: str | None = None
 
     def __post_init__(self) -> None:
-        if type(self.schema_version) is not int or self.schema_version != 1 or type(self.exact_reference_routing) is not bool:
+        if type(self.schema_version) is not int or self.schema_version not in {1, 2} or type(self.exact_reference_routing) is not bool:
             raise ValueError("invalid execution policy contract")
-        if self.lexical_profile not in {"legacy-v1", "local-lexical-v2", "generic-v3"}:
+        public_settings = None
+        if self.lexical_profile is None:
+            if self.schema_version == 1:
+                object.__setattr__(self, "lexical_profile", "legacy-v1")
+            elif self.bm25_settings is not None:
+                if not isinstance(self.bm25_settings, BM25Settings):
+                    raise ValueError("invalid explicit BM25 settings")
+                object.__setattr__(self, "lexical_profile", self.bm25_settings.lexical_profile)
+            else:
+                public_settings = resolve_bm25_settings()
+                object.__setattr__(self, "lexical_profile", public_settings.lexical_profile)
+        profiles = LEGACY_BM25_PROFILES if self.schema_version == 1 else BM25_PROFILES
+        if self.allowed_lexical_profiles is None:
+            object.__setattr__(self, "allowed_lexical_profiles", ("legacy-v1", "generic-v3") if self.schema_version == 1
+                               else ("legacy-v1", "generic-v3", *MODERN_BM25_PROFILES))
+        if self.lexical_profile not in profiles:
             raise ValueError("unapproved lexical profile")
         if not isinstance(self.allowed_lexical_profiles, tuple) or self.lexical_profile not in self.allowed_lexical_profiles or any(
-            profile not in {"legacy-v1", "local-lexical-v2", "generic-v3"} for profile in self.allowed_lexical_profiles
+            profile not in profiles for profile in self.allowed_lexical_profiles
         ) or len(set(self.allowed_lexical_profiles)) != len(self.allowed_lexical_profiles):
             raise ValueError("invalid lexical selector allowlist")
+        if self.schema_version == 1:
+            if self.bm25_settings is not None or self.evidence_rules_version not in {None, "general-reference-v2"}:
+                raise ValueError("historical policy cannot acquire new retrieval authority")
+            object.__setattr__(self, "evidence_rules_version", "general-reference-v2")
+        else:
+            settings = self.bm25_settings or (public_settings or resolve_bm25_settings()).for_profile(self.lexical_profile)
+            if not isinstance(settings, BM25Settings) or settings.lexical_profile != self.lexical_profile:
+                raise ValueError("BM25 settings must match the selected profile")
+            object.__setattr__(self, "bm25_settings", settings)
+            rules = self.evidence_rules_version or "general-reference-v3"
+            if rules not in {"general-reference-v2", "general-reference-v3"}:
+                raise ValueError("unapproved evidence rules")
+            object.__setattr__(self, "evidence_rules_version", rules)
         if not isinstance(self.generation, GenerationPolicy):
             raise ValueError("invalid generation policy")
         if self.semantic_policy is not None:
@@ -136,11 +168,27 @@ class ServiceExecutionPolicy:
             object.__setattr__(self, "semantic_policy", policy)
 
     def to_dict(self) -> dict:
-        return {"schema_version": self.schema_version, "lexical_profile": self.lexical_profile,
+        value = {"schema_version": self.schema_version, "lexical_profile": self.lexical_profile,
                 "allowed_lexical_profiles": list(self.allowed_lexical_profiles),
                 "exact_reference_routing": self.exact_reference_routing,
                 "generation": self.generation.to_dict(),
                 "semantic_policy": self.semantic_policy.to_dict() if self.semantic_policy else None}
+        if self.schema_version == 2:
+            value.update(bm25_settings=self.resolved_bm25_settings.to_dict(),
+                         evidence_rules_version=self.evidence_rules_version)
+        return value
+
+    @property
+    def resolved_bm25_settings(self) -> BM25Settings:
+        # The old service factory used the BM25 constructor multiplier 1.0,
+        # not CLI YAML's historical 0.5. Never import current defaults here.
+        return self.bm25_settings or BM25Settings(lexical_profile=self.lexical_profile, deprecated_penalty=1)
+
+    def with_lexical_profile(self, selector: str) -> ServiceExecutionPolicy:
+        if selector not in self.allowed_lexical_profiles:
+            raise ValueError("lexical selector is not allowed by deployment")
+        return replace(self, lexical_profile=selector,
+                       bm25_settings=self.resolved_bm25_settings.for_profile(selector) if self.schema_version == 2 else None)
 
     @property
     def fingerprint(self) -> str:
@@ -148,18 +196,26 @@ class ServiceExecutionPolicy:
 
     @classmethod
     def from_dict(cls, value: dict) -> ServiceExecutionPolicy:
-        if not isinstance(value, dict) or set(value) != {"schema_version", "lexical_profile", "allowed_lexical_profiles", "exact_reference_routing", "generation", "semantic_policy"}:
+        original_fields = {"schema_version", "lexical_profile", "allowed_lexical_profiles", "exact_reference_routing", "generation", "semantic_policy"}
+        if not isinstance(value, dict) or type(value.get("schema_version")) is not int or value["schema_version"] not in {1, 2}:
+            raise ValueError("invalid execution policy fields")
+        if not isinstance(value.get("lexical_profile"), str):
+            raise ValueError("serialized lexical profile identity must be explicit")
+        modern = value["schema_version"] == 2
+        if set(value) != (original_fields | {"bm25_settings", "evidence_rules_version"} if modern else original_fields):
             raise ValueError("invalid execution policy fields")
         if not isinstance(value["allowed_lexical_profiles"], list):
             raise ValueError("invalid lexical selector list")
         return cls(lexical_profile=value["lexical_profile"], exact_reference_routing=value["exact_reference_routing"],
                    allowed_lexical_profiles=tuple(value["allowed_lexical_profiles"]),
                    generation=GenerationPolicy.from_dict(value["generation"]),
-                   semantic_policy=value["semantic_policy"], schema_version=value["schema_version"])
+                   semantic_policy=value["semantic_policy"], schema_version=value["schema_version"],
+                   bm25_settings=BM25Settings.from_dict(value["bm25_settings"]) if modern else None,
+                   evidence_rules_version=value["evidence_rules_version"] if modern else None)
 
     @classmethod
     def historical(cls) -> ServiceExecutionPolicy:
-        return cls(exact_reference_routing=False, allowed_lexical_profiles=("legacy-v1",))
+        return cls(schema_version=1, exact_reference_routing=False, allowed_lexical_profiles=("legacy-v1",))
 
     @classmethod
     def from_environment(cls) -> ServiceExecutionPolicy:

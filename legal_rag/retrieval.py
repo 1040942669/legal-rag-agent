@@ -6,7 +6,10 @@ from collections import Counter, defaultdict
 from dataclasses import replace
 from numbers import Real
 from pathlib import Path
-from typing import Any, Mapping, Protocol, Sequence
+from typing import TYPE_CHECKING, Any, Mapping, Protocol, Sequence
+
+if TYPE_CHECKING:
+    from .bm25_settings import BM25Settings
 
 from .embeddings import (
     EmbeddingModelConfig,
@@ -606,17 +609,19 @@ def build_retriever(
     bm25_article_boost: float = 80.0,
     deprecated_penalty: float = 1.0,
     bm25_lexical_profile: str = DEFAULT_BM25_LEXICAL_PROFILE,
+    bm25_settings: BM25Settings | None = None,
 ) -> Retriever:
-    if kind == "bm25":
-        return BM25Retriever(
-            chunks,
-            k1=bm25_k1,
-            b=bm25_b,
-            law_boost=bm25_law_boost,
-            article_boost=bm25_article_boost,
+    from .bm25_settings import BM25Settings, build_bm25_retriever
+
+    settings = None
+    if kind in {"bm25", "rrf", "hybrid"}:
+        settings = bm25_settings if bm25_settings is not None else BM25Settings(
+            lexical_profile=bm25_lexical_profile, k1=bm25_k1, b=bm25_b,
+            law_boost=bm25_law_boost, article_boost=bm25_article_boost,
             deprecated_penalty=deprecated_penalty,
-            lexical_profile=bm25_lexical_profile,
         )
+    if kind == "bm25":
+        return build_bm25_retriever(chunks, settings)
     if kind == "dense":
         if embedding_cache_dir and embedding_model_config:
             return CachedDenseRetriever(
@@ -628,15 +633,7 @@ def build_retriever(
             )
         return DenseRetriever(chunks, model_name=embedding_model)
     if kind in {"rrf", "hybrid"}:
-        bm25 = BM25Retriever(
-            chunks,
-            k1=bm25_k1,
-            b=bm25_b,
-            law_boost=bm25_law_boost,
-            article_boost=bm25_article_boost,
-            deprecated_penalty=deprecated_penalty,
-            lexical_profile=bm25_lexical_profile,
-        )
+        bm25 = build_bm25_retriever(chunks, settings)
         if embedding_cache_dir and embedding_model_config:
             dense = CachedDenseRetriever(
                 chunks,

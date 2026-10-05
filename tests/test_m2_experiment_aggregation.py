@@ -159,6 +159,7 @@ class _AssistantHarness:
             adaptive_enabled=False,
             adaptive_use_llm=False,
             condense_with_llm=False,
+            evidence_rules_version="general-reference-v2",
         )
         client = self.client_factory()
         assistant.llm = client

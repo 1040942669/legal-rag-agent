@@ -37,6 +37,7 @@ from .rerank import (
     wrap_with_reranker,
 )
 from .retrieval import build_retriever
+from .bm25_settings import build_bm25_retriever, resolve_bm25_settings
 from .tracing import (
     JsonlTraceWriter,
     build_retrieval_trace_record,
@@ -386,6 +387,7 @@ def _experiment_plan_kwargs(args: argparse.Namespace) -> dict[str, Any]:
         "concurrency": args.concurrency,
         "max_retries": args.max_retries,
         "random_seed": args.random_seed,
+        "bm25_settings": resolve_bm25_settings(load_config(args.config)["retrieval"]),
     }
 
 
@@ -767,7 +769,7 @@ def handle_chat(args: argparse.Namespace) -> int:
             break
         if not question:
             continue
-        analysis = analyze_query(question)
+        analysis = analyze_query(question, evidence_rules_version=assistant.evidence_rules_version)
         started = time.perf_counter()
         answer, results = assistant.answer(question, generate=not args.no_generate)
         latency_ms = int((time.perf_counter() - started) * 1000)
@@ -1063,6 +1065,8 @@ def create_retriever(
             top_k=top_k,
             embedding_model=model_config.model_name,
         )
+    elif kind == "bm25":
+        retriever = build_bm25_retriever(chunks, resolve_bm25_settings(config["retrieval"]))
     else:
         cache_dir = None
         if kind in {"dense", "rrf", "hybrid"}:
@@ -1094,6 +1098,7 @@ def create_retriever(
             deprecated_penalty=float(
                 config["retrieval"].get("deprecated_penalty", 1.0)
             ),
+            bm25_settings=resolve_bm25_settings(config["retrieval"]),
         )
     return wrap_with_reranker(
         retriever,
@@ -1199,12 +1204,16 @@ def chunking_config_from_args(
 
 def retrieval_metadata(config: dict[str, Any]) -> dict[str, Any]:
     retrieval = config.get("retrieval", {})
+    settings = resolve_bm25_settings(retrieval)
     return {
-        "bm25_k1": float(retrieval.get("bm25_k1", 1.5)),
-        "bm25_b": float(retrieval.get("bm25_b", 0.75)),
-        "bm25_law_boost": float(retrieval.get("bm25_law_boost", 40.0)),
-        "bm25_article_boost": float(retrieval.get("bm25_article_boost", 80.0)),
-        "bm25_lexical_profile": retrieval.get("bm25_lexical_profile", "legacy-v1"),
+        "bm25_k1": settings.k1,
+        "bm25_b": settings.b,
+        "bm25_law_boost": settings.law_boost,
+        "bm25_article_boost": settings.article_boost,
+        "bm25_lexical_profile": settings.lexical_profile,
+        "bm25_hmm": settings.hmm,
+        "deprecated_penalty": settings.deprecated_penalty,
+        "bm25_settings": settings.to_dict(),
     }
 
 

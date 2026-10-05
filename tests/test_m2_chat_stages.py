@@ -196,7 +196,7 @@ def test_stale_staged_turn_cannot_commit_over_changed_memory() -> None:
     assert assistant.export_session_state() == state_after_other_turn
 
 
-def test_pre_retrieval_refusal_is_an_explicit_programmatic_stage() -> None:
+def test_historical_v2_pre_retrieval_refusal_is_an_explicit_programmatic_stage() -> None:
     class _ForbiddenRetriever:
         name = "forbidden"
 
@@ -206,6 +206,7 @@ def test_pre_retrieval_refusal_is_an_explicit_programmatic_stage() -> None:
     assistant = LegalChatAssistant(
         _ForbiddenRetriever(),
         model="deterministic-offline-fixture",
+        evidence_rules_version="general-reference-v2",
     )
     prepared = assistant.prepare_question("这个案子怎么起诉才能胜诉？")
     retrieved = assistant.retrieve_turn(prepared)

@@ -202,6 +202,11 @@ def test_implementation_fingerprints_cover_new_mechanisms_and_strict_codecs():
     for component in ("generation", "verification"):
         assert "legal_rag/semantic.py" in _IMPLEMENTATION_FILES[component]
         assert "legal_rag/evaluation_artifacts.py" in _IMPLEMENTATION_FILES[component]
+    for component in ("query_analysis", "retrieval", "generation", "verification"):
+        assert "legal_rag/request_policy.py" in _IMPLEMENTATION_FILES[component]
+        assert "legal_rag/legacy_reference_v2.py" in _IMPLEMENTATION_FILES[component]
+    assert "legal_rag/bm25_settings.py" in _IMPLEMENTATION_FILES["retrieval"]
+    assert "legal_rag/chinese_bm25.py" in _IMPLEMENTATION_FILES["retrieval"]
 
 
 def test_controls_never_grant_semantic_authority_implicitly():

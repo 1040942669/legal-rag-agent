@@ -323,6 +323,7 @@ def test_invalid_generated_schema_is_preserved_then_stops(
 def test_refusal_case_uses_zero_model_calls(public_fixture: Path) -> None:
     _, items = smoke.prepare_smoke(public_fixture)
     item = next(item for item in items if item["case"].case_type == "refusal")
+    assert item["assistant"].evidence_rules_version == "general-reference-v2"
     generated = item["assistant"].generate_turn(item["retrieved"], generate=True)
     verified = item["assistant"].verify_turn(generated)
     item["assistant"].commit_turn(verified)

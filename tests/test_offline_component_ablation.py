@@ -258,4 +258,13 @@ def test_unquoted_ownership_audit_uses_frozen_corpus_titles_not_only_returned_re
 
 def test_freeze_covers_evidence_adapter_and_all_reference_rule_sources():
     assert {"legal_rag/adaptive.py", "legal_rag/query_understanding.py", "legal_rag/planning.py",
-            "legal_rag/legal_references.py", "legal_rag/reference_evidence.py"}.issubset(experiment.CRITICAL_FILES)
+            "legal_rag/legal_references.py", "legal_rag/legacy_reference_v2.py", "legal_rag/request_policy.py",
+            "legal_rag/reference_evidence.py"}.issubset(experiment.CRITICAL_FILES)
+
+
+def test_fixed_historical_component_protocol_keeps_explicit_v2_contracts():
+    retriever = experiment.ComponentRetriever(experiment.Components(True, True, False),
+                                               BM25Retriever(chunks(), lexical_profile="generic-v3"))
+    inferred = experiment.infer_question(case().question, retriever)
+    assert inferred["retrieved"].evidence_check.rules_version == "general-reference-v2"
+    assert inferred["audit"]["typed_reference_ownership"]["rules_version"] == "reference-evidence-v1"

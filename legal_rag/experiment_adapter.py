@@ -219,8 +219,11 @@ class LegalEvaluationRuntimeFactory:
             )
         if assistant.verification_rules_version != self.spec.manifest["contracts"]["verification"]["rules_version"]:
             raise ExperimentContractError("assistant verification rules differ from manifest")
-        if assistant.evidence_rules_version != "general-reference-v2":
+        if assistant.evidence_rules_version not in {"general-reference-v2", "general-reference-v3"}:
             raise ExperimentContractError("modern experiment requires general evidence rules")
+        frozen_evidence_version = _manifest_evidence_rules_version(self.spec.manifest)
+        if assistant.evidence_rules_version != frozen_evidence_version:
+            raise ExperimentContractError("assistant evidence rules differ from frozen manifest")
         if assistant.semantic_policy != self.spec.semantic_policy:
             raise ExperimentContractError("assistant semantic policy differs from frozen manifest")
         if assistant.semantic_checker is not None:
@@ -831,7 +834,7 @@ class CaseRuntime:
                 },
                 artifact_kind="query_analysis",
                 producer=lambda: query_analysis_to_artifact(
-                    analyze_query(case.question)
+                    analyze_query(case.question, evidence_rules_version=self.assistant.evidence_rules_version)
                 ),
                 decoder=query_analysis_from_artifact,
                 observations=observations,
@@ -863,6 +866,7 @@ class CaseRuntime:
                 max_queries=self.assistant.adaptive_max_queries,
                 per_plan_top_k=self.assistant.adaptive_per_plan_top_k,
                 normalizer_retries=self.assistant.normalizer_retries,
+                evidence_rules_version=self.assistant.evidence_rules_version,
             )
             if adaptive.analysis != analysis:
                 raise ExperimentContractError(
@@ -1652,14 +1656,36 @@ def _validate_stage_outcome_consistency(
         )
 
 
+def _manifest_evidence_rules_version(manifest: Mapping[str, Any]) -> str:
+    retrieval = manifest["contracts"]["retrieval"]
+    query_contract = retrieval.get("query_analysis", {})
+    version = query_contract.get("evidence_rules_version", "general-reference-v2")
+    if version not in {"general-reference-v2", "general-reference-v3"}:
+        raise ExperimentContractError("unsupported frozen evidence rules")
+    if "evidence_rules_version" in query_contract:
+        expected_reference = version.replace("general-reference", "legal-reference")
+        if query_contract.get("reference_rules_version") != expected_reference:
+            raise ExperimentContractError("reference and evidence rules disagree")
+    if "bm25_settings" in retrieval["parameters"] and (
+        query_contract.get("evidence_rules_version") != version
+        or manifest["config"]["summary"].get("evidence_rules_version") != version
+    ):
+        raise ExperimentContractError("modern BM25 requires explicitly frozen evidence rules")
+    return version
+
+
 def _validate_outcome_manifest_contract(
     outcome: CompletedCaseOutcome,
     manifest: Mapping[str, Any],
 ) -> None:
     if manifest["manifest_schema_version"] == EXPERIMENT_MANIFEST_SCHEMA_VERSION and (
-        outcome.evidence_check.rules_version != "general-reference-v2"
+        outcome.evidence_check.rules_version not in {"general-reference-v2", "general-reference-v3"}
     ):
         raise ExperimentContractError("modern output cannot acquire historical evidence authority")
+    if manifest["manifest_schema_version"] == EXPERIMENT_MANIFEST_SCHEMA_VERSION and (
+        outcome.evidence_check.rules_version != _manifest_evidence_rules_version(manifest)
+    ):
+        raise ExperimentContractError("output evidence rules differ from frozen manifest")
     expected = {
         "model": manifest["contracts"]["generation"]["model"],
         "retriever": manifest["contracts"]["retrieval"]["kind"],
@@ -2293,11 +2319,47 @@ def _validate_spec(spec: EvaluationRuntimeSpec) -> EvaluationRuntimeSpec:
             "manifest execution_mode is incompatible with spec.generate"
         )
     retrieval_contract = manifest["contracts"]["retrieval"]
+    _manifest_evidence_rules_version(manifest)
     parameters = retrieval_contract["parameters"]
-    if set(parameters) != {"top_k"}:
+    if set(parameters) not in ({"top_k"}, {"top_k", "bm25_settings"}):
         raise ExperimentContractError(
-            "D4c retrieval contract parameters must contain only top_k"
+            "D4c retrieval contract parameters require top_k and optional frozen bm25_settings"
         )
+    from .bm25_settings import BM25Settings
+    from .chinese_bm25 import ChineseBM25Retriever
+    if "bm25_settings" in parameters:
+        try:
+            settings = BM25Settings.from_dict(parameters["bm25_settings"])
+        except (TypeError, ValueError) as exc:
+            raise ExperimentContractError("invalid frozen BM25 settings") from exc
+        if settings.to_dict() != manifest["config"]["summary"].get("bm25_settings"):
+            raise ExperimentContractError("BM25 config and retrieval contract differ")
+        if type(spec.retriever) is ChineseBM25Retriever:
+            actual_identity = spec.retriever.config_identity
+        elif type(spec.retriever) is BM25Retriever:
+            actual_identity = BM25Settings(
+                lexical_profile=spec.retriever.lexical_profile, k1=spec.retriever.k1,
+                b=spec.retriever.b, law_boost=spec.retriever.law_boost,
+                article_boost=spec.retriever.article_boost,
+                deprecated_penalty=spec.retriever.deprecated_penalty,
+            ).identity
+        else:
+            raise ExperimentContractError("frozen BM25 settings require the known concrete engine")
+        if actual_identity != settings.identity:
+            raise ExperimentContractError("actual BM25 engine differs from frozen settings")
+    elif type(spec.retriever) is ChineseBM25Retriever:
+        raise ExperimentContractError("modern BM25 requires complete frozen settings")
+    elif type(spec.retriever) is BM25Retriever:
+        # The old top-k-only contract implied these exact original defaults.
+        # Non-default historical experiments need the same explicit identity as
+        # modern ones; merely calling an engine "bm25" cannot share that cache.
+        historical_parameters = (
+            spec.retriever.lexical_profile, spec.retriever.k1, spec.retriever.b,
+            spec.retriever.law_boost, spec.retriever.article_boost,
+            spec.retriever.deprecated_penalty,
+        )
+        if historical_parameters != ("legacy-v1", 1.5, .75, 40.0, 80.0, 1.0):
+            raise ExperimentContractError("non-default historical BM25 requires frozen settings")
     if retrieval_contract["filters"] != {}:
         raise ExperimentContractError("D4c does not support implicit retrieval filters")
     retriever_name = getattr(spec.retriever, "name", None)
@@ -2309,7 +2371,7 @@ def _validate_spec(spec: EvaluationRuntimeSpec) -> EvaluationRuntimeSpec:
         )
     if not isinstance(spec.retriever_provider_free, bool):
         raise ExperimentContractError("retriever_provider_free must be a boolean")
-    if type(spec.retriever) is not BM25Retriever:
+    if type(spec.retriever) not in {BM25Retriever, ChineseBM25Retriever}:
         if not spec.retriever_provider_free or (
             getattr(spec.retriever, "provider_free", None) is not True
         ):

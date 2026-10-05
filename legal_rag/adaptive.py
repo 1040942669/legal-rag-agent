@@ -5,7 +5,7 @@ from typing import Any
 
 from .models import NormalizedQuery, RetrievalPlan, SearchResult
 from .evidence import (
-    EVIDENCE_RULES_VERSIONS, GENERAL_EVIDENCE_RULES_VERSION,
+    EVIDENCE_RULES_VERSIONS, GENERAL_EVIDENCE_RULES_VERSION, REFERENCE_BASED_EVIDENCE_RULES,
     check_evidence_sufficiency, with_stop_reason,
 )
 from .legal_references import MAX_REFERENCE_QUERY_CHARS
@@ -77,9 +77,9 @@ def retrieve_adaptive(
     if per_plan_top_k is not None:
         per_plan_top_k = validate_retrieval_top_k(per_plan_top_k)
     boundary = retrieval_boundary(retriever)
-    analysis = analyze_query(query)
+    analysis = analyze_query(query, evidence_rules_version=evidence_rules_version)
     known_law_titles = getattr(retriever, "known_law_hints", ())
-    if evidence_rules_version == GENERAL_EVIDENCE_RULES_VERSION and len(query) > MAX_REFERENCE_QUERY_CHARS:
+    if evidence_rules_version in REFERENCE_BASED_EVIDENCE_RULES and len(query) > MAX_REFERENCE_QUERY_CHARS:
         evidence = check_evidence_sufficiency(query, [], rules_version=evidence_rules_version)
         return AdaptiveRetrievalResult(
             [], analysis, None, [], {"mode": "query_limit"},
@@ -133,6 +133,7 @@ def retrieve_adaptive(
         llm_client=llm_client,
         use_llm=use_llm,
         max_retries=normalizer_retries,
+        evidence_rules_version=evidence_rules_version,
     )
     plans, planner_trace = build_retrieval_plans(
         normalized,

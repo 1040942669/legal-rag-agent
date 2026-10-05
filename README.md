@@ -8,12 +8,14 @@
 
 ## 项目产出
 
-当前未提交工作区已完成独立的 [通用证据与受控服务改善](reports/refactor/GENERAL_EVIDENCE_IMPROVEMENTS.md) 的W1至W8本地实施及所列适用运行验证，设计见 [ADR-006](docs/refactor/decisions/ADR-006-general-evidence-first-improvements.md)。它不是新M6发布，也不进入M7：明确法名/条号逐pair核验，数据库精确路由不以模糊结果冒充未命中，完整可见输出绑定语义判定，服务默认禁生成并冻结外发与费用策略。完整离线1752+157子测试、累计M2 25/25、隔离PG150、真实PG重启与仓库外wheel已通过；八臂消融中无购物扩展的generic-v3仅76/108到77/108，仍opt-in，排名默认legacy-v1。下面lexical-v2和paid Smoke保留为历史。工程通过不等于法律质量：实际法律审核/独立holdout/checker校准、真实Linuxbroker与生产容量未验证，最终文档静态结果见验收记录。
+当前开发分支在进行 [中文BM25组件替换与规则收缩](reports/refactor/CHINESE_BM25_OPTIMIZATION.md)，见 [TODO](docs/refactor/CHINESE_RETRIEVAL_TODO.md) 和 [Draft PR #31](https://github.com/1040942669/legal-rag-agent/pull/31)。现代候选直接使用BM25S评分与成熟jieba/sklearn分析器，不增加购物词表、40/80人工加分或自写BM25公式。固定开发集第二轮中，字符方案Hit@5为83/108（旧76/108），MRR@5为0.5971（旧0.6102），没有满足两项均不回退的自动推广门槛，默认暂未切换。当前全量集成验证仍进行中，不以专项绿色证明法律质量。
+
+前轮 [通用证据与受控服务改善](reports/refactor/GENERAL_EVIDENCE_IMPROVEMENTS.md) W1至W8已保存为前置提交，设计见 [ADR-006](docs/refactor/decisions/ADR-006-general-evidence-first-improvements.md)。它的1752+157子测试、M2 25/25、隔离PG150及重启/wheel证据属于原候选，不能替代本轮验收。现代链路保留精确目录身份、快照与权限隔离、证据归属、程序预算和默认禁生成；词命中不是违法意图证明，机械引用存在也不是语义支持。历史lexical-v2、paid Smoke及下文旧基线数字保持原实验身份。独立法律审核、未曝光holdout和生产容量仍未验证，本轮不发版、不进入M7。
 
 | 维度 | 已完成产出 |
 | --- | --- |
 | 数据与索引 | 203 部法律、19,050 个条文级 chunk 的历史实验快照；4 种 chunk 策略；废止法律标记与精确重复条文去重 |
-| 检索能力 | 自研中文 BM25、dense、RRF、LlamaIndex 对照；可选 BGE cross-encoder reranker；法律名和条号 metadata boost；完整 ranking trace |
+| 检索能力 | 成熟BM25S＋中文/字符分析候选，历史自写BM25复现；dense、RRF、LlamaIndex对照；可选BGE reranker；版本化配置与ranking trace |
 | 受控 Agent 能力 | 规则 Query Analyzer、严格 JSON normalizer、有限 multi-query planner、证据合并、最多一轮补检索 |
 | 生成边界 | 高风险请求预拒答、证据充分性检查、结构化回答兼容层、引用/范围/行为检查、资料不足或澄清模板、最终交付前复核 |
 | 评测体系 | 120 条分层评测集、30 条固定生成子集、bootstrap 95% CI、显式行为分母、answer/retrieval/Judge N/A、自动五维实验矩阵 |
@@ -66,7 +68,7 @@ flowchart LR
 
 ### 2. 可解释的多路检索
 
-- 自研 BM25 使用中文单字、bigram、法律名和条号特征，弥补默认英文式 tokenizer 对中文法律文本的不适配。
+- 历史BM25使用手写单字/bigram和metadata加分；现代候选把评分与分析交给现有库，明确记录实际分析器而不是依赖框架的英文默认设置。成熟库本身不保证本语料效果更好，选型与回退见本轮对照。
 - Dense 检索支持本地 sentence-transformers 和 OpenAI-compatible embedding API，并将 query instruction、metadata 拼接作为显式配置。
 - RRF 只基于排名融合不同分值空间，同时保存 BM25/dense 子排名，便于解释每个结果从哪里来。
 - 可选 cross-encoder 对 base retriever 的 top-N 候选做精排，保留原 rank/score，并单独记录候选数和重排耗时。

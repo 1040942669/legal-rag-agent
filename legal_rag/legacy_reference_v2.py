@@ -13,8 +13,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable, Mapping
 
 
-REFERENCE_RULES_VERSION = "legal-reference-v3"
-LEGACY_REFERENCE_RULES_VERSION = "legal-reference-v2"
+REFERENCE_RULES_VERSION = "legal-reference-v2"
 REFERENCE_SCHEMA_VERSION = 1
 MAX_REFERENCE_QUERY_CHARS = 16_384
 MAX_LAW_TITLE_CHARS = 255
@@ -34,16 +33,13 @@ _FORMAL_NUMERALS = str.maketrans("〇两壹贰叁肆伍陆柒捌玖拾佰仟", "
 _CLAUSE = re.compile(r"[^，,。；;!?！？\n]+")
 _REQUEST = re.compile(r"解释|查询|检索|核查|核对|判断|确认|验证|比较|对比|说明|是否|什么|对吗|正确吗|有效吗|适用吗")
 _REFERENCE_ANAPHORA = re.compile(r"(?:这(?:种|个|些|条|项)?|那(?:种|个|些|条|项)?|该|上述|前述|前面|其)(?:[一二两三几多各所有]*)(?:引用|法条|条款|条文|规定|法律|依据|说法|主张)")
+_PLURAL_ANAPHORA = re.compile(r"这些|那些|(?:两|二|三|多|几|各)(?:条|个|项|种)|各(?:条|项)|所有|二者|两者")
+_NEGATIVE_REQUEST = re.compile(r"(?:不要|无需|不用|不必|不)\s*$")
 _HISTORICAL_MARKER = re.compile(r"此前|先前|以前|之前|历史|曾经|曾|过去")
 _REPORTED_PREFIX = re.compile(r"(?:对方|他人|有人|他|她|" + _HISTORICAL_MARKER.pattern + r")[^，,。；;!?！？\n]*(?:引用|提到|援引|说过|主张)")
+_REPORTED_REQUEST_PREFIX = re.compile(r"(?:对方|他人|有人|他|她)[^，,。；;!?！？\n]*(?:说|主张|要求|表示)")
 _UNCERTAIN_NEGATION = re.compile(r"不|没|未|无|非|别|勿")
 _LAW_CONNECTOR = re.compile(r"(?:以及|或者|和|与|及|或|、|,)")
-# This is a declared, bounded command syntax, not a discourse/intent model.
-# No reporting verbs or scene vocabulary establish a user's selection.
-_COMMAND = re.compile(r"解释|查询|检索|核查|核对|判断|确认|验证|比较|对比|说明")
-_COMMAND_PREFIX = re.compile(r"(?:请|我(?:现在)?(?:只)?(?:要求|想|要)?|现在(?:只)?|只|并|再)*")
-_REFERENCE_TRIVIA = re.compile(r"(?:\s|的|中|和|与|及|以及|或|或者|、|[,，（()）])*")
-_QUESTION_PREFIX = re.compile(r"(?:\s|是|有|的|中|请|规定(?:了)?|分别|" + _LAW_CONNECTOR.pattern + r"|[（()）])*")
 
 
 def _hash(value: Any) -> str:
@@ -244,11 +240,8 @@ class ReferenceAnalysis:
     required_law_titles: tuple[str, ...]
     mentions: tuple[ReferenceMention, ...]
     known_law_titles: tuple[str, ...] = ()
-    rules_version: str = REFERENCE_RULES_VERSION
 
     def __post_init__(self) -> None:
-        if not isinstance(self.rules_version, str) or self.rules_version not in {REFERENCE_RULES_VERSION, LEGACY_REFERENCE_RULES_VERSION}:
-            raise ValueError("reference rules are unsupported")
         if not isinstance(self.query, str) or len(self.query) > MAX_REFERENCE_QUERY_CHARS:
             raise ValueError("reference query must be bounded text")
         for field, kind in (("requirements", LawArticleRequirement), ("unresolved", ReferenceMention),
@@ -264,7 +257,7 @@ class ReferenceAnalysis:
                 raise ValueError(f"{field} must contain canonical immutable titles")
 
     def _payload(self) -> dict[str, Any]:
-        return {"schema_version": REFERENCE_SCHEMA_VERSION, "rules_version": self.rules_version,
+        return {"schema_version": REFERENCE_SCHEMA_VERSION, "rules_version": REFERENCE_RULES_VERSION,
                 "query": self.query, "query_hash": hashlib.sha256(self.query.encode("utf-8")).hexdigest(),
                 "requirements": [item.to_dict() for item in self.requirements],
                 "unresolved": [item.to_dict() for item in self.unresolved],
@@ -288,15 +281,14 @@ class ReferenceAnalysis:
             raise ValueError("reference artifact fields are invalid")
         if type(payload["schema_version"]) is not int or payload["schema_version"] != REFERENCE_SCHEMA_VERSION:
             raise ValueError("reference schema is unsupported")
-        if not isinstance(payload["rules_version"], str) or payload["rules_version"] not in {REFERENCE_RULES_VERSION, LEGACY_REFERENCE_RULES_VERSION}:
+        if payload["rules_version"] != REFERENCE_RULES_VERSION:
             raise ValueError("reference rules are unsupported")
         if not isinstance(payload["known_law_titles"], list):
             raise ValueError("reference known titles must be an artifact array")
         if _hash({key: value for key, value in payload.items() if key != "fingerprint"}) != payload["fingerprint"]:
             raise ValueError("reference artifact fingerprint is invalid")
         # Reparse the bound original text instead of trusting serialized pairs.
-        restored = parse_legal_references(payload["query"], known_law_titles=payload["known_law_titles"],
-                                          rules_version=payload["rules_version"])
+        restored = parse_legal_references(payload["query"], known_law_titles=payload["known_law_titles"])
         if restored.to_dict() != dict(payload):
             raise ValueError("reference artifact does not match its original input")
         return restored
@@ -304,83 +296,106 @@ class ReferenceAnalysis:
 
 def _context(query: str, span: tuple[int, int]) -> tuple[str, str]:
     before = query[:span[0]]
-    start = 0
-    right = len(before)
-    for separator in reversed(list(re.finditer(r"[，,。；;!?！？\n]", before))):
-        # A comma inside a pure reference expression is a connector, not a
-        # new selection scope. Masked earlier references retain the command
-        # or opaque background prefix that owns the complete list.
-        if separator.group(0) in ",，" and _REFERENCE_TRIVIA.fullmatch(before[separator.end():right]):
-            right = separator.start()
-            continue
-        start = separator.end()
-        break
+    start = max((match.end() for match in re.finditer(r"[，,。；;!?！？\n]", before)), default=0)
     after = query[span[1]:]
     end = re.search(r"[，,。；;!?！？\n]", after)
     return query[start:span[0]], after[:end.start()] if end else after
 
 
-def _disposition(query: str, span: tuple[int, int], syntax_query: str) -> tuple[str, str]:
-    """Select only an explicit address or a bounded positive operation.
-
-    Reference spellings are masked before examining operation syntax, so a
-    request word in a document title or a previous pair is not an operator.
-    Unknown surrounding prose is a mention, not an implicit hard request.
-    """
-    before, after = _context(syntax_query, span)
-    before, after = before.strip(), after.strip()
+def _disposition(query: str, span: tuple[int, int]) -> tuple[str, str]:
+    before, after = _context(query, span)
     if re.search(r"(?:不是|并非)\s*(?:不要|无需|不用|不必|不)[^，,。；;!?！？\n]*$", before):
         return "unresolved", "nested_reference_negation"
     if re.search(r"(?:不是|而不是|并非|不要(?:查询|检索|解释|看)?|无需(?:查询|检索|解释)?|不用(?:查询|检索|解释)?|不(?:查询|检索|解释|讨论|看|按|依据))\s*$", before):
         return "excluded", "excluded_reference"
     if re.match(r"\s*(?:除外|不必解释|无需解释|不要解释)", after):
         return "excluded", "excluded_reference"
-    command = _COMMAND.search(before)
-    suffix_command = _COMMAND.search(after)
-    negated_suffix_operation = (suffix_command is not None
-                               and _UNCERTAIN_NEGATION.search(after[:suffix_command.start()]) is not None)
-    if command is not None:
-        if not _COMMAND_PREFIX.fullmatch(before[:command.start()].strip()):
-            return "unresolved", "unresolved_reference_selection"
-        if _UNCERTAIN_NEGATION.search(before[command.end():]) or negated_suffix_operation:
-            return "unresolved", "conflicting_reference_selection"
-        return "requested", "explicit_operation_selection"
-    # Negating a following operation does not become positive merely because
-    # its spelling contains a request word. It is kept without requiring it.
-    if negated_suffix_operation:
-        return "mentioned", "unselected_negated_operation"
-    if _UNCERTAIN_NEGATION.search(before):
-        return "unresolved", "unresolved_reference_selection"
-    if _REFERENCE_TRIVIA.fullmatch(before) or re.fullmatch(r"(?:按|依据|根据)\s*", before):
-        requested = _REQUEST.search(after)
-        if requested and _QUESTION_PREFIX.fullmatch(after[:requested.start()]):
-            return "requested", "explicit_question_selection"
-        if _REFERENCE_TRIVIA.fullmatch(after):
-            return "requested", "direct_reference_address"
-    if _REQUEST.search(before) or _REQUEST.search(after):
-        return "unresolved", "unresolved_reference_selection"
-    return "mentioned", "reference_not_selected"
+    segment_start = max((match.end() for match in _STOP.finditer(query, 0, span[0])), default=0)
+    # Comma-separated continuations inherit reporting context until a sentence
+    # boundary. A fresh local request still resets that scope below.
+    reported = _REPORTED_PREFIX.search(query[segment_start:span[0]])
+    asked_before = _REQUEST.search(before)
+    queried = _REQUEST.search(after)
+    # Outside the explicit exclusion grammar, near-reference negation is
+    # unknown intent, not a guessed demand or exclusion. A direct request to
+    # verify a negative proposition remains requested below.
+    if _UNCERTAIN_NEGATION.search(before[-8:]) or (not queried and _UNCERTAIN_NEGATION.match(after.lstrip())):
+        return "unresolved", "unresolved_reference_intent"
+    # An imperative before the report is still the user's request. A request
+    # inside somebody else's reported speech is not silently promoted.
+    if asked_before and _REPORTED_REQUEST_PREFIX.search(before[:asked_before.start()]):
+        return "unresolved", "reported_request_intent"
+    if reported and not queried and not asked_before:
+        return "excluded", "reported_reference"
+    temporal = _HISTORICAL_MARKER.search(before)
+    if temporal is None and asked_before is None:
+        temporal = _HISTORICAL_MARKER.search(query[segment_start:span[0]])
+    # Temporal scope does not depend on a list of past action verbs. A request
+    # after the temporal marker might itself be a past action, so it is unknown;
+    # an explicit request before that scope or querying the reference after it
+    # has a bounded, current ownership relation. A later clause cannot promote it.
+    if temporal and not queried and (asked_before is None or temporal.start() <= asked_before.start()):
+        return "unresolved", "unresolved_reference_temporal_context"
+    return "requested", "explicit_reference"
 
 
-def _selection_syntax(query, laws, article_items):
-    characters = list(query)
-    for start, end in [(start, end) for start, end, _ in laws] + [
-            (start, end) for start, end, _, _ in article_items]:
-        characters[start:end] = " " * (end - start)
-    return "".join(characters)
+def _link_anaphoric_requests(query, laws, article_items, dispositions):
+    """Resolve a bounded discourse link, not legal applicability.
 
-
-def _unresolved_anaphoric_requests(query, laws):
-    """Do not infer discourse selection from arbitrary reports or history."""
-    unresolved = []
-    for clause in _CLAUSE.finditer(query):
-        if (_REFERENCE_ANAPHORA.search(clause.group(0))
-            and not any(clause.start() <= start < clause.end() for start, _, _ in laws)):
-            unresolved.append(ReferenceMention(None, None, clause.span(), "unresolved",
-                                               "unresolved_reference_anaphora"))
-    return unresolved
-
-
+    Only the closest preceding reference-bearing clause is an antecedent.
+    A singular pointer to several distinct pairs, conflicting negation, or
+    another speaker's request stays unknown instead of inventing a demand.
+    """
+    clauses = list(_CLAUSE.finditer(query))
+    unlinked = []
+    for clause in clauses:
+        text = clause.group(0)
+        asked = _REQUEST.search(text)
+        anaphora = _REFERENCE_ANAPHORA.search(text)
+        if anaphora is None or asked is not None and _NEGATIVE_REQUEST.search(text[:asked.start()]):
+            continue
+        if any(clause.start() <= start < clause.end() for start, _, _ in laws):
+            continue  # A new explicit reference provides its own local identity.
+        antecedents = [prior for prior in clauses if prior.end() <= clause.start()
+                       and any(prior.start() <= start < prior.end() for start, _, _ in laws)]
+        if not antecedents:
+            unlinked.append(ReferenceMention(None, None, clause.span(), "unresolved", "unresolved_reference_anaphora"))
+            continue
+        antecedent = antecedents[-1]
+        nearest_law_start = max(start for start, _, _ in laws if antecedent.start() <= start < antecedent.end())
+        reference_start = max((match.end() for match in _STOP.finditer(query, 0, nearest_law_start)), default=0)
+        # Explicitly switching to another requested reference resets the group;
+        # a comma continuation of a report does not create an independent topic.
+        fresh_requests = [prior.start() for prior in antecedents if prior.start() >= reference_start
+                          and _REQUEST.search(prior.group(0))
+                          and any(dispositions[(start, end)][0] == "requested"
+                                  for start, end, _ in laws if prior.start() <= start < prior.end())]
+        reference_start = max([reference_start, *fresh_requests])
+        owners = [item for item in laws if reference_start <= item[0] < antecedent.end()]
+        units = set()
+        for start, end, article, issue in article_items:
+            if not reference_start <= start < antecedent.end():
+                continue
+            prior = [law for law in owners if law[1] <= start]
+            if prior:
+                units.add((prior[-1][2], article, issue))
+        if not units:
+            units = {(law, None, None) for _, _, law in owners}
+        states = [dispositions[(start, end)] for start, end, _ in owners]
+        reason = None
+        if asked is None:
+            reason = "unresolved_reference_intent"
+        elif _REPORTED_REQUEST_PREFIX.search(text[:asked.start()]):
+            reason = "reported_request_intent"
+        elif _UNCERTAIN_NEGATION.search(text[:asked.start()][-8:]):
+            reason = "unresolved_reference_intent"
+        elif any(state == "unresolved" or state == "excluded" and why != "reported_reference" for state, why in states):
+            reason = "conflicting_reference_intent"
+        elif len(units) > 1 and not _PLURAL_ANAPHORA.search(anaphora.group(0)):
+            reason = "ambiguous_reference_anaphora"
+        for start, end, _ in owners:
+            dispositions[(start, end)] = ("unresolved", reason) if reason else ("requested", "anaphoric_reference_requested")
+    return unlinked
 
 
 def _bare_title_start_supported(query: str, start: int) -> bool:
@@ -435,8 +450,8 @@ def _article_looking_items(query: str, protected: list[tuple[int, int]]):
         if any(match.start() < end and match.end() > start for start, end in protected):
             continue
         end = match.end()
-        while query[end:].startswith("之"):
-            tail = query[end:]
+        tail = query[end:]
+        if tail.startswith("之"):
             numeral = _NUMERAL_FRAGMENT.match(tail)
             if numeral is not None:
                 end += numeral.end()
@@ -458,20 +473,7 @@ def _article_looking_items(query: str, protected: list[tuple[int, int]]):
         yield match.start(), end, article, issue
 
 
-def parse_legal_references(query: str, known_law_titles: Iterable[str] = (), *,
-                           rules_version: str = REFERENCE_RULES_VERSION) -> ReferenceAnalysis:
-    if rules_version == LEGACY_REFERENCE_RULES_VERSION:
-        from .legacy_reference_v2 import parse_legal_references as legacy_parse
-        old = legacy_parse(query, known_law_titles)
-        def mention(item):
-            return ReferenceMention(item.law_title, item.article_number, item.span, item.disposition, item.reason)
-        return ReferenceAnalysis(old.query,
-            tuple(LawArticleRequirement(item.law_title, item.article_number, item.span) for item in old.requirements),
-            tuple(mention(item) for item in old.unresolved), tuple(mention(item) for item in old.excluded),
-            old.required_law_titles, tuple(mention(item) for item in old.mentions), old.known_law_titles,
-            LEGACY_REFERENCE_RULES_VERSION)
-    if rules_version != REFERENCE_RULES_VERSION:
-        raise ValueError("reference rules are unsupported")
+def parse_legal_references(query: str, known_law_titles: Iterable[str] = ()) -> ReferenceAnalysis:
     if not isinstance(query, str) or len(query) > MAX_REFERENCE_QUERY_CHARS:
         raise ValueError("reference query must be bounded text")
     if isinstance(known_law_titles, (str, bytes)) or known_law_titles is None:
@@ -557,10 +559,9 @@ def parse_legal_references(query: str, known_law_titles: Iterable[str] = (), *,
     law_dispositions: dict[tuple[int, int], tuple[str, str]] = {}
     used_laws: set[tuple[int, int]] = set()
     active_laws: list[str] = []
-    syntax_query = _selection_syntax(query, laws, article_items)
     for start, end, law in laws:
-        law_dispositions[(start, end)] = _disposition(query, (start, end), syntax_query)
-    unresolved.extend(_unresolved_anaphoric_requests(query, laws))
+        law_dispositions[(start, end)] = _disposition(query, (start, end))
+    unresolved.extend(_link_anaphoric_requests(query, laws, article_items, law_dispositions))
     for start, end, law in laws:
         disposition, reason = law_dispositions[(start, end)]
         mentions.append(ReferenceMention(law, None, (start, end), disposition, reason))
@@ -584,29 +585,18 @@ def parse_legal_references(query: str, known_law_titles: Iterable[str] = (), *,
             continue
         owner_start, owner_end, law_title = owner
         span = (min(owner_start, start), max(owner_end, end))
-        # Identity may be inherited from an earlier explicit law, but each
-        # article's local selection must still be evaluated. Using the whole
-        # owner-to-article span would hide intervening negation or reports.
-        disposition, reason = _disposition(query, (start, end), syntax_query)
+        disposition, reason = _disposition(query, span)
         inherited = law_dispositions[(owner_start, owner_end)]
-        if inherited[0] in {"excluded", "unresolved", "mentioned"}:
-            if disposition == "requested" and reason == "explicit_operation_selection":
-                # A later local operation cannot silently inherit either an
-                # earlier exclusion or an unselected discourse reference.
-                disposition, reason = "unresolved", "conflicting_inherited_selection"
-            elif disposition not in {"excluded", "unresolved"}:
-                disposition, reason = inherited
+        if inherited[0] in {"excluded", "unresolved"} or inherited[1] == "anaphoric_reference_requested":
+            disposition, reason = inherited
         used_laws.add((owner_start, owner_end))
         if disposition == "excluded":
             excluded.append(ReferenceMention(law_title, article, span, disposition, reason))
             continue
-        if disposition == "mentioned":
-            mentions.append(ReferenceMention(law_title, article, span, disposition, reason))
-            continue
         if disposition == "unresolved" or issue:
             unresolved.append(ReferenceMention(law_title, article, span, "unresolved", issue or reason))
             continue
-        group = [law for law in prior if law_dispositions[(law[0], law[1])][0] == "requested"]
+        group = [law for law in prior if law_dispositions[(law[0], law[1])][0] != "excluded"]
         if len(group) > 1:
             previous = group[-2]
             between = query[previous[1]:owner_start]
@@ -626,7 +616,7 @@ def parse_legal_references(query: str, known_law_titles: Iterable[str] = (), *,
                 excluded.append(ReferenceMention(law, None, (start, end), disposition, reason))
             elif disposition == "unresolved":
                 unresolved.append(ReferenceMention(law, None, (start, end), disposition, reason))
-            elif disposition == "requested":
+            else:
                 active_laws.append(law)
     mentions.extend(unresolved)
     mentions.extend(excluded)

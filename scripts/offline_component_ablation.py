@@ -49,8 +49,8 @@ from scripts.offline_retrieval_ab import NoCallsClient, input_identity, write_js
 METRICS = ("hit_at_3", "hit_at_5", "mrr", "target_coverage")
 CRITICAL_FILES = (
     "scripts/offline_component_ablation.py", "tests/test_offline_component_ablation.py",
-    "legal_rag/legal_references.py", "legal_rag/reference_evidence.py", "legal_rag/retrieval.py",
-    "legal_rag/chat.py", "legal_rag/evidence.py", "legal_rag/query.py", "legal_rag/models.py",
+    "legal_rag/legal_references.py", "legal_rag/legacy_reference_v2.py", "legal_rag/reference_evidence.py", "legal_rag/retrieval.py",
+    "legal_rag/chat.py", "legal_rag/evidence.py", "legal_rag/query.py", "legal_rag/request_policy.py", "legal_rag/models.py",
     "legal_rag/adaptive.py", "legal_rag/planning.py", "legal_rag/query_understanding.py",
     "legal_rag/retrieval_contracts.py", "legal_rag/chat_artifacts.py", "legal_rag/semantic.py",
     "legal_rag/chunking.py", "legal_rag/tracing.py", "legal_rag/evaluation.py",
@@ -120,8 +120,10 @@ The production generic-v3 branch itself never executes scene expansion.
 
 def audit_reference_ownership(question, results, *, known_law_titles=()):
     known = tuple({*known_law_titles, *(law for result in results for law in result.chunk.law_names)})
-    analysis = parse_legal_references(question, known_law_titles=known)
-    typed = check_reference_evidence(analysis, results)
+    # This fixed diagnostic retains its original execution contracts; modern
+    # parser/evidence defaults must not silently change a historical replay.
+    analysis = parse_legal_references(question, known_law_titles=known, rules_version="legal-reference-v2")
+    typed = check_reference_evidence(analysis, results, rules_version="reference-evidence-v1")
     laws: set[str] = set()
     articles: set[str] = set()
     for result in results:
@@ -154,7 +156,8 @@ def infer_question(question, retriever):
     client = NoCallsClient()
     assistant = LegalChatAssistant(retriever, model="retrieval-only", top_k=5,
                                     adaptive_enabled=False, adaptive_use_llm=False,
-                                    condense_with_llm=False, completion_client=client)
+                                    condense_with_llm=False, completion_client=client,
+                                    evidence_rules_version="general-reference-v2")
     prepared = assistant.prepare_question(question)
     retrieved = assistant.retrieve_turn(prepared, max_followup_rounds=0)
     if client.usage.calls:

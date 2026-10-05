@@ -504,6 +504,8 @@ def test_modern_m6_candidate_smoke_binds_requested_head_and_modules(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     files = (
+        "legal_rag/bm25_settings.py", "legal_rag/chinese_bm25.py",
+        "legal_rag/request_policy.py", "legal_rag/legacy_reference_v2.py",
         "legal_rag/legal_references.py", "legal_rag/reference_evidence.py",
         "legal_rag/retrieval_outcomes.py", "legal_rag/semantic.py",
         "legal_rag/evaluation_governance.py", "legal_rag/governed_protocol.py",

@@ -393,7 +393,7 @@ def test_mixed_scope_filtered_retrieval_round_trips_with_original_source_map() -
             _TextAnswerClient(),
             True,
             "这个案子怎么起诉才能胜诉？",
-            "pre_retrieval_refusal",
+            "request_clarification",
         ),
         (
             _DeterministicRetriever(results=[]),

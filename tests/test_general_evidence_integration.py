@@ -15,7 +15,7 @@ from legal_rag.models import Chunk, NormalizedQuery, RetrievalPlan, SearchResult
 from legal_rag.query import analyze_query
 
 
-GENERAL = "general-reference-v2"
+GENERAL = "general-reference-v3"
 HISTORICAL = "legacy-hints-and-return-v1"
 
 
@@ -159,12 +159,22 @@ def test_long_query_is_classified_without_retrieval_or_model_dispatch():
     assert retriever.calls == []
 
 
-def test_cross_sentence_reference_verification_requires_the_original_owned_pair():
+def test_historical_cross_sentence_reference_verification_requires_the_original_owned_pair():
     query = "对方此前引用《合成甲法》第十条；请判断这种引用是否正确？"
-    missing = check_evidence_sufficiency(query, [row("合成乙法", "第十条")])
+    missing = check_evidence_sufficiency(query, [row("合成乙法", "第十条")], rules_version="general-reference-v2")
     assert not missing.sufficient
     assert "missing_reference_pair:合成甲法:第十条" in missing.missing_law_support
-    assert check_evidence_sufficiency(query, [row()]).sufficient
+    assert check_evidence_sufficiency(query, [row()], rules_version="general-reference-v2").sufficient
+
+
+def test_modern_cross_sentence_selection_is_explicitly_unknown_not_guessed():
+    query = "对方此前引用《合成甲法》第十条；请判断这种引用是否正确？"
+    for evidence in ([row()], [row("合成乙法", "第十条")]):
+        checked = check_evidence_sufficiency(query, evidence)
+        assert not checked.sufficient
+        assert checked.stop_reason == "needs_clarification"
+        assert checked.mechanical_check["reference_coverage_status"] == "unresolved"
+        assert checked.followup_queries == []
 
 
 def test_invalid_query_numerals_are_classified_unknown_without_followup_or_dispatch():

@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import re
 
-from legal_rag.legal_references import canonical_law_title, canonical_article_number, parse_legal_references
+from legal_rag.legal_references import (
+    MAX_REFERENCE_QUERY_CHARS, canonical_law_title, canonical_article_number, parse_legal_references,
+)
 from legal_rag.models import SearchResult
 from legal_rag.retrieval_contracts import validate_retrieval_top_k
 from legal_rag.retrieval_outcomes import RetrievalOutcome
@@ -27,7 +30,11 @@ class ExactReferenceRetriever:
     name = "bound_reference_router"
 
     def __init__(self, *, corpus: BoundCorpus, lexical: BoundaryBoundRetriever, catalog,
-                 pointer_revision: int, activation_id: str):
+                 pointer_revision: int, activation_id: str,
+                 reference_rules_version: str = "legal-reference-v3"):
+        if reference_rules_version not in {"legal-reference-v2", "legal-reference-v3"}:
+            raise ValueError("unsupported exact router reference rules")
+        self.reference_rules_version = reference_rules_version
         if not isinstance(corpus, BoundCorpus) or lexical.retrieval_boundary != corpus.boundary:
             raise ValueError("exact router requires one authoritative frozen corpus")
         self._corpus = BoundCorpus(corpus.boundary, tuple(deepcopy(corpus.entries)))
@@ -39,9 +46,20 @@ class ExactReferenceRetriever:
             pointer_revision=pointer_revision, activation_id=activation_id,
         )
         self._titles = {}
+        catalog_titles, unsupported_titles = set(), set()
         for entry in self._corpus.entries:
             for article in entry.provenance.articles:
-                self._titles.setdefault(canonical_law_title(article.title), set()).add(article.title)
+                catalog_titles.add(article.title)
+                try:
+                    query_title = canonical_law_title(article.title)
+                except ValueError:
+                    # Storage owns the complete original identity. The bounded
+                    # query grammar is a capability, not a catalog validity rule.
+                    unsupported_titles.add(article.title)
+                else:
+                    self._titles.setdefault(query_title, set()).add(article.title)
+        self._catalog_titles = tuple(sorted(catalog_titles))
+        self._unsupported_titles = tuple(sorted(unsupported_titles))
 
     @property
     def retrieval_boundary(self):
@@ -55,17 +73,63 @@ class ExactReferenceRetriever:
     def known_law_hints(self) -> tuple[str, ...]:
         return tuple(sorted(self._titles))
 
+    @property
+    def catalog_law_titles(self) -> tuple[str, ...]:
+        """All original identities in this frozen, authorized corpus."""
+        return self._catalog_titles
+
+    @property
+    def unsupported_law_titles(self) -> tuple[str, ...]:
+        """Explicitly retained identities outside the query grammar capability."""
+        return self._unsupported_titles
+
+    def unsupported_reference_titles(self, query: str) -> tuple[str, ...]:
+        """Recognize a complete unsupported spelling, not arbitrary substrings.
+
+        A wrapper or adjacent article label establishes a reference-shaped
+        boundary. A short malformed catalog spelling inside another recognized
+        law's complete quoted title cannot steal that law's reference.
+        """
+        if not isinstance(query, str) or len(query) > MAX_REFERENCE_QUERY_CHARS:
+            raise ValueError("reference query must be bounded text")
+        normalized = "".join(query.split())
+        analysis = parse_legal_references(normalized, known_law_titles=self.known_law_hints,
+                                          rules_version=self.reference_rules_version)
+        return self._unsupported_reference_titles(normalized, analysis)
+
+    def _unsupported_reference_titles(self, query, analysis):
+        matched = []
+        title_spans = tuple(item.span for item in analysis.mentions
+                            if item.law_title is not None and item.article_number is None)
+        for title in self._unsupported_titles:
+            spelling = "".join(title.split())
+            for match in re.finditer(re.escape(spelling), query):
+                start, end = match.span()
+                if any(left <= start and end <= right and (left, right) != (start, end)
+                       for left, right in title_spans):
+                    continue
+                wrapped = start > 0 and query[start - 1] == "《" and query[end:end + 1] == "》"
+                article_follows = re.match(r"》*第[^，,。；;!?！？\n《》]*条", query[end:]) is not None
+                if wrapped or article_follows:
+                    matched.append(title)
+                    break
+        return tuple(matched)
+
     def retrieve(self, query: str, top_k: int = 5):
         return list(self.retrieve_outcome(query, top_k).results)
 
     def retrieve_outcome(self, query: str, top_k: int = 5) -> RetrievalOutcome:
         limit = validate_retrieval_top_k(top_k)
-        analysis = parse_legal_references(query, known_law_titles=tuple(self._titles))
+        analysis = parse_legal_references(query, known_law_titles=tuple(self._titles),
+                                          rules_version=self.reference_rules_version)
         pairs = tuple(dict.fromkeys((item.law_title, item.article_number) for item in analysis.requirements))
         if len(pairs) > 16:
             # Reject the whole oversized request before any unresolved branch,
             # lookup or truncation. No subset may masquerade as exact coverage.
             return RetrievalOutcome((), "exact_reference", "needs_disambiguation", ("too_many_references",))
+        if self.unsupported_reference_titles(query):
+            return RetrievalOutcome((), "exact_reference", "needs_disambiguation",
+                                    ("unsupported_catalog_title",))
         if analysis.unresolved:
             return RetrievalOutcome((), "exact_reference", "needs_disambiguation",
                                     ("unresolved_reference",), pairs)

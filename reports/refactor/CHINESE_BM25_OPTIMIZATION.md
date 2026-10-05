@@ -51,6 +51,12 @@ char是已测试现代候选中召回最高者，较legacy为9改善/2回退，�
 
 此轮仍是直接词汇排名，不包含精确目录路由。并行开发期只锁定清单内运行依赖，结果由manifest中的精确源码hash绑定，而不是把未提交的整个工作区说成一个干净commit。hash清单补入实际使用的evaluation/retrieval_contracts，bootstrap显式传2000/.95/42。性能仍有固定顺序、单次建库和并行负载的限制。协议SHA256 `70404487e28838dc3b97d9ddf17e3194bc288d816471169b8dcd1be12877b5d5`，summary SHA256 `ec4793e771b2718cf246361843806d7eed605e13b88cfe49a7b0383570a59940`，输出保存在同名本地忽略目录。
 
+## 建库成本与实际服务边界
+
+补充固定probe `chinese_bm25_20261006_build_fixed`，脚本 [benchmark_chinese_bm25_build.py](../../scripts/benchmark_chinese_bm25_build.py) 对同一19,050条索引，在一个进程内每臂重新构建4次，不读case/gold、不共享索引，固定无外发。source/index身份稳定、exit0。首次char构建4428.93ms；库已加载后的三次为1620.97/1635.06/1655.67ms。legacy对应首次1075.76ms，后续1084.34/1064.75/1063.76ms。固定查询的char为10.21至11.23ms，legacy为51.65至54.61ms；这些不是120题p95。
+
+当前`PostgresAssistantFactory`仍为run构建检索器，未新增跨run共享缓存。因此热查询更快**不代表当前API端到端更快**，建库、数据库加载、首次依赖导入均需计入。本probe不含PG加载，只是小样本工程成本诊断；无法推导生产吞吐。上述额外取舍已告知用户，不静默增缓存、搜索服务或改推广门槛。manifest SHA256 `d36338fe5eb23a4bc4df5a48b3ae508251f79e6111437711af0395cf07581c23`。
+
 ## 已运行工程检查与失败
 
 - T3真实库合同与相关旧回归：94 passed + 4 subtests，16.02s，exit0，`.tmp/chinese-bm25-contract-scope-green.xml`。初始模块未存在的RED、首次分词假设错误造成的1 failed/42 passed均保留；修正合成测试中的词边界，不改词典或评分。benchmark汇总/NA/不覆写证据4项passed。
@@ -65,4 +71,17 @@ char是已测试现代候选中召回最高者，较legacy为9改善/2回退，�
 - T7首次真实隔离PG4项失败，`.tmp/chinese-catalog-pg-first.xml`，证实`lookup_run_article`尚把存储标题套用有界query语法，修复与复验待完成。自建临时PG已停止，日志保留。
 - BM25/RRF/hybrid实际成熟子路、API闭集selector、M2实际引擎漂移拒绝及分数尺度共27项通过，`.tmp/chinese-wiring-score-first.xml`。
 
-未完成：默认策略的明确选择、完整累计门禁、修复后真实PG/恢复/wheel、新候选CI及最终交接。所有上列专项不能替代最终候选验收。真实模型新增调用和费用均0。
+## 整体接线与独立复核
+
+T4至T7已实现，默认策略选择仍待确认，完整最终门禁尚待收口。配置身份、历史v2、机械v2/现代general-v3、目录边界和风险处置的职责见 [ADR-007](../../docs/refactor/decisions/ADR-007-chinese-bm25-and-bounded-rules.md)。
+
+独立审查不是仅看现有测试：实际补出了条款局部选择被法名跨度遮盖、异常`条之二之三`截断、继承排除遮盖后续未知、输出v2冒充v3、阶段指纹遗漏、未冻结历史参数及公共profile被服务强制切回legacy等反例。修复分别约束跨度/完整标签、冻结版本/依赖身份和共用有效配置，没有加入购物词表或用gold修运行逻辑。未知跨句指代仍未知，未命中风险词仍不代表安全确认。
+
+- T6当前17文件522 passed +100 subtests，`.tmp/reference-risk-complete-migrations-reviewed-final.xml`；独立风险15项通过。原parser基础测试继续跑现代版本，改变的收缩语义同时断言v2原行为，旧模块SHA保持`2e52d6f0e694c8819827e7b9ee3906b055e3071037f1c3a345de5649bb9da420`。
+- M2历史修复过程分别63 failed/71 passed、5 failed/129 passed，源于未显式版本和旧manifest缺query_analysis被错误索引；真实修复后六文件135 passed，但随后公共profile又有新修复，不能累加或借用它当最终门禁。公共profile真实RED1 failed/3 passed，修后80 passed。新schema2共享公共默认；schema1原payload/fingerprint与1.0乘数保持不变。
+- T4/T5独立63项通过，`.tmp/chinese-t4-t5-independent-reviewed-green.xml`；真实合成RRF k=200的2/201分数不再被现代0.01阈值误拒，仍semantic not_checked。M2公共解码/implicit-BM25身份14项独立通过，`.tmp/chinese-output-final-frozen-green.xml`。公共测试第一次5失败是新增fixture参数错误，含red文件名的implicit测试实际上12通过，都不冒充产品RED。
+- 第二次PG17文件93 passed/95.96s，`.tmp/chinese-service-pg-second.xml`，并完成实际stop/start与独立进程schema8恢复，receipt在`.tmp/isolated-pg-716819adf1e44a9685e02d5cd3bc5cc1/restart-prepared.json`。该轮早于最后公共profile修复，最终候选需复跑。
+- 第一轮累计M2为24/25、exit1、234409ms，`.tmp/chinese-candidate-m2-first.json`。唯一失败检查是全量pytest中2个CLI trace测试替身未带实际助手的evidence_rules_version字段；生产链路不放松，修复替身后CLI+版本专项17 passed，`.tmp/chinese-cli-version-final-green.xml`。
+- 当前wheel实际仓库外安装成功，27模块/schema8 smoke通过，`.tmp/chinese-candidate-wheel-probe.json`，wheel SHA256 `cab21c051ed911939f728b2ffd3c29eb02500b5c535e965ab675a442c3f4e78d`。随后逐文件比较110个包源码模块，全部与当前候选相同。wheel合同fixture新增模块前1 failed/23 passed，补齐真实新模块后24 passed，不取消缺文件检查。
+
+未完成：默认策略的明确选择、完整冻结候选累计门禁、最终PG复跑、新候选CI及最终交接。上述重叠专项不相加为最终总数，工程通过不替代法律独立holdout。真实模型新增调用和费用均0。

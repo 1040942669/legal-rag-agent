@@ -56,13 +56,18 @@ def test_reported_history_is_preserved_without_becoming_a_requirement():
     query = "对方曾引用《合成乙法》第五条，我现在只要求解释《合成甲法》第十条。"
     result = parse_legal_references(query)
     assert pairs(query) == [("合成甲法", "第十条")]
-    assert any(item.reason == "reported_reference" for item in result.excluded)
+    assert any(item.law_title == "合成乙法" and item.disposition == "mentioned" for item in result.mentions)
     assert not result.unresolved
+    historical = parse_legal_references(query, rules_version="legal-reference-v2")
+    assert any(item.reason == "reported_reference" for item in historical.excluded)
 
 
-def test_reported_reference_explicitly_queried_is_not_excluded():
+def test_free_text_report_with_suffix_question_requires_explicit_selection_in_v3():
     query = "对方引用《合成甲法》第十条是否适用？"
-    assert pairs(query) == [("合成甲法", "第十条")]
+    assert pairs(query) == []
+    assert parse_legal_references(query).unresolved
+    assert pairs(query, rules_version="legal-reference-v2") == [("合成甲法", "第十条")]
+    assert pairs("请核查" + query) == [("合成甲法", "第十条")]
 
 
 def test_known_corpus_titles_allow_unquoted_references_without_scene_rules():
@@ -141,11 +146,12 @@ def test_ownership_relations_are_invariant_under_fictional_title_substitution(in
 
 @pytest.mark.parametrize("separator", ["；", "。", "\n", "，"])
 @pytest.mark.parametrize("intent", ["请判断这种引用是否正确", "请核查该法条是否适用", "能否解释上述条款"])
-def test_reported_reference_then_anaphoric_request_is_not_silently_excluded(separator, intent):
+def test_reported_reference_then_anaphoric_request_is_explicitly_unknown_in_v3(separator, intent):
     query = "对方此前引用《合成甲法》第十条" + separator + intent + "？"
     analysis = parse_legal_references(query)
-    assert pairs(query) == [("合成甲法", "第十条")]
-    assert not analysis.unresolved
+    assert not analysis.requirements
+    assert any(item.reason == "unresolved_reference_anaphora" for item in analysis.unresolved)
+    assert pairs(query, rules_version="legal-reference-v2") == [("合成甲法", "第十条")]
 
 
 @pytest.mark.parametrize("query", [
@@ -162,20 +168,25 @@ def test_cross_sentence_other_explicit_request_does_not_promote_history():
     assert not parse_legal_references(query).unresolved
 
 
-def test_ambiguous_singular_anaphora_is_unknown_but_plural_requests_cover_each_owned_pair():
+def test_v3_does_not_resolve_singular_or_plural_discourse_ownership():
     prefix = "对方引用《合成甲法》第十条和《合成乙法》第五条；"
     singular = parse_legal_references(prefix + "请核查这条引用是否正确？")
     assert singular.requirements == ()
-    assert any(item.reason == "ambiguous_reference_anaphora" for item in singular.unresolved)
+    assert any(item.reason == "unresolved_reference_anaphora" for item in singular.unresolved)
     plural = prefix + "请核查这些引用是否正确？"
-    assert pairs(plural) == [("合成甲法", "第十条"), ("合成乙法", "第五条")]
+    assert not pairs(plural) and parse_legal_references(plural).unresolved
+    historical_singular = parse_legal_references(prefix + "请核查这条引用是否正确？", rules_version="legal-reference-v2")
+    assert any(item.reason == "ambiguous_reference_anaphora" for item in historical_singular.unresolved)
+    assert pairs(plural, rules_version="legal-reference-v2") == [("合成甲法", "第十条"), ("合成乙法", "第五条")]
 
 
 def test_reported_user_request_is_not_mistaken_for_actual_request():
     query = "他曾引用《合成甲法》第十条；对方说请核查这种引用是否正确。"
     analysis = parse_legal_references(query)
     assert not analysis.requirements
-    assert any(item.reason == "reported_request_intent" for item in analysis.unresolved)
+    assert any(item.reason == "unresolved_reference_anaphora" for item in analysis.unresolved)
+    historical = parse_legal_references(query, rules_version="legal-reference-v2")
+    assert any(item.reason == "reported_request_intent" for item in historical.unresolved)
 
 
 @pytest.mark.parametrize("query", [
@@ -232,13 +243,15 @@ def test_reported_reference_collection_does_not_turn_its_later_member_into_a_dem
     prefix = "他此前引用《合成甲法》第十条" + separator + "《合成乙法》第五条。"
     assert pairs(prefix + "我现在只要求解释《合成丙法》第七条。") == [("合成丙法", "第七条")]
     plural = prefix + "请核查这些引用是否正确？"
-    assert pairs(plural) == [("合成甲法", "第十条"), ("合成乙法", "第五条")]
+    assert not pairs(plural) and parse_legal_references(plural).unresolved
+    assert pairs(plural, rules_version="legal-reference-v2") == [("合成甲法", "第十条"), ("合成乙法", "第五条")]
 
 
-def test_new_explicit_request_resets_the_antecedent_group_instead_of_reviving_earlier_history():
+def test_new_explicit_request_does_not_resolve_a_later_anaphoric_clause_in_v3():
     query = "对方引用《合成乙法》第五条，我现在要求解释《合成甲法》第十条；请核查该法条是否适用？"
     assert pairs(query) == [("合成甲法", "第十条")]
-    assert not parse_legal_references(query).unresolved
+    assert parse_legal_references(query).unresolved
+    assert not parse_legal_references(query, rules_version="legal-reference-v2").unresolved
 
 
 @pytest.mark.parametrize("intent", ["无需核查这些引用", "不要解释该法条", "这种引用不必说明"])
@@ -278,7 +291,11 @@ def test_article_looking_labels_outside_supported_grammar_are_not_silently_lost(
 def test_unknown_reference_intent_is_unresolved_instead_of_invented_or_silently_excluded(query):
     analysis = parse_legal_references(query)
     assert ("合成甲法", "第十条") not in [(item.law_title, item.article_number) for item in analysis.requirements]
-    assert analysis.unresolved
+    # The old parser marked all opaque background as globally unknown. V3
+    # retains it as an unselected mention unless selection/discourse is unknown.
+    assert analysis.unresolved or any(item.law_title == "合成甲法" and item.disposition == "mentioned"
+                                      for item in analysis.mentions)
+    assert parse_legal_references(query, rules_version="legal-reference-v2").unresolved
 
 
 @pytest.mark.parametrize("query", ["解释《合成甲法》第十条是否适用？", "核查《合成甲法》第十条不适用吗？"])
@@ -328,7 +345,11 @@ def test_temporal_statement_cannot_be_promoted_by_a_later_current_request(action
     query = "此前" + action + "《合成甲法》第十条处理" + separator + "现在只解释《合成乙法》第五条。"
     analysis = parse_legal_references(query)
     assert pairs(query) == [("合成乙法", "第五条")]
-    assert analysis.unresolved
+    # Temporal prose without a selection operation is merely background, not
+    # a failed requirement for the later explicitly selected law.
+    assert analysis.unresolved or any(item.law_title == "合成甲法" and item.disposition == "mentioned"
+                                      for item in analysis.mentions)
+    assert parse_legal_references(query, rules_version="legal-reference-v2").unresolved
     assert "合成甲法" not in analysis.required_law_titles
 
 
@@ -337,7 +358,13 @@ def test_temporal_statement_cannot_be_promoted_by_a_later_current_request(action
     "此前依据《合成甲法》第十条处理是否正确？",
 ])
 def test_explicit_request_can_query_a_historical_reference_without_temporal_promotion(query):
-    assert pairs(query) == [("合成甲法", "第十条")]
+    if query.startswith("请核查"):
+        assert pairs(query) == [("合成甲法", "第十条")]
+    else:
+        # An arbitrary historical proposition is outside bounded reference
+        # selection; repeat a positive operation rather than infer discourse.
+        assert not pairs(query) and parse_legal_references(query).unresolved
+    assert pairs(query, rules_version="legal-reference-v2") == [("合成甲法", "第十条")]
 
 
 @pytest.mark.parametrize("qualifier", ["（草案）", "(旧版)", "【另一版本】", "[未知限定]"])

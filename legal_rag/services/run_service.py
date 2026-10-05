@@ -1242,13 +1242,12 @@ class RunService:
                 )
             )
             if self.execution_policy is not None:
-                from dataclasses import replace
                 if set(retrieval_config) - {"top_k", "lexical_profile"}:
                     raise ServiceContractError("retrieval options cannot override execution authority")
                 selector = retrieval_config.get("lexical_profile", self.execution_policy.lexical_profile)
                 if selector not in self.execution_policy.allowed_lexical_profiles:
                     raise ServiceContractError("lexical selector is not allowed by deployment")
-                frozen_policy = replace(self.execution_policy, lexical_profile=selector)
+                frozen_policy = self.execution_policy.with_lexical_profile(selector)
                 if frozen_policy.generation.enabled and bound.scope_id not in frozen_policy.generation.allowed_scope_ids:
                     raise ServiceContractError("scope is not authorized for generation egress")
                 connection.execute(insert(run_execution_policies).values(
@@ -1335,10 +1334,17 @@ class RunService:
         record = self.get_run(principal, run_id)
         if principal.scope_id != record.scope_id:
             raise ResourceNotFoundError()
-        title = canonical_law_title(law_title)
         number = canonical_article_number(article_number)
-        if not title or not number:
-            raise ServiceContractError("invalid exact article reference")
+        # A full catalog identity is not a bounded natural-language title.
+        # Validate its storage shape, then use grammar aliases only when both
+        # spellings support that capability. Never extract an inner law name.
+        boundary = ArticleLookupBoundary(record.scope_id, record.snapshot_id,
+                                        pointer_revision=record.snapshot_revision, activation_id=record.activation_id)
+        ArticleLookupRequest(boundary, law_title, number, law_id=law_id, version_id=version_id, effective_on=effective_on)
+        try:
+            title = canonical_law_title(law_title)
+        except ValueError:
+            title = None
         # Resolve aliases using ONLY SQL-selected authorized snapshot titles.
         with self.engine.connect() as connection:
             titles = connection.execute(select(law_versions.c.title).distinct().select_from(
@@ -1347,12 +1353,20 @@ class RunService:
                 .join(snapshot_chunks, snapshot_chunks.c.chunk_id == chunk_articles.c.chunk_id)
                 .join(corpus_snapshots, corpus_snapshots.c.snapshot_id == snapshot_chunks.c.snapshot_id)
             ).where(snapshot_chunks.c.snapshot_id == record.snapshot_id, corpus_snapshots.c.scope_id == record.scope_id)).scalars().all()
-        matching = tuple(stored for stored in titles if canonical_law_title(stored) == title)
+        matching = []
+        for stored in titles:
+            if stored == law_title:
+                matching.append(stored)
+            elif title is not None:
+                try:
+                    if canonical_law_title(stored) == title:
+                        matching.append(stored)
+                except ValueError:
+                    continue  # Retained catalog row has no query alias capability.
         if len(matching) > 1:
             raise ServiceContractError("law title is ambiguous within the frozen snapshot")
         request = ArticleLookupRequest(
-            ArticleLookupBoundary(record.scope_id, record.snapshot_id,
-                                  pointer_revision=record.snapshot_revision, activation_id=record.activation_id),
+            boundary,
             matching[0] if matching else law_title, number, law_id=law_id,
             version_id=version_id, effective_on=effective_on,
         )

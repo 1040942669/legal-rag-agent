@@ -5,16 +5,40 @@ from dataclasses import replace
 from numbers import Real
 from typing import Iterable, Sequence
 
-from .legal_references import MAX_REFERENCE_QUERY_CHARS, parse_legal_references
+from .legal_references import MAX_REFERENCE_QUERY_CHARS, canonical_law_title, parse_legal_references
 from .models import EvidenceCheck, NormalizedQuery, RetrievalPlan, SearchResult
 from .query import QueryAnalysis, analyze_query, extract_law_names
 from .reference_evidence import check_reference_evidence
 
 
 LOW_SCORE_THRESHOLD = 0.01
-GENERAL_EVIDENCE_RULES_VERSION = "general-reference-v2"
+GENERAL_EVIDENCE_RULES_VERSION = "general-reference-v3"
+REFERENCE_BASED_EVIDENCE_RULES = frozenset({"general-reference-v2", GENERAL_EVIDENCE_RULES_VERSION})
 HISTORICAL_EVIDENCE_RULES_VERSION = "legacy-hints-and-return-v1"
-EVIDENCE_RULES_VERSIONS = frozenset({GENERAL_EVIDENCE_RULES_VERSION, HISTORICAL_EVIDENCE_RULES_VERSION})
+EVIDENCE_RULES_VERSIONS = REFERENCE_BASED_EVIDENCE_RULES | {HISTORICAL_EVIDENCE_RULES_VERSION}
+
+
+def reference_rules_for_evidence(rules_version: str) -> str:
+    if rules_version not in REFERENCE_BASED_EVIDENCE_RULES:
+        raise ValueError("evidence rules do not use reference analysis")
+    return "legal-reference-v2" if rules_version == "general-reference-v2" else "legal-reference-v3"
+
+
+def query_compatible_title_hints(titles: Iterable[str]) -> tuple[str, ...]:
+    """Only query-grammar hints, never a filter on corpus/evidence identities.
+
+    Unsupported original titles remain in their source/provenance and are still
+    opaque when explicitly present in a question. A directory display label
+    must not make an unrelated ordinary question unparsable.
+    """
+    compatible = []
+    for title in titles:
+        try:
+            canonical_law_title(title)
+        except (TypeError, ValueError):
+            continue
+        compatible.append(title)
+    return tuple(dict.fromkeys(compatible))
 
 
 def check_evidence_sufficiency(
@@ -51,17 +75,21 @@ def check_evidence_sufficiency(
     missing_facts = unique(normalized_query.missing_facts if normalized_query else [])
     if len(query) > MAX_REFERENCE_QUERY_CHARS:
         return _unparsed_evidence_check(results, missing_facts, covered_laws, covered_articles,
-                                        "reference_query_limit_exceeded")
+                                        "reference_query_limit_exceeded", rules_version)
     # Only literal occurrences in the original query may use these title aliases.
     # The supplied QueryAnalysis is intentionally not trusted for requirements.
     try:
-        reference_analysis = parse_legal_references(query, known_law_titles=(
-            *known_law_titles, *covered_laws, *extract_law_names(query)))
+        title_hints = (*known_law_titles, *covered_laws, *extract_law_names(query))
+        if rules_version == GENERAL_EVIDENCE_RULES_VERSION:
+            title_hints = query_compatible_title_hints(title_hints)
+        reference_analysis = parse_legal_references(query, known_law_titles=title_hints,
+            rules_version=reference_rules_for_evidence(rules_version))
     except (TypeError, ValueError):
         return _unparsed_evidence_check(results, missing_facts, covered_laws, covered_articles,
-                                        "reference_parse_invalid")
+                                        "reference_parse_invalid", rules_version)
     mechanical = check_reference_evidence(reference_analysis, results,
-                                           snapshot_id=snapshot_id, allowed_scope_ids=allowed_scope_ids)
+                                           snapshot_id=snapshot_id, allowed_scope_ids=allowed_scope_ids,
+                                           rules_version="reference-evidence-v1" if rules_version == "general-reference-v2" else "reference-evidence-v2")
     missing_law_support = [reason for reason in mechanical.reasons if reason.startswith((
         "missing_law:", "missing_reference_pair:", "unresolved_reference:"))
         or reason == "no_retrieved_evidence"]
@@ -88,14 +116,14 @@ def check_evidence_sufficiency(
         stop_reason="needs_clarification" if clarify else "sufficient" if sufficient else "needs_followup",
         checked_result_count=mechanical.checked_result_count,
         covered_laws=covered_laws, covered_articles=covered_articles,
-        rules_version=GENERAL_EVIDENCE_RULES_VERSION, mechanical_check=mechanical.to_dict())
+        rules_version=rules_version, mechanical_check=mechanical.to_dict())
 
 
-def _unparsed_evidence_check(results, missing_facts, covered_laws, covered_articles, reason):
+def _unparsed_evidence_check(results, missing_facts, covered_laws, covered_articles, reason, rules_version):
     # Unknown parsing stays unknown; do not fabricate an analysis fingerprint.
     return EvidenceCheck(False, missing_facts, [], [reason], [], "needs_clarification",
                          len(results), covered_laws, covered_articles,
-                         GENERAL_EVIDENCE_RULES_VERSION, None)
+                         rules_version, None)
 
 
 def _check_historical_evidence_sufficiency(
@@ -109,7 +137,7 @@ def _check_historical_evidence_sufficiency(
     max_followup_queries: int = 2,
 ) -> EvidenceCheck:
     if analysis is None:
-        analysis = analyze_query(query)
+        analysis = analyze_query(query, evidence_rules_version=HISTORICAL_EVIDENCE_RULES_VERSION)
     missing_facts: list[str] = []
     missing_law_support: list[str] = []
     low_coverage: list[str] = []

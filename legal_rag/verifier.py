@@ -25,6 +25,7 @@ from .models import (
     VerificationResult,
 )
 from .semantic import SemanticAssessment, SemanticPolicy, build_semantic_input, evaluate_semantic_assessment
+from .request_policy import request_answer_mode
 
 
 CITATION_RE = re.compile(r"\[S([1-9]\d*)\]")
@@ -857,8 +858,11 @@ def _resolve_expected_mode(
 ) -> str | None:
     if expected_answer_mode is not None:
         return expected_answer_mode if expected_answer_mode in ANSWER_MODES else None
-    if set(risk_flags or []) & HIGH_RISK_FLAGS:
-        return "out_of_scope"
+    request_mode = request_answer_mode(risk_flags or [],
+        evidence_rules_version=evidence_check.rules_version if evidence_check is not None else "general-reference-v2",
+        free_generation=True)
+    if request_mode is not None:
+        return request_mode
     if evidence_check is not None and (
         evidence_check.missing_facts
         or evidence_check.stop_reason == "needs_clarification"

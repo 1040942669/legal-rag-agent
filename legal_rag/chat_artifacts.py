@@ -25,7 +25,6 @@ from .chat import (
     programmatic_answer,
     render_retrieval_only_answer,
     safe_terminal_answer,
-    should_refuse_before_retrieval,
     validate_reference_route,
     constrain_reference_route,
 )
@@ -36,6 +35,7 @@ from .evaluation_artifacts import (
     search_result_to_artifact,
 )
 from .experiment_runtime import canonical_hash, canonical_json_bytes
+from .evidence import EVIDENCE_RULES_VERSIONS, REFERENCE_BASED_EVIDENCE_RULES
 from .json_utils import validate_json_unicode
 from .models import (
     ANSWER_MODES,
@@ -48,6 +48,7 @@ from .models import (
     StructuredAnswer,
     VerificationResult,
 )
+from .request_policy import request_answer_mode
 from .query import QueryAnalysis, analyze_query
 from .retrieval import assert_results_match_boundary
 from .retrieval_contracts import RetrievalBoundary
@@ -351,20 +352,21 @@ def _evidence_check_from_payload(value: Any) -> EvidenceCheck:
         expected,
     )
     rules_version = _string("evidence.rules_version", payload["rules_version"], non_empty=True)
-    if rules_version not in {"general-reference-v2", "legacy-hints-and-return-v1"}:
+    if rules_version not in EVIDENCE_RULES_VERSIONS:
         raise ValueError("evidence rules version is unsupported")
     mechanical = payload["mechanical_check"]
-    if rules_version == "general-reference-v2" and payload["sufficient"] is True and mechanical is None:
+    if rules_version in REFERENCE_BASED_EVIDENCE_RULES and payload["sufficient"] is True and mechanical is None:
         raise ValueError("sufficient modern evidence requires a mechanical assessment")
     if mechanical is not None:
-        if rules_version != "general-reference-v2":
+        if rules_version not in REFERENCE_BASED_EVIDENCE_RULES:
             raise ValueError("legacy evidence cannot acquire a modern mechanical check")
         mechanical = _exact_mapping("mechanical check", mechanical, {
             "rules_version", "candidate_available", "scores_valid", "scope_status",
             "reference_coverage_status", "missing_pairs", "missing_laws", "reasons",
             "checked_result_count", "analysis_fingerprint", "sufficient", "semantic_support_status",
         })
-        if mechanical["rules_version"] != "reference-evidence-v1" or mechanical["semantic_support_status"] != "not_checked":
+        expected_mechanical_rules = "reference-evidence-v1" if rules_version == "general-reference-v2" else "reference-evidence-v2"
+        if mechanical["rules_version"] != expected_mechanical_rules or mechanical["semantic_support_status"] != "not_checked":
             raise ValueError("mechanical evidence cannot prove semantics")
         if mechanical["scope_status"] not in {"not_configured", "valid", "invalid"} or mechanical["reference_coverage_status"] not in {
             "complete", "missing", "unresolved", "not_requested",
@@ -753,7 +755,8 @@ def _prepared_semantic_payload(prepared: PreparedQuestion) -> dict[str, Any]:
     )
     if analysis["original_query"] != standalone_question:
         raise ValueError("prepared analysis is not bound to its standalone question")
-    if prepared.analysis != analyze_query(standalone_question):
+    if prepared.analysis not in (analyze_query(standalone_question, evidence_rules_version="general-reference-v3"),
+                                 analyze_query(standalone_question, evidence_rules_version="general-reference-v2")):
         raise ValueError("prepared analysis does not match its standalone question")
     session_state = _exact_mapping(
         "prepared.session_state_before",
@@ -975,9 +978,9 @@ def _validate_retrieved_relationships(turn: RetrievedTurn) -> None:
     if route is not None:
         if not isinstance(route, RetrievalOutcome) or route.results != results:
             raise ValueError("retrieved route is not bound to its evidence snapshot")
-        validate_reference_route(route, turn.prepared.standalone_question)
-        if evidence is None or evidence.rules_version != "general-reference-v2":
+        if evidence is None or evidence.rules_version not in REFERENCE_BASED_EVIDENCE_RULES:
             raise ValueError("routed retrieval requires modern evidence")
+        validate_reference_route(route, turn.prepared.standalone_question, evidence_rules_version=evidence.rules_version)
         if constrain_reference_route(evidence, route) != evidence:
             raise ValueError("exact route authority cannot be overridden by evidence heuristics")
     if boundary is not None and not isinstance(boundary, RetrievalBoundary):
@@ -995,7 +998,11 @@ def _validate_retrieved_relationships(turn: RetrievedTurn) -> None:
         turn.terminal_answer,
         turn.terminal_expected_answer_mode,
     )
-    refusal_required = should_refuse_before_retrieval(turn.prepared.analysis.risk_flags)
+    request_version = evidence.rules_version if evidence is not None else "general-reference-v2"
+    if turn.prepared.analysis != analyze_query(turn.prepared.standalone_question, evidence_rules_version=request_version):
+        raise ValueError("retrieved request analysis differs from its frozen evidence rules")
+    refusal_required = request_answer_mode(turn.prepared.analysis.risk_flags,
+                                          evidence_rules_version=request_version, free_generation=False) == "out_of_scope"
     if adaptive is None:
         expected_refusal = programmatic_answer(
             build_risk_refusal_answer(turn.prepared.analysis.risk_flags),
@@ -1102,7 +1109,7 @@ def retrieved_turn_to_artifact(turn: RetrievedTurn) -> dict[str, Any]:
         ),
     }
     modern = turn.route_outcome is not None or (
-        turn.evidence_check is not None and turn.evidence_check.rules_version == "general-reference-v2")
+        turn.evidence_check is not None and turn.evidence_check.rules_version in REFERENCE_BASED_EVIDENCE_RULES)
     if modern:
         payload["route_outcome"] = turn.route_outcome.to_dict() if turn.route_outcome is not None else None
     return _artifact("retrieved_turn", payload, schema_version=2 if modern else 1)
@@ -1157,7 +1164,7 @@ def retrieved_turn_from_artifact(
     evidence = (
         None if raw_evidence is None else _evidence_check_from_payload(raw_evidence)
     )
-    if evidence is not None and (evidence.rules_version == "general-reference-v2") != modern:
+    if evidence is not None and (evidence.rules_version in REFERENCE_BASED_EVIDENCE_RULES) != modern:
         raise ValueError("retrieved artifact schema and evidence rules disagree")
     route = (RetrievalOutcome.from_dict(payload["route_outcome"], results=results)
              if modern and payload["route_outcome"] is not None else None)
@@ -1387,7 +1394,22 @@ def _validate_generated_relationships(turn: GeneratedTurn) -> None:
         ):
             raise ValueError("generation-error turn contract is invalid")
         return
+    if turn.kind == "request_clarification":
+        if (retrieved.evidence_check is None or retrieved.adaptive_result is None
+            or request_answer_mode(retrieved.prepared.analysis.risk_flags,
+                                   evidence_rules_version=retrieved.evidence_check.rules_version,
+                                   free_generation=True) != "needs_clarification"
+            or turn.answer != safe_terminal_answer("needs_clarification")
+            or turn.expected_answer_mode != "needs_clarification"
+            or turn.generation_error is not None or turn.raw_response is not None or turn.parser_version is not None):
+            raise ValueError("request clarification turn contract is invalid")
+        return
     if turn.kind == "model":
+        if retrieved.evidence_check is not None and request_answer_mode(
+                retrieved.prepared.analysis.risk_flags,
+                evidence_rules_version=retrieved.evidence_check.rules_version,
+                free_generation=True) is not None:
+            raise ValueError("unresolved request purpose cannot obtain free generation")
         if (
             retrieved.adaptive_result is None
             or retrieved.evidence_check is None

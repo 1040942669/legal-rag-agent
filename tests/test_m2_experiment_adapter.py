@@ -164,7 +164,7 @@ class _SequencedJudgeClient:
 
 
 class _TrackingAssistant(LegalChatAssistant):
-    def __init__(self, retriever: _ProviderFreeRetriever) -> None:
+    def __init__(self, retriever: _ProviderFreeRetriever, *, evidence_rules_version="general-reference-v2") -> None:
         super().__init__(
             retriever,
             model="m2-adapter-offline-fixture",
@@ -172,6 +172,7 @@ class _TrackingAssistant(LegalChatAssistant):
             adaptive_enabled=False,
             adaptive_use_llm=False,
             condense_with_llm=False,
+            evidence_rules_version=evidence_rules_version,
         )
         self.events: list[str] = []
         self.prepared_memory: list[str] = []
@@ -208,13 +209,14 @@ class _TrackingAssistant(LegalChatAssistant):
 
 
 class _AssistantHarness:
-    def __init__(self, retriever: _ProviderFreeRetriever) -> None:
+    def __init__(self, retriever: _ProviderFreeRetriever, *, evidence_rules_version="general-reference-v2") -> None:
         self.retriever = retriever
         self.assistants: list[_TrackingAssistant] = []
         self.clients: list[_CountingAnswerClient] = []
+        self.evidence_rules_version = evidence_rules_version
 
     def build(self) -> _TrackingAssistant:
-        assistant = _TrackingAssistant(self.retriever)
+        assistant = _TrackingAssistant(self.retriever, evidence_rules_version=self.evidence_rules_version)
         client = _CountingAnswerClient()
         assistant.llm = client
         self.assistants.append(assistant)
@@ -435,6 +437,7 @@ def _manifest(
     adaptive_use_llm: bool = False,
     normalizer_retries: int = 0,
     condense_with_llm: bool = False,
+    evidence_rules_version: str | None = None,
 ) -> dict[str, Any]:
     manifest_cases = raw_cases if raw_cases is not None else build_manifest_cases(cases)
     provider_limits = {kind: 1 for kind in EXTERNAL_CALL_KINDS}
@@ -501,6 +504,11 @@ def _manifest(
             "retrieval": {
                 "kind": "m2-adapter-provider-free",
                 "parameters": {"top_k": 3},
+                **({"query_analysis": {
+                    "version": "rules-v1",
+                    "reference_rules_version": evidence_rules_version.replace("general-reference", "legal-reference"),
+                    "evidence_rules_version": evidence_rules_version,
+                }} if evidence_rules_version is not None else {}),
                 "filters": {},
                 "scope": {
                     "configured": False,
@@ -591,6 +599,42 @@ def _total_client_calls(harness: _AssistantHarness) -> int:
 
 def _actual_provider_attempts(result: dict[str, Any]) -> int:
     return sum(item["attempted"] for item in result["call_ledger"]["actual"].values())
+
+
+def test_explicit_v3_runtime_uses_frozen_current_request_selection(tmp_path: Path) -> None:
+    case = _case(question="材料提到《合成旧法》第十条。请解释《合成规则》第一条规定什么？")
+    manifest = _manifest([case], generate=False, evidence_rules_version="general-reference-v3")
+    harness = _AssistantHarness(_ProviderFreeRetriever(), evidence_rules_version="general-reference-v3")
+    factory = LegalEvaluationRuntimeFactory(
+        _spec(manifest, ExactStageCache(tmp_path / "cache"), harness, generate=False)
+    )
+    store, summary = _run(tmp_path / "run", manifest, factory, cache_mode="fresh")
+    assert summary.status == "succeeded"
+    result = _completed_result(store, case.case_id)
+    evidence = result["output"]["scoring_facts"]["evidence_check"]["payload"]
+    assert evidence["rules_version"] == "general-reference-v3"
+    assert evidence["mechanical_check"]["missing_pairs"] == []
+    assert evidence["mechanical_check"]["reference_coverage_status"] == "complete"
+    assert _total_client_calls(harness) == 0
+    assert _actual_provider_attempts(result) == 0
+
+
+@pytest.mark.parametrize("manifest_version,assistant_version", [
+    (None, "general-reference-v3"),
+    ("general-reference-v3", "general-reference-v2"),
+])
+def test_runtime_cannot_upgrade_or_downgrade_frozen_evidence_version(
+    tmp_path: Path, manifest_version: str | None, assistant_version: str,
+) -> None:
+    manifest = _manifest([_case()], generate=False, evidence_rules_version=manifest_version)
+    harness = _AssistantHarness(_ProviderFreeRetriever(), evidence_rules_version=assistant_version)
+    factory = LegalEvaluationRuntimeFactory(
+        _spec(manifest, ExactStageCache(tmp_path / "cache"), harness, generate=False)
+    )
+    with pytest.raises(ExperimentContractError, match="evidence rules differ"):
+        factory(plan_work_units(manifest)[0], None, RunnerControls(cache_mode="fresh"))
+    assert _total_client_calls(harness) == 0
+    assert harness.retriever.queries == []
 
 
 def test_manifest_case_builder_binds_the_complete_evaluation_case() -> None:

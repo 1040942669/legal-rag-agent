@@ -213,6 +213,7 @@ def _make_assistant(retriever: BM25Retriever) -> LegalChatAssistant:
         adaptive_use_llm=False,
         normalizer_retries=0,
         condense_with_llm=False,
+        evidence_rules_version="general-reference-v2",
     )
 
 
@@ -412,6 +413,7 @@ def _score_case(item: dict, generated: Any, verified: Any, usage: dict, elapsed:
         item["case"].question,
         list(retrieved.results),
         analysis=retrieved.prepared.analysis,
+        rules_version="general-reference-v2",
     )
     return score_completed_case(
         CompletedCaseOutcome(

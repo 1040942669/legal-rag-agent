@@ -142,6 +142,7 @@ def evaluate_arm(case, retriever, *, run_id: str) -> dict[str, Any]:
         retriever, model="retrieval-only", top_k=TOP_K,
         adaptive_enabled=False, adaptive_use_llm=False, condense_with_llm=False,
         completion_client=client,
+        evidence_rules_version="general-reference-v2",
     )
     started = time.perf_counter()
     try:
@@ -149,7 +150,7 @@ def evaluate_arm(case, retriever, *, run_id: str) -> dict[str, Any]:
         retrieved = assistant.retrieve_turn(prepared, max_followup_rounds=0)
         results = list(retrieved.results)
         evidence = retrieved.evidence_check or check_evidence_sufficiency(
-            case.question, results, analysis=prepared.analysis,
+            case.question, results, analysis=prepared.analysis, rules_version="general-reference-v2",
         )
         elapsed_ms = (time.perf_counter() - started) * 1000
         if client.usage.calls:

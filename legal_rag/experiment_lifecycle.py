@@ -43,7 +43,7 @@ from .experiment_runtime import (
 from .experiment_store import ArtifactConflictError, ExperimentStore
 from .llm import CompletionUsage
 from .models import Chunk, LawArticle
-from .retrieval import BM25Retriever, DEFAULT_BM25_LEXICAL_PROFILE, bm25_text_versions
+from .bm25_settings import BM25Settings, build_bm25_retriever, resolve_bm25_settings
 
 
 LIFECYCLE_PLAN_SCHEMA_VERSION = 1
@@ -238,10 +238,12 @@ _IMPLEMENTATION_FILES: Mapping[str, tuple[str, ...]] = {
     "query_analysis": (
         "legal_rag/query.py",
         "legal_rag/query_understanding.py",
+        "legal_rag/request_policy.py",
         "legal_rag/adaptive.py",
         "legal_rag/planning.py",
         "legal_rag/models.py",
         "legal_rag/legal_references.py",
+        "legal_rag/legacy_reference_v2.py",
         "legal_rag/reference_evidence.py",
         "legal_rag/retrieval_contracts.py",
         "legal_rag/retrieval_outcomes.py",
@@ -251,10 +253,14 @@ _IMPLEMENTATION_FILES: Mapping[str, tuple[str, ...]] = {
     "embedding": ("legal_rag/embeddings.py",),
     "retrieval": (
         "legal_rag/retrieval.py",
+        "legal_rag/chinese_bm25.py",
+        "legal_rag/bm25_settings.py",
+        "legal_rag/request_policy.py",
         "legal_rag/evidence.py",
         "legal_rag/adaptive.py",
         "legal_rag/models.py",
         "legal_rag/legal_references.py",
+        "legal_rag/legacy_reference_v2.py",
         "legal_rag/reference_evidence.py",
         "legal_rag/retrieval_contracts.py",
         "legal_rag/retrieval_outcomes.py",
@@ -264,6 +270,9 @@ _IMPLEMENTATION_FILES: Mapping[str, tuple[str, ...]] = {
     ),
     "rerank": ("legal_rag/rerank.py",),
     "generation": (
+        "legal_rag/request_policy.py",
+        "legal_rag/legal_references.py",
+        "legal_rag/legacy_reference_v2.py",
         "legal_rag/chat.py",
         "legal_rag/chat_artifacts.py",
         "legal_rag/llm.py",
@@ -279,6 +288,8 @@ _IMPLEMENTATION_FILES: Mapping[str, tuple[str, ...]] = {
         "legal_rag/experiment_adapter.py",
     ),
     "verification": (
+        "legal_rag/request_policy.py",
+        "legal_rag/legacy_reference_v2.py",
         "legal_rag/verifier.py",
         "legal_rag/evidence.py",
         "legal_rag/models.py",
@@ -453,8 +464,10 @@ def _resolve_input_path(value: str | Path, repository_root: Path) -> Path:
     return path.resolve() if path.is_absolute() else (repository_root / path).resolve()
 
 
-def _manifest_contracts(*, top_k: int, judge_enabled: bool) -> dict[str, Any]:
-    query_version, document_version = bm25_text_versions(DEFAULT_BM25_LEXICAL_PROFILE)
+def _manifest_contracts(*, top_k: int, judge_enabled: bool, bm25_settings: BM25Settings | None = None,
+                        evidence_rules_version: str = "general-reference-v3") -> dict[str, Any]:
+    settings = bm25_settings or resolve_bm25_settings()
+    query_version, document_version = settings.identity["query_text_version"], settings.identity["document_text_version"]
     return {
         "chunking": {"strategy": "article", "version": "article-v1"},
         "embedding": {
@@ -467,14 +480,16 @@ def _manifest_contracts(*, top_k: int, judge_enabled: bool) -> dict[str, Any]:
         },
         "retrieval": {
             "kind": "bm25",
-            "parameters": {"top_k": top_k},
+            "parameters": {"top_k": top_k, "bm25_settings": settings.to_dict()},
             "filters": {},
             "scope": {
                 "configured": False,
                 "snapshot_id": None,
                 "allowed_scope_ids": None,
             },
-            "query_analysis": {"version": "rules-v1"},
+            "query_analysis": {"version": "rules-v1", "reference_rules_version":
+                               "legal-reference-v3" if evidence_rules_version == "general-reference-v3" else "legal-reference-v2",
+                               "evidence_rules_version": evidence_rules_version},
         },
         "rerank": {"enabled": False, "config": {}},
         "generation": {
@@ -527,10 +542,16 @@ def build_lifecycle_plan(
     allow_external_calls: bool = False,
     created_at: str | None = None,
     manifest_environment: Mapping[str, Any] | None = None,
+    bm25_settings: BM25Settings | None = None,
+    evidence_rules_version: str = "general-reference-v3",
 ) -> dict[str, Any]:
     """Build but do not persist a registry-backed experiment manifest."""
 
     root = resolve_repository_root(repository_root)
+    settings = bm25_settings or resolve_bm25_settings()
+    if not isinstance(settings, BM25Settings) or evidence_rules_version not in {"general-reference-v2", "general-reference-v3"}:
+        raise ExperimentLifecycleError("invalid frozen retrieval configuration")
+    settings = BM25Settings.from_dict(settings.to_dict())
     if mode not in MODE_ORDER:
         raise ExperimentLifecycleError(f"unsupported experiment mode: {mode!r}")
     top_k = _positive_int("top_k", top_k)
@@ -580,6 +601,8 @@ def build_lifecycle_plan(
         "adaptive_normalizer_retries": 0,
         "condense_with_llm": False,
         "semantic_policy": None,
+        "bm25_settings": settings.to_dict(),
+        "evidence_rules_version": evidence_rules_version,
         "provider_timeouts": {"assistant": None, "judge": None, "adaptive": None},
     }
     runtime = {
@@ -603,7 +626,8 @@ def build_lifecycle_plan(
             "file_count": corpus.file_count,
         },
         dataset=selection.dataset.manifest_payload(),
-        contracts=_manifest_contracts(top_k=top_k, judge_enabled=judge_enabled),
+        contracts=_manifest_contracts(top_k=top_k, judge_enabled=judge_enabled, bm25_settings=settings,
+                                      evidence_rules_version=evidence_rules_version),
         runtime=runtime,
         environment=dict(manifest_environment or execution_environment()),
         created_at=created_at or utc_now(),
@@ -679,6 +703,9 @@ def _rebuild_from_manifest(
         manifest_environment=(
             stored_manifest["environment"] if preserve_manifest_envelope else None
         ),
+        bm25_settings=(BM25Settings.from_dict(summary["bm25_settings"]) if "bm25_settings" in summary
+                       else BM25Settings(lexical_profile="legacy-v1", deprecated_penalty=1)),
+        evidence_rules_version=summary.get("evidence_rules_version", "general-reference-v2"),
     )
     corpus = build_corpus_snapshot(
         selected_corpus,
@@ -702,8 +729,31 @@ def _runtime_factory(
         raise ExperimentLifecycleError(
             "provider-free lifecycle cannot execute an external-call manifest"
         )
-    retriever = BM25Retriever(list(corpus.chunks))
     summary = manifest["config"]["summary"]
+    parameters = manifest["contracts"]["retrieval"]["parameters"]
+    query_contract = manifest["contracts"]["retrieval"]["query_analysis"]
+    if "bm25_settings" in summary or "bm25_settings" in parameters:
+        if summary.get("bm25_settings") != parameters.get("bm25_settings"):
+            raise ExperimentLifecycleError("retrieval configuration differs from the frozen contract")
+        try:
+            settings = BM25Settings.from_dict(summary["bm25_settings"])
+        except (TypeError, ValueError) as exc:
+            raise ExperimentLifecycleError("invalid or drifted frozen retrieval configuration") from exc
+        evidence_version = summary.get("evidence_rules_version")
+        reference_version = "legal-reference-v3" if evidence_version == "general-reference-v3" else "legal-reference-v2"
+        if evidence_version not in {"general-reference-v2", "general-reference-v3"} or (
+            query_contract.get("evidence_rules_version") != evidence_version
+            or query_contract.get("reference_rules_version") != reference_version
+        ):
+            raise ExperimentLifecycleError("evidence configuration differs from the frozen contract")
+    else:
+        # Explicit original lifecycle shape: old kernel and original service
+        # multiplier. Resume with changed manifests/code still fails closed.
+        if set(parameters) != {"top_k"} or set(query_contract) != {"version"}:
+            raise ExperimentLifecycleError("historical retrieval configuration is unsupported")
+        settings = BM25Settings(lexical_profile="legacy-v1", deprecated_penalty=1)
+        evidence_version = "general-reference-v2"
+    retriever = build_bm25_retriever(corpus.chunks, settings)
     model = manifest["contracts"]["generation"]["model"]
 
     def assistant_factory() -> LegalChatAssistant:
@@ -719,6 +769,7 @@ def _runtime_factory(
             normalizer_retries=summary["adaptive_normalizer_retries"],
             condense_with_llm=summary["condense_with_llm"],
             completion_client=_ProviderForbiddenCompletionClient(),
+            evidence_rules_version=evidence_version,
         )
 
     return LegalEvaluationRuntimeFactory(
@@ -802,6 +853,8 @@ def run_experiment(
     max_retries: int = 0,
     random_seed: int = 42,
     stop_after_completed: int | None = None,
+    bm25_settings: BM25Settings | None = None,
+    evidence_rules_version: str = "general-reference-v3",
 ) -> LifecycleExecution:
     root = resolve_repository_root(repository_root)
     plan = build_lifecycle_plan(
@@ -818,6 +871,8 @@ def run_experiment(
         random_seed=random_seed,
         judge_enabled=False,
         allow_external_calls=False,
+        bm25_settings=bm25_settings,
+        evidence_rules_version=evidence_rules_version,
     )
     if not plan["runnable"]:
         raise ExperimentLifecycleError(plan["blocked_reason"])

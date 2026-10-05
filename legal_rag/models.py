@@ -119,7 +119,7 @@ class EvidenceCheck:
     checked_result_count: int
     covered_laws: list[str] = field(default_factory=list)
     covered_articles: list[str] = field(default_factory=list)
-    rules_version: str = "general-reference-v2"
+    rules_version: str = "general-reference-v3"
     mechanical_check: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:

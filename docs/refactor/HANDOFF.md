@@ -4,13 +4,17 @@
 
 2026-10-06 用户授权先研究中文 BM25、编写 TODO、逐项实施并推送 GitHub。当前任务以 `STATE.json.chinese_retrieval_optimization` 和 [优化清单](CHINESE_RETRIEVAL_TODO.md) 为准。下文 local-only 是前轮历史范围，不限制本次已明确授权的 commit/push/review PR；本次不新建 Release、不移动 Tag、不进入 M7、不进行真实模型调用。
 
-核验 HEAD、origin/master 及远端默认 master 均为 `4d9546e06cfe8ff44660943ffd2dd353ac2e61cc`，没有打开的 PR。已有 Smoke、lexical、W1-W8 未提交改动完整保留，先建立 `codex/chinese-bm25-optimization` 分支和前置提交。新实现与比较尚未完成，不能借用下文旧门禁宣称通过。
+开始时核验 HEAD、origin/master 及远端默认 master 均为 `4d9546e06cfe8ff44660943ffd2dd353ac2e61cc`。已有 Smoke、lexical、W1-W8 改动完整保存为前置提交 `914a7e322d2787ec99a2fe1f1117ad5906244e02`。本轮分支 `codex/chinese-bm25-optimization`，最新已核验推送 `e55a6a42da65549d3d1c2b2e241dd0759cd9f662`，对应 [Draft PR #31](https://github.com/1040942669/legal-rag-agent/pull/31)；尚有T4-T7接线未提交，不把阶段性head当最终候选。
+
+两次预冻结比较已完成，见 [本轮报告](../../reports/refactor/CHINESE_BM25_OPTIMIZATION.md)。首轮jieba search72/108低于legacy76/108；第二轮成熟sklearn char83/108，但MRR@5 .597065低于legacy .610184，不满足预声明自动推广条件。已询问用户是否接受维护/召回与排序取舍、保留候选或继续SmartCN；未回复前默认未变。真实模型新调用0，没有动旧输出或gold。
+
+当前重点：完成现代配置身份、历史规则分派、风险advisory、引用局部选择、目录完整标题修复后的累计门禁和隔离PG恢复；最后更新README/CHANGELOG/STATE/报告并commit/push。`c562eec`的CI因测试入口路径失败已定位，本地脚本入口16项通过；`e55a6a4`的CI `37352214591` 正在运行，不能标绿。原失败证据均保留。
 
 只读审计已复现风险词误拒、引用后置否定/转述误归属、分数重标度导致充分性翻转，以及目录与查询标题合同不一致。现有相关五个测试文件216 passed，不覆盖新增反例。实施收敛为成熟评分/分词组件、必要配置与版本适配、规则裁决权收缩；不添加通用意图框架或未经性能测量支持的共享缓存。
 
-> 当前工作以最前面的通用证据改善及 `STATE.json.general_evidence_improvements` 为准。下面的 lexical 与两份 live Smoke 交接是不可变历史实验，不代表当前候选验收。M6 保持 released，M7 未开始；旧发布与门禁不能替代当前未提交候选的验证。
+> 以下是前轮历史状态，以各自原始权限和提交时点解释；当前任务只以最上面的中文检索节点为准。M6 保持 released，M7 未开始；旧发布与门禁不能替代当前候选验证。
 
-## 当前本地改善：通用证据合同与受控服务接线
+## 前轮历史改善：通用证据合同与受控服务接线
 
 - 当前分支 `codex/general-rag-improvements`，HEAD/基线为 `4d9546e06cfe8ff44660943ffd2dd353ac2e61cc`，dirty=true。保留既有未提交 Smoke/lexical 代码，不 reset/stash/覆盖；本次未 commit/push/PR/合并/Tag/Release。
 - 用户要求完整设计、复核、择优实施，选择 [ADR-006](decisions/ADR-006-general-evidence-first-improvements.md) 的 W1 至 W8。适用的本地工程实施、独立复核、修复候选运行时门禁及已观察的结果文档静态3/3已完成，原源码scope与27个critical文件身份未变；结果回写后仅重验同组静态。这不是法律质量验收、生产证明或新 Release。真实 RED/GREEN 与处理链见 [独立改善验收记录](../../reports/refactor/GENERAL_EVIDENCE_IMPROVEMENTS.md)。

@@ -101,6 +101,8 @@ M6_SMOKE_MODULES: Final = (
 )
 GENERAL_MIGRATION_HEAD: Final = "0008_execution_money"
 GENERAL_SMOKE_MODULES: Final = (
+    "legal_rag.bm25_settings", "legal_rag.chinese_bm25",
+    "legal_rag.request_policy", "legal_rag.legacy_reference_v2",
     "legal_rag.legal_references", "legal_rag.reference_evidence",
     "legal_rag.retrieval_outcomes", "legal_rag.semantic",
     "legal_rag.evaluation_governance", "legal_rag.governed_protocol",

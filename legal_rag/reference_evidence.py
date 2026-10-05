@@ -13,7 +13,8 @@ from .legal_references import (
 from .models import SearchResult
 
 
-REFERENCE_EVIDENCE_RULES_VERSION = "reference-evidence-v1"
+REFERENCE_EVIDENCE_RULES_VERSION = "reference-evidence-v2"
+REFERENCE_EVIDENCE_RULES_VERSIONS = frozenset({"reference-evidence-v1", REFERENCE_EVIDENCE_RULES_VERSION})
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +28,7 @@ class MechanicalEvidenceCheck:
     reasons: tuple[str, ...]
     checked_result_count: int
     analysis_fingerprint: str
+    rules_version: str = REFERENCE_EVIDENCE_RULES_VERSION
 
     @property
     def sufficient(self) -> bool:
@@ -37,7 +39,7 @@ class MechanicalEvidenceCheck:
         return "not_checked"
 
     def to_dict(self) -> dict[str, Any]:
-        return {"rules_version": REFERENCE_EVIDENCE_RULES_VERSION,
+        return {"rules_version": self.rules_version,
                 "candidate_available": self.candidate_available, "scores_valid": self.scores_valid,
                 "scope_status": self.scope_status, "reference_coverage_status": self.reference_coverage_status,
                 "missing_pairs": [item.to_dict() for item in self.missing_pairs],
@@ -81,7 +83,10 @@ def _finite(value: object) -> bool:
 def check_reference_evidence(
     analysis: ReferenceAnalysis, results: Sequence[SearchResult], *,
     snapshot_id: str | None = None, allowed_scope_ids: Sequence[str] | None = None,
+    rules_version: str = REFERENCE_EVIDENCE_RULES_VERSION,
 ) -> MechanicalEvidenceCheck:
+    if rules_version not in REFERENCE_EVIDENCE_RULES_VERSIONS:
+        raise ValueError("unsupported mechanical evidence rules")
     if not isinstance(analysis, ReferenceAnalysis):
         raise ValueError("reference analysis must be typed")
     if isinstance(results, (str, bytes)) or any(not isinstance(result, SearchResult) for result in results):
@@ -109,9 +114,14 @@ def check_reference_evidence(
     if not permitted:
         reasons.append("no_retrieved_evidence")
     scores_valid = all(_finite(result.score) for result in results)
+    if scores_valid and rules_version == REFERENCE_EVIDENCE_RULES_VERSION:
+        # These backends only emit positive matches. Cosine similarities may
+        # legitimately be zero/negative; positivity is not a universal cutoff.
+        scores_valid = all(result.score > 0 for result in results
+                           if result.retriever in {"bm25", "rrf", "hybrid", "exact_reference"})
     if not scores_valid:
         reasons.append("invalid_scores")
-    elif permitted and max(result.score for result in permitted) <= 0.01:
+    elif rules_version == "reference-evidence-v1" and permitted and max(result.score for result in permitted) <= 0.01:
         reasons.append("low_scores")
     covered_laws = {law for result in permitted for law in _canonical_laws(result)}
     missing_laws = tuple(law for law in analysis.required_law_titles if law not in covered_laws)
@@ -129,4 +139,4 @@ def check_reference_evidence(
         coverage = "not_requested"
     return MechanicalEvidenceCheck(bool(permitted), scores_valid, scope_status, coverage,
                                     missing_pairs, missing_laws, tuple(dict.fromkeys(reasons)),
-                                    len(permitted), analysis.fingerprint)
+                                    len(permitted), analysis.fingerprint, rules_version)
