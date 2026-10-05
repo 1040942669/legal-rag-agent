@@ -5,6 +5,7 @@ from copy import deepcopy
 import hashlib
 import json
 import math
+from importlib.metadata import version
 
 import bm25s
 import jieba
@@ -205,3 +206,130 @@ def test_engine_only_formula_diagnostic_matches_historical_atire_lucene_combinat
         scores = library.get_scores(terms)
         for index, item in enumerate(chunks):
             assert float(scores[index]) == pytest.approx(old_rows.get(item.chunk_id, 0.0), rel=1e-12, abs=1e-12)
+
+
+@pytest.mark.parametrize("mode,ngrams,profile", [
+    ("char", [1, 1], "bm25s-sklearn-char-v1"),
+    ("char-bigram", [1, 2], "bm25s-sklearn-char-bigram-v1"),
+])
+def test_character_analyzers_are_library_features_with_explicit_non_applicable_hmm(mode, ngrams, profile):
+    from sklearn.feature_extraction.text import CountVectorizer
+
+    original = chunk("target", "甲打乙，乙打甲 ABC。", laws=("合成甲法",), articles=("第十条",))
+    retriever = ChineseBM25Retriever([original], mode=mode)
+    reference = CountVectorizer(analyzer="char", ngram_range=tuple(ngrams)).build_analyzer()
+    expected = tuple(token for token in reference(retriever.index_texts[0])
+                     if any(character.isalnum() for character in token))
+    assert retriever.document_tokens == (expected,)
+    assert retriever.hmm is None
+    assert retriever.lexical_profile == profile
+    assert retriever._segmenter is None
+    assert "，" not in expected
+    assert "a" in expected and "A" not in expected
+    if mode == "char-bigram":
+        # Standard char n-grams retain mixed punctuation/letter features. The
+        # adapter's shared alnum eligibility is not custom punctuation splitting.
+        assert "乙，" in expected
+        assert "甲打" in expected and "打乙" in expected
+    rows = retriever.retrieve("甲打乙")
+    assert rows and rows[0].chunk is original
+    assert rows[0].trace["tokenizer"] == "sklearn"
+    assert rows[0].trace["hmm"] is None
+    assert rows[0].trace["lexical_profile"] == profile
+    assert rows[0].score == float(retriever._engine.get_scores(
+        list(dict.fromkeys(retriever._tokens("甲打乙"))))[0])
+
+
+@pytest.mark.parametrize("mode", ["char", "char-bigram"])
+def test_character_identity_is_complete_defensive_and_requires_no_jieba_dictionary(monkeypatch, mode):
+    import legal_rag.chinese_bm25 as adapter
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("character identity must not read jieba resources")
+    monkeypatch.setattr(adapter, "_dependency_identity", forbidden)
+    identity = chinese_bm25_identity(mode=mode)
+    tokenizer = identity["tokenizer"]
+    assert tokenizer["name"] == "sklearn"
+    assert tokenizer["version"] == version("scikit-learn")
+    assert tokenizer["implementation"] == "CountVectorizer.build_analyzer"
+    assert tokenizer["analyzer"] == "char"
+    assert tokenizer["ngram_range"] == ([1, 1] if mode == "char" else [1, 2])
+    assert tokenizer["lowercase"] is True
+    assert tokenizer["strip_accents"] is tokenizer["preprocessor"] is tokenizer["tokenizer"] is None
+    assert tokenizer["stop_words"] is None and tokenizer["stop_words_applicable"] is False
+    assert tokenizer["hmm"] is None and tokenizer["hmm_applicable"] is False
+    assert tokenizer["normalization"] == "CountVectorizer defaults; keep tokens containing alnum"
+    assert identity["index_text_version"] == "law-titles-article-labels-body-newlines-v1"
+    assert identity["engine"]["method"] == identity["engine"]["idf_method"] == "lucene"
+    retriever = ChineseBM25Retriever([], mode=mode, hmm=None)
+    assert retriever.config_identity == identity
+    tokenizer["ngram_range"][1] = 99
+    assert retriever.config_identity == chinese_bm25_identity(mode=mode, hmm=None)
+    assert retriever.query_text_version != "jieba-unique-lower-alnum-v1"
+
+
+@pytest.mark.parametrize("mode", ["char", "char-bigram"])
+@pytest.mark.parametrize("hmm", [True, False, 1, "true"])
+def test_character_analyzers_reject_explicit_hmm_parameters(mode, hmm):
+    with pytest.raises(ValueError, match="hmm"):
+        chinese_bm25_identity(mode=mode, hmm=hmm)
+
+
+def test_character_modes_have_distinct_order_features_and_configuration_identities():
+    source = [chunk("a", "甲打乙"), chunk("b", "乙打甲")]
+    chars = ChineseBM25Retriever(source, mode="char")
+    bigrams = ChineseBM25Retriever(source, mode="char-bigram")
+    assert chars.document_tokens[0] != chars.document_tokens[1]
+    assert set(chars.document_tokens[0]) == set(chars.document_tokens[1])
+    assert set(bigrams.document_tokens[0]) != set(bigrams.document_tokens[1])
+    assert chars.retrieve("甲打乙")[0].score == chars.retrieve("甲打乙")[1].score
+    assert bigrams.retrieve("甲打乙")[0].chunk.chunk_id == "a"
+    assert bigrams.retrieve("乙打甲")[0].chunk.chunk_id == "b"
+    assert chars.fingerprint != bigrams.fingerprint
+
+
+@pytest.mark.parametrize("mode", ["char", "char-bigram"])
+def test_character_query_unique_document_tf_empty_unknown_ties_and_concurrency(mode):
+    a, b = chunk("a", "甲甲，甲甲"), chunk("b", "甲甲，甲甲")
+    retriever = ChineseBM25Retriever([b, a], mode=mode)
+    assert retriever.document_tokens[0].count("甲") == 4
+    if mode == "char-bigram":
+        assert retriever.document_tokens[0].count("甲甲") == 2
+    assert retriever.retrieve("甲甲")[0].score == retriever.retrieve("甲甲甲甲")[0].score
+    assert [row.chunk.chunk_id for row in retriever.retrieve("甲甲", top_k=1)] == ["a"]
+    assert ChineseBM25Retriever([], mode=mode).retrieve("甲") == []
+    for text in ("", " \n\t", "，。", "zyxwvu"):
+        assert retriever.retrieve(text) == []
+    before = dict(retriever._engine.vocab_dict)
+    queries = ["甲", "甲甲", "甲甲甲甲", "zyxwvu"] * 3
+    expected = [[(row.chunk.chunk_id, row.score) for row in retriever.retrieve(query)] for query in queries]
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        actual = list(pool.map(lambda query: [(row.chunk.chunk_id, row.score)
+                                              for row in retriever.retrieve(query)], queries))
+    assert actual == expected
+    assert retriever._engine.vocab_dict == before
+
+
+@pytest.mark.parametrize("mode", ["precise", "search"])
+def test_jieba_identity_and_default_hmm_remain_exactly_compatible(mode):
+    import legal_rag.chinese_bm25 as adapter
+
+    resources = adapter._dependency_identity()
+    expected = {
+        "schema_version": 1,
+        "engine": {"name": "bm25s", "version": resources["bm25s_version"],
+                   "method": "lucene", "idf_method": "lucene", "k1": 1.5, "b": 0.75,
+                   "backend": "numpy", "dtype": "float64"},
+        "tokenizer": {"name": "jieba", "version": resources["jieba_version"], "mode": mode, "hmm": True,
+                      "dictionary": "jieba/dict.txt", "dictionary_sha256": resources["dictionary_sha256"],
+                      "hmm_resource_sha256": resources["hmm_resource_sha256"],
+                      "stopwords": [], "normalization": "lower; keep tokens containing alnum"},
+        "index_text_version": "law-titles-article-labels-body-newlines-v1",
+        "query_text_version": "jieba-unique-lower-alnum-v1",
+        "document_text_version": "jieba-tf-lower-alnum-v1",
+    }
+    assert chinese_bm25_identity(mode=mode) == expected
+    assert chinese_bm25_identity(mode=mode, hmm=True) == expected
+    assert ChineseBM25Retriever([], mode=mode).config_identity == expected
+    with pytest.raises(ValueError, match="hmm"):
+        ChineseBM25Retriever([], mode=mode, hmm=None)

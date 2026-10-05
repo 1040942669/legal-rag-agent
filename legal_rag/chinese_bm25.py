@@ -23,6 +23,9 @@ from .retrieval_contracts import validate_retrieval_top_k
 QUERY_TEXT_VERSION = "jieba-unique-lower-alnum-v1"
 DOCUMENT_TEXT_VERSION = "jieba-tf-lower-alnum-v1"
 INDEX_TEXT_VERSION = "law-titles-article-labels-body-newlines-v1"
+CHAR_QUERY_TEXT_VERSION = "sklearn-char-ngrams-unique-lower-alnum-v1"
+CHAR_DOCUMENT_TEXT_VERSION = "sklearn-char-ngrams-tf-lower-alnum-v1"
+_DEFAULT_HMM = object()
 
 
 def _parameter(value: Real, name: str, *, lower: float, upper: float | None = None) -> float:
@@ -54,15 +57,40 @@ def _dependency_identity() -> dict:
 
 
 def chinese_bm25_identity(
-    *, mode: str = "search", k1: float = 1.5, b: float = 0.75, hmm: bool = True,
+    *, mode: str = "search", k1: float = 1.5, b: float = 0.75,
+    hmm: bool | None | object = _DEFAULT_HMM,
 ) -> dict:
     """Freeze analyzer/engine settings without building an index or reading cases."""
-    if not isinstance(mode, str) or mode not in {"precise", "search"}:
-        raise ValueError("mode must be precise or search")
-    if type(hmm) is not bool:
+    if not isinstance(mode, str) or mode not in {"precise", "search", "char", "char-bigram"}:
+        raise ValueError("mode must be precise, search, char or char-bigram")
+    character_mode = mode in {"char", "char-bigram"}
+    if hmm is _DEFAULT_HMM:
+        hmm = None if character_mode else True
+    if character_mode and hmm is not None:
+        raise ValueError("hmm is not applicable to character analyzers; use None")
+    if not character_mode and type(hmm) is not bool:
         raise ValueError("hmm must be a boolean")
     k1 = _parameter(k1, "k1", lower=0)
     b = _parameter(b, "b", lower=0, upper=1)
+    if character_mode:
+        return {
+            "schema_version": 1,
+            "engine": {"name": "bm25s", "version": version("bm25s"),
+                       "method": "lucene", "idf_method": "lucene", "k1": k1, "b": b,
+                       "backend": "numpy", "dtype": "float64"},
+            "tokenizer": {"name": "sklearn", "version": version("scikit-learn"),
+                          "implementation": "CountVectorizer.build_analyzer",
+                          "mode": mode, "analyzer": "char",
+                          "ngram_range": [1, 1] if mode == "char" else [1, 2],
+                          "lowercase": True, "strip_accents": None,
+                          "preprocessor": None, "tokenizer": None,
+                          "stop_words": None, "stop_words_applicable": False,
+                          "hmm": None, "hmm_applicable": False,
+                          "normalization": "CountVectorizer defaults; keep tokens containing alnum"},
+            "index_text_version": INDEX_TEXT_VERSION,
+            "query_text_version": CHAR_QUERY_TEXT_VERSION,
+            "document_text_version": CHAR_DOCUMENT_TEXT_VERSION,
+        }
     resources = _dependency_identity()
     return {
         "schema_version": 1,
@@ -97,7 +125,7 @@ class ChineseBM25Retriever:
         mode: str = "search",
         k1: float = 1.5,
         b: float = 0.75,
-        hmm: bool = True,
+        hmm: bool | None | object = _DEFAULT_HMM,
     ) -> None:
         self._config_identity = chinese_bm25_identity(mode=mode, k1=k1, b=b, hmm=hmm)
         k1 = self._config_identity["engine"]["k1"]
@@ -110,21 +138,33 @@ class ChineseBM25Retriever:
 
         # Lazy dependency imports keep historical retrievers independently usable.
         import bm25s
-        import jieba
 
         self._mode = mode
-        self._hmm = hmm
-        self.query_text_version = QUERY_TEXT_VERSION
-        self.document_text_version = DOCUMENT_TEXT_VERSION
-        resources = Path(jieba.__file__).resolve().parent
-        dictionary = resources / "dict.txt"
+        self._hmm = self._config_identity["tokenizer"]["hmm"]
+        self.query_text_version = self._config_identity["query_text_version"]
+        self.document_text_version = self._config_identity["document_text_version"]
         canonical = json.dumps(self._config_identity, ensure_ascii=False, sort_keys=True,
                                separators=(",", ":"), allow_nan=False)
         self._fingerprint = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-        # This is the packaged default dictionary, not a corpus-derived userdict.
-        # An explicit path avoids jieba's version-agnostic default jieba.cache.
-        self._segmenter = jieba.Tokenizer(dictionary=str(dictionary))
-        self._segmenter.initialize()
+        self._segmenter = None
+        self._analyzer = None
+        if mode in {"char", "char-bigram"}:
+            from sklearn.feature_extraction.text import CountVectorizer
+
+            # Use the mature library's analyzer directly. It is never fitted on
+            # questions and has no custom tokenizer, word list or stopword set.
+            self._analyzer = CountVectorizer(
+                analyzer="char", ngram_range=tuple(self._config_identity["tokenizer"]["ngram_range"]),
+            ).build_analyzer()
+        else:
+            import jieba
+
+            resources = Path(jieba.__file__).resolve().parent
+            dictionary = resources / "dict.txt"
+            # This is the packaged default dictionary, not a corpus-derived userdict.
+            # An explicit path avoids jieba's version-agnostic default jieba.cache.
+            self._segmenter = jieba.Tokenizer(dictionary=str(dictionary))
+            self._segmenter.initialize()
         titles = {
             alias for item in self.chunks for title in item.law_names
             for alias in (title.strip(), title.strip().removeprefix("中华人民共和国").strip())
@@ -151,11 +191,13 @@ class ChineseBM25Retriever:
         return self._mode
 
     @property
-    def hmm(self) -> bool:
+    def hmm(self) -> bool | None:
         return self._hmm
 
     @property
     def lexical_profile(self) -> str:
+        if self.mode in {"char", "char-bigram"}:
+            return f"bm25s-sklearn-{self.mode}-v1"
         return f"bm25s-jieba-{self.mode}-v1"
 
     @property
@@ -163,7 +205,9 @@ class ChineseBM25Retriever:
         return self._fingerprint
 
     def _tokens(self, text: str) -> list[str]:
-        if self.mode == "search":
+        if self._analyzer is not None:
+            words = self._analyzer(text)
+        elif self.mode == "search":
             words = self._segmenter.cut_for_search(text.lower(), HMM=self.hmm)
         else:
             words = self._segmenter.cut(text.lower(), cut_all=False, HMM=self.hmm)
@@ -197,7 +241,8 @@ class ChineseBM25Retriever:
                 chunk=self.chunks[index], score=values[index], rank=rank, retriever=self.name,
                 trace={"score_kind": "bm25", "engine": "bm25s", "method": "lucene",
                        "lexical_profile": self.lexical_profile,
-                       "tokenizer": "jieba", "tokenizer_mode": self.mode, "hmm": self.hmm,
+                       "tokenizer": self._config_identity["tokenizer"]["name"],
+                       "tokenizer_mode": self.mode, "hmm": self.hmm,
                        "config_fingerprint": self.fingerprint,
                        "query_text_version": self.query_text_version,
                        "document_text_version": self.document_text_version,

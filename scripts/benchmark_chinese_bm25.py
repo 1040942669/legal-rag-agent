@@ -20,6 +20,7 @@ PROTOCOL = ROOT / "configs/chinese-bm25-benchmark.json"
 CRITICAL = ("scripts/benchmark_chinese_bm25.py", "configs/chinese-bm25-benchmark.json",
             "legal_rag/chinese_bm25.py", "legal_rag/retrieval.py", "legal_rag/models.py",
             "legal_rag/chunking.py", "legal_rag/evaluation_scoring.py",
+            "legal_rag/evaluation.py", "legal_rag/retrieval_contracts.py",
             "legal_rag/experiment_datasets.py", "legal_rag/evaluation_artifacts.py",
             "scripts/offline_retrieval_ab.py", "pyproject.toml", "uv.lock")
 
@@ -28,8 +29,9 @@ def digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def critical_identity():
-    return {name: digest(ROOT / name) for name in CRITICAL}
+def critical_identity(protocol_path=PROTOCOL):
+    names = (*CRITICAL, str(Path(protocol_path).resolve().relative_to(ROOT)).replace("\\", "/"))
+    return {name: digest(ROOT / name) for name in dict.fromkeys(names)}
 
 
 def write_new(path, value):
@@ -97,8 +99,9 @@ def execute_worker(directory, arm_id):
     import psutil
     manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
     protocol = manifest["protocol"]
+    protocol_path = ROOT / manifest["protocol_path"]
     arm = next(arm for arm in protocol["arms"] if arm["id"] == arm_id)
-    if critical_identity() != manifest["critical_file_sha256"]:
+    if critical_identity(protocol_path) != manifest["critical_file_sha256"]:
         raise ValueError("implementation_changed_before_worker")
     chunks, cases, dataset = load_inputs(protocol)
     if digest(ROOT / protocol["index"]) != manifest["index_sha256"] or dataset.manifest_payload() != manifest["dataset"]:
@@ -137,7 +140,7 @@ def execute_worker(directory, arm_id):
     if peak is None:
         import resource
         peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss * 1024
-    stable = (critical_identity() == manifest["critical_file_sha256"]
+    stable = (critical_identity(protocol_path) == manifest["critical_file_sha256"]
               and digest(ROOT / protocol["index"]) == manifest["index_sha256"]
               and load_inputs(protocol)[2].manifest_payload() == manifest["dataset"])
     result = {"arm_id": arm_id, "config_identity": getattr(retriever, "config_identity", arm),
@@ -154,27 +157,64 @@ def execute_worker(directory, arm_id):
     return 0 if stable and not repeats and result["first_pass"]["error_count"] == 0 else 1
 
 
-def paired_summary(baseline, candidate):
+def paired_summary(baseline, candidate, bootstrap=None):
     from legal_rag.evaluation import bootstrap_ci
     old = {row["case_id"]: row for row in baseline["passes"][0]}
     pairs = [(old[row["case_id"]], row) for row in candidate["passes"][0]]
     valid = [(a, b) for a, b in pairs if a["status"] == b["status"] == "succeeded"
              and a["metrics"] is not None and b["metrics"] is not None]
     deltas = [b["metrics"]["hit_at_5"] - a["metrics"]["hit_at_5"] for a, b in valid]
+    options = bootstrap or {"resamples": 2000, "confidence": .95, "seed": 42}
     return {"paired_quality_denominator": len(valid),
             "improved_case_ids": [b["case_id"] for a, b in valid if b["metrics"]["hit_at_5"] > a["metrics"]["hit_at_5"]],
             "regressed_case_ids": [b["case_id"] for a, b in valid if b["metrics"]["hit_at_5"] < a["metrics"]["hit_at_5"]],
-            "hit_at_5_delta_ci95": list(bootstrap_ci(deltas)) if deltas else None}
+            "hit_at_5_delta_ci95": list(bootstrap_ci(deltas, n_resamples=options["resamples"],
+                                                    confidence=options["confidence"], seed=options["seed"])) if deltas else None}
 
 
-def run(run_id):
+def selection(protocol, results, executions, stable):
+    """No failed, unstable, partial or nondeterministic arm can win."""
+    names = {arm["id"] for arm in protocol["arms"]}
+    complete = bool(names) and set(results) == set(executions) == names and stable
+    if complete:
+        complete = all(executions[name]["exit_code"] == 0
+                       and results[name]["inputs_and_implementation_stable"]
+                       and not results[name]["repeat_mismatch_case_ids"]
+                       and results[name]["first_pass"]["error_count"] == 0
+                       and results[name]["second_pass"]["error_count"] == 0 for name in names)
+    eligible = [results[arm["id"]] for arm in protocol["arms"] if arm["backend"] == "bm25s"] if complete else []
+    ranked = sorted(eligible, key=lambda item: (-item["first_pass"]["metrics"]["hit_at_5"],
+                    -item["first_pass"]["metrics"]["mrr"], item["second_pass"]["query_p95_ms"], item["arm_id"]))
+    selected = ranked[0]["arm_id"] if ranked else None
+    promotable = selected
+    if selected and protocol.get("promotion_requires_legacy_non_regression"):
+        baseline = results["legacy-v1"]["first_pass"]["metrics"]
+        winner = results[selected]["first_pass"]["metrics"]
+        if any(winner[key] < baseline[key] for key in ("hit_at_5", "mrr")):
+            promotable = None
+    return complete, selected, promotable
+
+
+def run_worker(directory, arm, timeout):
+    with (directory / (arm["id"] + ".log")).open("x", encoding="utf-8") as output:
+        try:
+            return subprocess.run([sys.executable, "-B", str(Path(__file__).resolve()), "--worker", arm["id"],
+                                   "--directory", str(directory)], cwd=ROOT, stdout=output,
+                                  stderr=subprocess.STDOUT, timeout=timeout).returncode
+        except subprocess.TimeoutExpired:
+            return "timeout"
+
+
+def run(run_id, protocol_path=PROTOCOL):
     from scripts.offline_retrieval_ab import create_run_directory, input_identity
     from legal_rag.manifest import utc_now
-    protocol = json.loads(PROTOCOL.read_text(encoding="utf-8"))
+    protocol_path = Path(protocol_path).resolve()
+    protocol = json.loads(protocol_path.read_text(encoding="utf-8"))
     chunks, cases, dataset = load_inputs(protocol)
     directory = create_run_directory(ROOT / "artifacts/experiments", run_id)
     manifest = {"run_id": run_id, "created_at": utc_now(), "protocol": protocol,
-                "protocol_sha256": digest(PROTOCOL), "critical_file_sha256": critical_identity(),
+                "protocol_path": str(protocol_path.relative_to(ROOT)).replace("\\", "/"),
+                "protocol_sha256": digest(protocol_path), "critical_file_sha256": critical_identity(protocol_path),
                 "git_head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
                 "index_sha256": digest(ROOT / protocol["index"]), "corpus": input_identity(chunks),
                 "dataset": dataset.manifest_payload(), "actual_calls_policy": "no model client; socket audit guard",
@@ -183,30 +223,20 @@ def run(run_id):
     results, executions = {}, {}
     for arm in protocol["arms"]:
         started = time.perf_counter()
-        try:
-            with (directory / (arm["id"] + ".log")).open("x", encoding="utf-8") as output:
-                completed = subprocess.run([sys.executable, "-B", str(Path(__file__).resolve()), "--worker", arm["id"],
-                                            "--directory", str(directory)], cwd=ROOT,
-                                           stdout=output, stderr=subprocess.STDOUT, timeout=protocol["worker_timeout_seconds"])
-            code = completed.returncode
-        except subprocess.TimeoutExpired:
-            code = "timeout"
+        code = run_worker(directory, arm, protocol["worker_timeout_seconds"])
         executions[arm["id"]] = {"exit_code": code, "elapsed_ms": (time.perf_counter()-started)*1000}
         result_path = directory / (arm["id"] + ".json")
         if result_path.exists():
             results[arm["id"]] = json.loads(result_path.read_text(encoding="utf-8"))
         print(json.dumps({"arm": arm["id"], **executions[arm["id"]]}, ensure_ascii=False), flush=True)
-    completed = all(value["exit_code"] == 0 for value in executions.values()) and len(results) == len(protocol["arms"])
-    stable = critical_identity() == manifest["critical_file_sha256"] and digest(PROTOCOL) == manifest["protocol_sha256"]
-    eligible = [results[name] for name in ("bm25s-jieba-precise", "bm25s-jieba-search")
-                if name in results and executions[name]["exit_code"] == 0]
-    selected = max(eligible, key=lambda item: (item["first_pass"]["metrics"]["hit_at_5"],
-                  item["first_pass"]["metrics"]["mrr"], -item["second_pass"]["query_p95_ms"]))["arm_id"] if completed and stable else None
+    stable = critical_identity(protocol_path) == manifest["critical_file_sha256"] and digest(protocol_path) == manifest["protocol_sha256"]
+    completed, selected, promotable = selection(protocol, results, executions, stable)
     summary = {"run_id": run_id, "status": "completed" if completed and stable else "failed",
                "manifest_sha256": digest(directory / "manifest.json"), "protocol_sha256": manifest["protocol_sha256"],
                "critical_identity_stable": stable, "executions": executions, "selected_modern_arm": selected,
+               "promotion_eligible_modern_arm": promotable,
                "arms": {name: {key: value for key, value in result.items() if key != "passes"} for name, result in results.items()},
-               "paired_vs_legacy": {name: paired_summary(results["legacy-v1"], result) for name, result in results.items()
+               "paired_vs_legacy": {name: paired_summary(results["legacy-v1"], result, protocol["bootstrap"]) for name, result in results.items()
                                     if name != "legacy-v1"} if "legacy-v1" in results else None,
                "actual_provider_calls": 0, "new_model_cost_cny": "0", "limits": protocol["limits"],
                "finished_at": utc_now()}
@@ -219,7 +249,8 @@ def run(run_id):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run-id")
-    parser.add_argument("--worker", choices=("legacy-v1", "generic-v3", "bm25s-jieba-precise", "bm25s-jieba-search"))
+    parser.add_argument("--protocol", type=Path, default=PROTOCOL)
+    parser.add_argument("--worker")
     parser.add_argument("--directory", type=Path)
     args = parser.parse_args()
     for name, value in {"LEGAL_RAG_DISABLE_DOTENV": "1", "PYTHON_DOTENV_DISABLED": "1", "ALLOW_LIVE_MODEL_CALLS": "false",
@@ -232,7 +263,7 @@ def main():
         return execute_worker(args.directory.resolve(), args.worker)
     if not args.run_id:
         parser.error("--run-id is required")
-    return run(args.run_id)
+    return run(args.run_id, args.protocol)
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from scripts.benchmark_chinese_bm25 import aggregate, paired_summary, score_case, write_new
+from scripts.benchmark_chinese_bm25 import aggregate, paired_summary, score_case, write_new, selection, run_worker, critical_identity
 from legal_rag.models import Chunk, EvalCase, SearchResult
 import pytest
 
@@ -44,3 +44,62 @@ def test_new_run_results_never_overwrite_existing_evidence(tmp_path):
     with pytest.raises(FileExistsError):
         write_new(path, {"status": "completed"})
     assert '"failed"' in path.read_text(encoding="utf-8")
+
+
+def selection_inputs():
+    protocol = {"arms": [{"id": "legacy-v1", "backend": "historical"},
+                         {"id": "modern", "backend": "bm25s"}],
+                "promotion_requires_legacy_non_regression": True}
+    results = {}
+    for name in ("legacy-v1", "modern"):
+        results[name] = {"arm_id": name, "inputs_and_implementation_stable": True,
+                         "repeat_mismatch_case_ids": [],
+                         "first_pass": {"error_count": 0, "metrics": {"hit_at_5": .7, "mrr": .6}},
+                         "second_pass": {"error_count": 0, "query_p95_ms": 1}}
+    return protocol, results, {name: {"exit_code": 0} for name in results}
+
+
+@pytest.mark.parametrize("cause", ["exit", "timeout", "missing", "repeat", "drift", "error", "global-drift"])
+def test_partial_failure_or_source_drift_never_selects_a_winner(cause):
+    protocol, results, executions = selection_inputs()
+    if cause == "exit": executions["modern"]["exit_code"] = 1
+    if cause == "timeout": executions["modern"]["exit_code"] = "timeout"
+    if cause == "missing": results.pop("modern")
+    if cause == "repeat": results["modern"]["repeat_mismatch_case_ids"] = ["a"]
+    if cause == "drift": results["modern"]["inputs_and_implementation_stable"] = False
+    if cause == "error": results["modern"]["second_pass"]["error_count"] = 1
+    assert selection(protocol, results, executions, cause != "global-drift") == (False, None, None)
+
+
+@pytest.mark.parametrize("metric", ["hit_at_5", "mrr"])
+def test_best_modern_arm_is_not_promotable_when_either_metric_regresses(metric):
+    protocol, results, executions = selection_inputs()
+    assert selection(protocol, results, executions, True) == (True, "modern", "modern")
+    results["modern"]["first_pass"]["metrics"][metric] -= .01
+    assert selection(protocol, results, executions, True) == (True, "modern", None)
+
+
+def test_worker_timeout_is_recorded_not_converted_to_success(tmp_path, monkeypatch):
+    import subprocess
+    def timeout(*args, **kwargs):
+        raise subprocess.TimeoutExpired("synthetic-worker", 1)
+    monkeypatch.setattr(subprocess, "run", timeout)
+    assert run_worker(tmp_path, {"id": "synthetic"}, 1) == "timeout"
+
+
+def test_source_freeze_includes_actual_scoring_and_contract_dependencies():
+    identity = critical_identity()
+    assert "legal_rag/evaluation.py" in identity
+    assert "legal_rag/retrieval_contracts.py" in identity
+
+
+def test_bootstrap_uses_explicit_protocol_options(monkeypatch):
+    import legal_rag.evaluation as evaluation
+    observed = []
+    def fake(values, **kwargs):
+        observed.append((values, kwargs))
+        return (-1, 1)
+    monkeypatch.setattr(evaluation, "bootstrap_ci", fake)
+    paired_summary({"passes": [[row("a", 0)]]}, {"passes": [[row("a", 1)]]},
+                   {"resamples": 7, "confidence": .8, "seed": 99})
+    assert observed == [([1], {"n_resamples": 7, "confidence": .8, "seed": 99})]
