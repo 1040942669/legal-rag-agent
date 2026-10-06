@@ -22,6 +22,32 @@
   },
   "execution_status": "released",
   "active_milestone": "M6",
+  "engineering_readiness": {
+    "status": "in_progress",
+    "requested_on": "2026-10-07",
+    "target_date": "2026-10-08",
+    "scope": "Finite correctness and demonstrability: run-local lazy lexical construction, semantic observation accounting, vector optional hints, fixed provider-free contract showcase and source-scoped validation; no M7 UI or new release.",
+    "base_sha": "db64d328cb289f4b099c9fc523437fba524809cf",
+    "branch": "codex/chinese-bm25-optimization",
+    "todo": "docs/refactor/ENGINEERING_READINESS_TODO.md",
+    "report": "reports/refactor/ENGINEERING_READINESS_20261008.md",
+    "remote_write_scope": "commit_push_existing_draft_review_pr",
+    "candidate_sha": null,
+    "candidate_status": "targeted_tests_passed_final_validation_pending",
+    "pr": "https://github.com/1040942669/legal-rag-agent/pull/31",
+    "pr_status": "draft",
+    "default_decision": "retain_legacy_v1_with_mature_profiles_opt_in_stop_analyzer_search",
+    "default_promotion_guard_changed": false,
+    "external_model_calls_allowed": false,
+    "new_live_model_calls": 0,
+    "new_model_cost_cny": "0",
+    "personal_materials": "local_only_not_staged_or_published",
+    "final_m2": {"status": "not_run"},
+    "final_pg": {"status": "not_run"},
+    "final_ci": {"status": "not_run"},
+    "release_authorized": false,
+    "m7_started": false
+  },
   "chinese_retrieval_optimization": {
     "status": "in_progress",
     "requested_on": "2026-10-06",
@@ -51,7 +77,7 @@
     "modern_mrr_at_5": 0.5970648148148148,
     "baseline_mrr_at_5": 0.6101842592592592,
     "default_promoted": false,
-    "default_selection_status": "awaiting_user_tradeoff_choice_not_gate_override",
+    "default_selection_status": "retain_legacy_under_delegated_optimization_decision_20261007_not_gate_override",
     "smartcn_comparison": {
       "user_choice": "option_3_finite_smartcn_comparison",
       "status": "completed_no_default_promotion",
@@ -1778,5 +1804,6 @@
   "historical_next_action_before_local_lexical_retrieval": "Stop after the separately authorized citation-prompt repair, bounded live revalidation and actual result handoff. The original patent case and first four drafts live-passed; the repair stopped on fifth-case historical retrieval/response-mode failure: 5 of 9 processed, 4 drafts passed, 4 cases not run. Repair 5 calls plus prior 2 total 7, estimated 0.0070528 CNY, not verified billing. Both fixed ledgers are consumed; do not delete, move, retry or start a third paid run using unused nominal capacity. Final offline M2 gate passed 25/25 with 1191 tests and 157 subtests; the earlier doc-link gate failure remains recorded. Changes remain uncommitted on codex/live-smoke-qwen35b at base 4d9546e06cfe8ff44660943ffd2dd353ac2e61cc; no remote writes or new release. Further retrieval/semantic-evidence work needs separately defined scope and quality evidence; any new paid run requires explicit authorization. Do not expand to 30 cases, Judge, a new model or M7. Existing M5/M6 software tags, receipts and releases remain unchanged.",
   "historical_next_action_before_general_evidence_improvements": "Stop and report the completed local improvements and verification. The frozen candidate passed the cumulative M2 offline gate 25/25 with 1294 tests and 157 subtests; result-document static checks passed 3/3. The provider-free paired experiment completed; four retrieval cases improved and two regressed, so local-lexical-v2 remains explicit opt-in and legacy-v1 stays default. This is not complete live-smoke or legal semantic-quality acceptance. No third paid request, consumed-ledger reuse, remote write, new release, corpus/gold rewrite, verifier weakening or M7. Existing M5/M6 released artifacts and both paid histories remain unchanged.",
   "historical_next_action_before_chinese_retrieval": "Report and stop this completed W1-W8 local implementation and applicable engineering verification. Full pytest, cumulative M2, isolated PostgreSQL, real restart, installed wheel, repaired eight-arm development experiment and observed result-document static checks have completed; failures remain preserved and runtime identity is unchanged. Recheck the same static checks after metadata-only closeout without changing runtime code. Legal quality, trusted human review, independent holdout, live checker calibration, real Linux broker, production capacity and remote CI are not accepted. Keep legacy-v1 default and generic-v3 opt-in. Do not inject gold, fabricate review/holdout, send new paid calls, reuse consumed ledgers, read secrets/raw history, upload corpus, write remotely, move M5/M6 tags or start M7. Existing published artifacts remain unchanged.",
-  "next_action": "Finish the finite IK result-document static checks, commit/push to Draft PR31, update the PR and independently read the actual final head CI without recursive receipts. The clean dde6fc3 experiment completed 720 rows and local M2 passed25/25 with2255 tests+157 subtests. IK71/108 does not beat legacy76/108; char83/108 still regresses MRR and fails the unchanged automatic promotion guard. Report and stop this finite experiment, leaving legacy default unchanged. A mature-library default change needs the user's explicit tradeoff decision or a separately authorized fixed whole-chain quality study, not more unbounded candidate tuning. Preserve all failures, paid histories, raw local evidence and historical release receipts. No new model calls, ledger reuse, corpus upload, production ES integration, merge/release, tag movement or M7."
+  "historical_next_action_before_engineering_readiness": "Finish the finite IK result-document static checks, commit/push to Draft PR31, update the PR and independently read the actual final head CI without recursive receipts. The clean dde6fc3 experiment completed 720 rows and local M2 passed25/25 with2255 tests+157 subtests. IK71/108 does not beat legacy76/108; char83/108 still regresses MRR and fails the unchanged automatic promotion guard. Report and stop this finite experiment, leaving legacy default unchanged. A mature-library default change needs the user's explicit tradeoff decision or a separately authorized fixed whole-chain quality study, not more unbounded candidate tuning. Preserve all failures, paid histories, raw local evidence and historical release receipts. No new model calls, ledger reuse, corpus upload, production ES integration, merge/release, tag movement or M7.",
+  "next_action": "Finish finite E1-E6 on the existing draft review branch. Retain legacy-v1 default under delegated optimization; stop analyzer search, preserve MRR regression and unchanged guard. Run fixed provider-free showcase, isolated PostgreSQL and exact frozen candidate M2 without tracked writes during identity-sensitive tests; review, commit/push explicit public engineering paths and read their own head CI. Keep personal materials local; source review is not personal ownership or oral readiness. No new model calls, consumed-ledger reuse, corpus upload, production ES, merge/release, tag movement or M7."
 }

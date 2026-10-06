@@ -698,10 +698,11 @@ class PgVectorExactRetriever:
 
     @property
     def known_law_hints(self) -> tuple[str, ...]:
-        from ..legal_references import canonical_law_title
-        return tuple(sorted({canonical_law_title(article.title)
-                             for entry in self._entries.values()
-                             for article in entry.provenance.articles}))
+        # Unlike a corpus-backed lexical adapter, this vector adapter keeps
+        # only an encoder and a frozen boundary. Do not access nonexistent
+        # lexical entries or load an entire corpus just to expose optional
+        # query-parser hints. Exact catalog authority is a separate adapter.
+        return ()
 
     @property
     def profile(self) -> EmbeddingProfileIdentity:

@@ -8,6 +8,8 @@
 
 ## 项目产出
 
+2026-10-07 起的 [有限工程可演示性改善](docs/refactor/ENGINEERING_READINESS_TODO.md) 在同一Draft PR31继续：用户委托优化后，选择保持默认、成熟候选显式opt-in并停止新增分析器比较，仅优化精确路由的词汇索引构建时机、M2 semantic调用观测和vector可选提示属性，配套固定零模型工程合同入口。当前结果与未运行项见 [独立验收](reports/refactor/ENGINEERING_READINESS_20261008.md)；它不是新Release、M7界面或法律质量提升声明。下面的比较与选择等待叙述保留各轮结束时点含义，不再表示当前仍等待是否继续分析器搜索。
+
 当前开发分支已实现 [中文BM25组件替换与规则收缩](reports/refactor/CHINESE_BM25_OPTIMIZATION.md)，见 [TODO](docs/refactor/CHINESE_RETRIEVAL_TODO.md) 和 [Draft PR #31](https://github.com/1040942669/legal-rag-agent/pull/31)。现代候选使用成熟评分与分析组件，不增加购物词表、40/80人工加分或自写BM25公式。用户追加的 [Elasticsearch＋IK第四轮固定比较](reports/refactor/ELASTICSEARCH_IK_EXPERIMENT.md) `chinese_bm25_20261007_ik_fixed_fourth_verified` 已完成：legacy的Hit@5为76/108、MRR@5为0.610184，BM25S字符方案为83/108、0.597065，原生Elasticsearch＋IK为71/108、0.550307。三臂720条执行全部成功、两遍排名一致、身份稳定且自有服务清理成功，新增模型调用与费用均0。char被选为现代候选，但自动推广资格为空：没有现代候选满足Hit@5与MRR均不回退的原门槛。默认仍为 `legacy-v1`，不推广IK或SmartCN；是否接受字符方案的召回、排名与建库开销取舍仍待明确决定。
 
 本轮固定ES/IK 9.1.4原始默认词典，`ik_max_word`建索引、`ik_smart`分析查询后以唯一term OR检索；只启动自有loopback实验节点，不接入生产CLI/API/M2 selector或共享索引缓存，不是生产安全部署或最新版推荐。源码 `dde6fc3c568b461aa84cfa38351478b239eb20db` 已提交推送，135项离线合同与8项显式真实本地ES检查通过；该clean源码门禁前后不变，本地累计M2为25/25 passed、267732ms，其中2255 passed＋157子测试、206.58s、JUnit2412/0/0/0，4条jieba上游警告。其精确源码 [CI 37502817897](https://github.com/1040942669/legal-rag-agent/actions/runs/37502817897) 已实际四路completed/success；后续纯结果文档head仍须独立核验，不能借该源码绿灯预先宣布文档head通过。

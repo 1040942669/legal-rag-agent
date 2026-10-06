@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from legal_rag.experiment_lifecycle import run_experiment
+from legal_rag.experiment_runner import _MODEL_USAGE_ROLE_TO_CALL_KIND
 from legal_rag.experiment_store import ExperimentStore
 from legal_rag.observability import Observation, ObservationContext
 from legal_rag.observability.tracing import (
@@ -22,6 +23,103 @@ class CaptureObserver:
 
     def record(self, observation: Observation) -> None:
         self.events.append(observation)
+
+
+def _emit_synthetic_generation(
+    calls: dict[str, int],
+    *,
+    origin: str = "fresh",
+    source_calls: dict[str, int] | None = None,
+) -> list[Observation]:
+    """Exercise only the safe projection, without a dataset or provider."""
+
+    observer = CaptureObserver()
+    observe_evaluation_attempt(
+        observer,
+        context=ObservationContext(trace_id="synthetic-semantic-trace"),
+        result={
+            "case": {"case_id": "synthetic-semantic-case"},
+            "output": {"trace_record": {"results": []}},
+            "stage_observations": {
+                "generation": {
+                    "status": "succeeded",
+                    "origin": origin,
+                    "duration_ms": 1.0,
+                    "cache_key": "a" * 64,
+                    "external_calls": calls,
+                    "source_external_calls": source_calls or {},
+                }
+            },
+        },
+        attempt_number=1,
+        cache_mode=origin if origin != "fresh" else "fresh",
+    )
+    return observer.events
+
+
+@pytest.mark.parametrize("generation_calls,semantic_calls", [(0, 1), (1, 1)])
+def test_current_semantic_dispatch_is_in_model_observation(
+    generation_calls: int, semantic_calls: int
+) -> None:
+    events = _emit_synthetic_generation(
+        {"generation": generation_calls, "semantic": semantic_calls}
+    )
+    expected = generation_calls + semantic_calls
+    model = next(event for event in events if event.name == "model.completed")
+    node = next(event for event in events if event.name == "node.completed")
+    assert model.counts == {"model_calls": expected}
+    assert model.budget_used == {"model_attempts": expected}
+    assert node.budget_used["model_attempts"] == expected
+    assert model.model_input_tokens is None
+    assert model.model_output_tokens is None
+    assert model.cost_usd is None
+
+
+@pytest.mark.parametrize(
+    "kind", [*_MODEL_USAGE_ROLE_TO_CALL_KIND.values(), "rerank"]
+)
+def test_model_observation_uses_the_closed_runner_call_kind_contract(kind: str) -> None:
+    events = _emit_synthetic_generation({kind: 1})
+    model = next(event for event in events if event.name == "model.completed")
+    assert model.counts == {"model_calls": 1}
+    assert model.budget_used == {"model_attempts": 1}
+
+
+@pytest.mark.parametrize("origin", ["cache", "replay"])
+def test_semantic_source_history_is_not_a_current_model_dispatch(origin: str) -> None:
+    events = _emit_synthetic_generation(
+        {"generation": 1, "semantic": 1},
+        origin=origin,
+        source_calls={"generation": 7, "semantic": 9},
+    )
+    assert not any(event.name == "model.completed" for event in events)
+    node = next(event for event in events if event.name == "node.completed")
+    assert node.status == "skipped"
+    assert node.budget_used["model_attempts"] == 0
+    assert node.duration_ms is None
+
+
+@pytest.mark.parametrize("semantic_calls", [0, 1])
+def test_non_model_and_unknown_call_kinds_do_not_acquire_model_counts(
+    semantic_calls: int,
+) -> None:
+    events = _emit_synthetic_generation(
+        {
+            "semantic": semantic_calls,
+            "embedding": 3,
+            "other": 5,
+            "unrecognized_model": 11,
+        }
+    )
+    node = next(event for event in events if event.name == "node.completed")
+    assert node.budget_used == {
+        "model_attempts": semantic_calls,
+        "embedding_attempts": 3,
+    }
+    models = [event for event in events if event.name == "model.completed"]
+    assert len(models) == bool(semantic_calls)
+    if models:
+        assert models[0].counts == {"model_calls": semantic_calls}
 
 
 @pytest.fixture

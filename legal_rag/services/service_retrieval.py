@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from collections.abc import Callable
+from copy import deepcopy
+from threading import Lock
 from typing import Any
 
 from sqlalchemy import Engine, select
@@ -11,10 +13,11 @@ from legal_rag.embedding_contracts import EmbeddingProfileIdentity
 from legal_rag.evidence import reference_rules_for_evidence
 from legal_rag.models import VerificationContext
 from legal_rag.llm import SiliconFlowClient
-from legal_rag.bm25_settings import build_bm25_retriever
+from legal_rag.bm25_settings import BM25Settings, build_bm25_retriever
 from legal_rag.retrieval_contracts import RetrievalBoundary
 from legal_rag.storage.retrieval import (
     BoundaryBoundRetriever,
+    BoundCorpus,
     PostgresExactRetrievalRepository,
 )
 from legal_rag.storage.schema import embedding_profiles
@@ -31,13 +34,45 @@ class _ProviderDisabledCompletionClient:
         raise RuntimeError("generation is disabled for the provider-free service profile")
 
 
+class _RunLocalLazyBM25:
+    """Delay only index construction, not the authorized corpus resolution.
+
+    Every instance owns detached inputs for exactly one assistant/run. The lock
+    protects concurrent first use, not retrieval or any cross-run cache. A failed
+    constructor leaves the index unset; a later explicit retrieval can retry from
+    pristine inputs without reusing partially initialized state.
+    """
+
+    name = "bm25"
+
+    def __init__(self, corpus: BoundCorpus, settings: BM25Settings) -> None:
+        self._chunks = tuple(corpus.chunks)
+        self._settings = BM25Settings.from_dict(settings.to_dict())
+        self._retriever = None
+        self._build_lock = Lock()
+
+    def retrieve(self, query: str, top_k: int = 5):
+        retriever = self._retriever
+        if retriever is None:
+            with self._build_lock:
+                retriever = self._retriever
+                if retriever is None:
+                    # Give each attempt disposable input: a failed builder may
+                    # have mutated its arguments before raising.
+                    retriever = build_bm25_retriever(list(deepcopy(self._chunks)), self._settings)
+                    self._retriever = retriever
+        return retriever.retrieve(query, top_k=top_k)
+
+
 @dataclass(frozen=True, slots=True)
 class PostgresAssistantFactory:
     """Create one database-bound assistant from the run's frozen server policy.
 
     The factory reloads the immutable snapshot/profile named on the run rather
     than following the current active pointer.  PostgreSQL applies every hard
-    boundary before BM25 sees the corpus. Generation defaults to disabled; an
+    boundary before BM25 sees the corpus. Exact-routing runs build BM25 only on
+    their first lexical retrieval; non-routing historical runs remain eager.
+    There is no index reuse across runs. Generation defaults to disabled; an
     enabled policy creates a lazy adapter (or an explicitly trusted test fake).
     The graph runner, not this factory, supplies lease/epoch authority and the
     shared monetary invoker before generation or semantic checking can execute.
@@ -111,10 +146,13 @@ class PostgresAssistantFactory:
             filters=boundary,
             expected_profile=profile,
         )
-        retriever = BoundaryBoundRetriever(
-            build_bm25_retriever(corpus.chunks, policy.resolved_bm25_settings),
-            corpus=corpus,
+        settings = policy.resolved_bm25_settings
+        lexical = (
+            _RunLocalLazyBM25(corpus, settings)
+            if policy.exact_reference_routing
+            else build_bm25_retriever(corpus.chunks, settings)
         )
+        retriever = BoundaryBoundRetriever(lexical, corpus=corpus)
         if policy.exact_reference_routing:
             retriever = ExactReferenceRetriever(
                 corpus=corpus, lexical=retriever,

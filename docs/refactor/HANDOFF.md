@@ -1,5 +1,13 @@
 # M6 执行交接
 
+## 当前任务：有限工程可演示性改善
+
+2026-10-07 用户委托优化并要求次日形成可解释、可演示的版本。继续 clean `db64d328cb289f4b099c9fc523437fba524809cf` 上的既有 `codex/chinese-bm25-optimization` / Draft PR31，不丢前置实现。origin/master 仍为 `4d9546e06cfe8ff44660943ffd2dd353ac2e61cc`；db64 自身 [CI37505709901](https://github.com/1040942669/legal-rag-agent/actions/runs/37505709901) 已独立读回四路 completed/success，不替代本轮新源码。
+
+本轮 [E1-E6 清单](ENGINEERING_READINESS_TODO.md) 与 [验收记录](../../reports/refactor/ENGINEERING_READINESS_20261008.md) 为当前入口。默认决定为保留 legacy-v1、成熟组件显式opt-in，停止追加分词器；用户委托优化不是删除MRR回退或更改自动门槛。已实现 run 内延迟 BM25、semantic观测漏计修复、vector可选提示属性修复；固定离线合同入口与最终适用运行时验证仍待收口。个人材料仅本地，不 stage/upload，不从源码推断个人贡献或真人口述已通过。
+
+开发期 RED/GREEN 各自保留，定向数字不是最终冻结候选验收。下一步停止所有 tracked 写入后执行固定演示、隔离PG及精确源码累计M2，再明确路径commit/push，更新原Draft PR并读取自身head CI。不新建Release、不移动Tag、不使用剩余付费额度、不进入M7；历史IK及软件发布段落保持各自历史快照含义。
+
 ## 当前任务：有限 Elasticsearch + IK 实测与交接
 
 2026-10-07 用户确认“ok那先测吧”，追加范围仅是固定本地 ES/IK 比较，从已推送且四路 CI 成功的 `31a6e63f32b4640eb77aa6a69ed9ae0171bc2ae9` 继续同一 Draft PR31。最新实验源码 `dde6fc3c568b461aa84cfa38351478b239eb20db` 已提交推送；benchmark 和最终本地门禁前后均为同一 clean HEAD。origin/master 仍是 `4d9546e06cfe8ff44660943ffd2dd353ac2e61cc`。本节是结果文档提交前快照，不虚填自身未来 SHA。
