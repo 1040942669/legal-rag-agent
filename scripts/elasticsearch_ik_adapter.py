@@ -376,16 +376,24 @@ class ElasticsearchIKRetriever:
         self._usable()
         try:
             tokens = self._analyze(query)
-            oov = []
+            oov, frequencies = [], []
             for token in tokens:
-                response = self._transport.request("POST", self._path + "/_terms_enum", {"field": "body", "string": token, "size": 1, "timeout": "5s"})
-                if response.get("complete") is not True or not isinstance(response.get("terms"), list) or any(not isinstance(term, str) for term in response["terms"]):
+                # ES9.1.4 text fields do not implement getTerms: _terms_enum may
+                # return complete empty even when a body term is indexed. Use
+                # the same exact term semantics as retrieval, without scoring.
+                response = self._transport.request("POST", self._path + "/_count", {"query": {"term": {"body": token}}})
+                if response.get("timed_out") is True or response.get("terminated_early") is True:
                     raise ElasticsearchIKError("incomplete_term_diagnostic")
                 _shards(response.get("_shards"))
-                if token not in response["terms"]:
+                count = response.get("count")
+                if type(count) is not int or not 0 <= count <= len(self.chunks):
+                    raise ElasticsearchIKError("invalid_term_document_count")
+                frequencies.append(count)
+                if count == 0:
                     oov.append(token)
             self.diagnostics["diagnostic_count"] += 1
-            return {"token_count": len(tokens), "tokens": list(tokens), "oov_count": len(oov), "oov_tokens": oov, "status": "completed"}
+            return {"token_count": len(tokens), "tokens": list(tokens), "oov_count": len(oov), "oov_tokens": oov,
+                    "document_frequencies": frequencies, "method": "body-exact-term-count-v1", "status": "completed"}
         except ElasticsearchIKError:
             self._failed = True
             raise

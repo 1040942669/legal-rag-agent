@@ -56,6 +56,11 @@ def run(home, directory):
         checks.append("empty_and_oov_are_valid_empty_results")
         assert retriever.retrieve("劳动", top_k=0) == []
         checks.append("zero_top_k")
+        present = retriever.diagnose_query("劳动")
+        absent = retriever.diagnose_query("qzxvnotindictionary000000")
+        assert present["token_count"] > 0 and present["oov_count"] == 0
+        assert absent["token_count"] > 0 and absent["oov_count"] == absent["token_count"]
+        checks.append("real_text_field_exact_term_presence_diagnostics")
         retriever.close()
         retriever = None
         checks.append("frozen_instance_and_index_identity")

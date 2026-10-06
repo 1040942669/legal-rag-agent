@@ -34,6 +34,7 @@ class FakeTransport:
         self.bulk_error = False
         self.max_seq_no = -1
         self.available_terms = {"合成"}
+        self.term_count_override = None
 
     def request(self, method, path, payload=None, *, raw_body=None):
         self.calls.append((method, path, deepcopy(payload), raw_body))
@@ -63,6 +64,11 @@ class FakeTransport:
         if path.endswith("/_refresh"):
             return {"_shards": {"total": 1, "successful": 1, "failed": 0}}
         if path.endswith("/_count"):
+            if payload is not None:
+                if self.term_count_override is not None:
+                    return deepcopy(self.term_count_override)
+                token = payload["query"]["term"]["body"]
+                return {"count": int(token in self.available_terms), "_shards": {"total": 1, "successful": 1, "failed": 0}}
             return {"count": len(self.ids), "_shards": {"total": 1, "successful": 1, "failed": 0}}
         if "/_settings?" in path:
             self.settings["index.uuid"] = self.index_uuid
@@ -424,3 +430,49 @@ def test_ipv4_tcp_with_platform_socket_flags_remains_allowed():
     flags = getattr(socket, "SOCK_NONBLOCK", 0) | getattr(socket, "SOCK_CLOEXEC", 0)
     guard = adapter.loopback_socket_guard("http://127.0.0.1:19200")
     guard("socket.connect", (SimpleNamespace(family=socket.AF_INET, type=socket.SOCK_STREAM | flags), ("127.0.0.1", 19200)))
+
+
+def test_empty_terms_enum_on_text_is_not_evidence_of_oov(fake, monkeypatch):
+    # ES9.1.4 text's getTerms returns null; _terms_enum can report complete empty
+    # even though the term is indexed. Only an exact body term count is evidence.
+    original = fake.request
+
+    def text_enum_unsupported(method, path, payload=None, *, raw_body=None):
+        result = original(method, path, payload, raw_body=raw_body)
+        if path.endswith("/_terms_enum"):
+            result["terms"] = []
+        return result
+
+    monkeypatch.setattr(fake, "request", text_enum_unsupported)
+    retriever = build(fake)
+    retriever.retrieve("合成问题")
+    before = len(fake.calls)
+    prior_timing = deepcopy(retriever.timings)
+    prior_tokens = retriever.last_query_tokens
+    result = retriever.diagnose_query("合成问题")
+    assert result["tokens"] == ["合成", "中文"]
+    assert result["oov_count"] == 1 and result["oov_tokens"] == ["中文"]
+    assert result["document_frequencies"] == [1, 0]
+    diagnosis_calls = fake.calls[before:]
+    assert not any("_terms_enum" in call[1] for call in diagnosis_calls)
+    assert [call[2] for call in diagnosis_calls if call[1].endswith("/_count")] == [
+        {"query": {"term": {"body": "合成"}}}, {"query": {"term": {"body": "中文"}}}]
+    assert retriever.timings == prior_timing and retriever.last_query_tokens == prior_tokens
+
+
+@pytest.mark.parametrize("mutation", ["missing-count", "negative", "bool", "float", "too-large", "failed-shard", "missing-shards", "timeout", "terminated"])
+def test_oov_diagnostics_reject_incomplete_or_malformed_exact_term_counts(fake, mutation):
+    retriever = build(fake)
+    result = {"count": 1, "_shards": {"total": 1, "successful": 1, "failed": 0}}
+    if mutation == "missing-count": result.pop("count")
+    elif mutation == "negative": result["count"] = -1
+    elif mutation == "bool": result["count"] = True
+    elif mutation == "float": result["count"] = 1.0
+    elif mutation == "too-large": result["count"] = 2
+    elif mutation == "failed-shard": result["_shards"]["failed"] = 1
+    elif mutation == "missing-shards": result.pop("_shards")
+    elif mutation == "timeout": result["timed_out"] = True
+    elif mutation == "terminated": result["terminated_early"] = True
+    fake.term_count_override = result
+    with pytest.raises(adapter.ElasticsearchIKError):
+        retriever.diagnose_query("合成问题")
