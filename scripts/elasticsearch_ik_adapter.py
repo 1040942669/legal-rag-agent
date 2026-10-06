@@ -13,6 +13,7 @@ import json
 import math
 from numbers import Real
 import re
+import socket
 import sys
 import time
 from typing import Sequence
@@ -45,7 +46,13 @@ def loopback_socket_guard(endpoint: str):
     def guard(event, args):
         if event == "socket.connect":
             address = args[1] if len(args) > 1 else None
-            if not isinstance(address, tuple) or address != ("127.0.0.1", port):
+            source = args[0] if args else None
+            kind = getattr(source, "type", None)
+            flags = getattr(socket, "SOCK_NONBLOCK", 0) | getattr(socket, "SOCK_CLOEXEC", 0)
+            tcp = (getattr(source, "family", None) == socket.AF_INET
+                   and isinstance(kind, int) and not isinstance(kind, bool)
+                   and kind & ~flags == socket.SOCK_STREAM)
+            if not tcp or not isinstance(address, tuple) or address != ("127.0.0.1", port):
                 raise ElasticsearchIKError("network_forbidden")
         elif event == "socket.getaddrinfo":
             if len(args) < 2 or args[0] != "127.0.0.1" or args[1] != port:

@@ -2,6 +2,8 @@
 from copy import deepcopy
 import json
 import math
+import socket
+from types import SimpleNamespace
 
 import pytest
 
@@ -11,6 +13,10 @@ from scripts import elasticsearch_ik_adapter as adapter
 
 def chunk(key="a", text="合成中文正文"):
     return Chunk(key, text, ["合成法"], ["第一条"], [], [], "article")
+
+
+def tcp_socket():
+    return SimpleNamespace(family=socket.AF_INET, type=socket.SOCK_STREAM)
 
 
 class FakeTransport:
@@ -223,7 +229,7 @@ def test_socket_guard_allows_only_exact_literal_endpoint_and_is_not_auto_install
     build(fake)
     assert installed == []
     guard = adapter.loopback_socket_guard("http://127.0.0.1:19200")
-    guard("socket.connect", (None, ("127.0.0.1", 19200)))
+    guard("socket.connect", (tcp_socket(), ("127.0.0.1", 19200)))
     guard("socket.getaddrinfo", ("127.0.0.1", 19200, 0, 0, 0))
     adapter.install_loopback_socket_audit("http://127.0.0.1:19200")
     assert len(installed) == 1
@@ -404,3 +410,17 @@ def test_index_level_analysis_cannot_override_frozen_plugin_analyzers(fake):
     fake.settings["index.analysis.analyzer.ik_smart.type"] = "keyword"
     with pytest.raises(adapter.ElasticsearchIKError, match="unexpected_index_analysis"):
         retriever.close()
+
+
+@pytest.mark.parametrize("family,kind", [(socket.AF_INET, socket.SOCK_DGRAM), (socket.AF_INET6, socket.SOCK_STREAM), (socket.AF_INET, socket.SOCK_RAW), (socket.AF_INET, True)])
+def test_exact_endpoint_is_not_enough_without_ipv4_tcp(family, kind):
+    guard = adapter.loopback_socket_guard("http://127.0.0.1:19200")
+    endpoint = ("127.0.0.1", 19200)
+    with pytest.raises(adapter.ElasticsearchIKError, match="network_forbidden"):
+        guard("socket.connect", (SimpleNamespace(family=family, type=kind), endpoint))
+
+
+def test_ipv4_tcp_with_platform_socket_flags_remains_allowed():
+    flags = getattr(socket, "SOCK_NONBLOCK", 0) | getattr(socket, "SOCK_CLOEXEC", 0)
+    guard = adapter.loopback_socket_guard("http://127.0.0.1:19200")
+    guard("socket.connect", (SimpleNamespace(family=socket.AF_INET, type=socket.SOCK_STREAM | flags), ("127.0.0.1", 19200)))

@@ -212,7 +212,7 @@ def execute_worker(directory, arm_id):
             passes.append(rows)
         if hasattr(retriever, "diagnose_query"):
             diagnostic_started = time.perf_counter()
-            items = [retriever.diagnose_query(case.question) for case in cases]
+            items = [{"case_id": case.case_id, **retriever.diagnose_query(case.question)} for case in cases]
             diagnostics = {"first_pass_query_diagnostics": items,
                            "scope": "extra read-only requests after timed passes; not included in query latency"}
             timings["post_query_diagnostics_ms"] = (time.perf_counter() - diagnostic_started) * 1000
