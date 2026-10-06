@@ -13,6 +13,7 @@ from .json_utils import (
 from .models import NormalizedQuery
 from .provider_errors import should_propagate_controlled_error
 from .query import QueryAnalysis, analyze_query, should_use_adaptive
+from .request_policy import advisory_risk_flags
 
 
 NORMALIZED_QUERY_FIELDS = {
@@ -67,8 +68,9 @@ def normalize_query(
     llm_client: CompletionClient | None = None,
     use_llm: bool = False,
     max_retries: int = 0,
+    evidence_rules_version: str = "general-reference-v3",
 ) -> NormalizedQuery:
-    analysis = analysis or analyze_query(query)
+    analysis = analysis or analyze_query(query, evidence_rules_version=evidence_rules_version)
     if not should_use_adaptive(analysis):
         return fallback_normalized_query(query, analysis, source="rules:clear_query")
     if not use_llm or llm_client is None:
@@ -91,7 +93,7 @@ def normalize_query(
                 original_query=query,
                 source="llm",
             )
-            return enrich_normalized_query(parsed, analysis)
+            return enrich_normalized_query(parsed, analysis, evidence_rules_version=evidence_rules_version)
         except (TypeError, ValueError, RecursionError, OverflowError):
             errors.append("normalizer_invalid_response")
 
@@ -182,7 +184,7 @@ def fallback_normalized_query(
 
 
 def enrich_normalized_query(
-    normalized: NormalizedQuery, analysis: QueryAnalysis
+    normalized: NormalizedQuery, analysis: QueryAnalysis, *, evidence_rules_version: str = "general-reference-v3"
 ) -> NormalizedQuery:
     return NormalizedQuery(
         original_query=normalized.original_query,
@@ -201,7 +203,8 @@ def enrich_normalized_query(
         keywords=unique(
             [*normalized.keywords, *extract_keywords(analysis.normalized_query)]
         ),
-        risk_flags=unique([*normalized.risk_flags, *analysis.risk_flags]),
+        risk_flags=advisory_risk_flags(unique([*normalized.risk_flags, *analysis.risk_flags]),
+                                     evidence_rules_version=evidence_rules_version),
         confidence=round(min(max(normalized.confidence, 0.0), 1.0), 2),
         source=normalized.source,
         errors=normalized.errors,

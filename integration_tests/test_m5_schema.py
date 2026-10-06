@@ -41,7 +41,7 @@ from legal_rag.storage.schema import (
 )
 
 
-HEAD_REVISION = "0007_m6_jobs_outbox"
+HEAD_REVISION = "0008_execution_money"
 M4_REVISION = "0005_m4_api_sessions"
 _APPLICATION_RECOVERY_TABLES = {
     "run_budget_ledgers",

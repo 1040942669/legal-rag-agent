@@ -420,6 +420,17 @@ def _output_usage_matches_runner(
             attempt.model_usage[role]
         ):
             return False
+    metadata = facts.get("trace_metadata")
+    gate = metadata.get("semantic_gate") if isinstance(metadata, Mapping) else None
+    semantic_usage = attempt.model_usage["semantic"]
+    if gate is None:
+        # Old results never implied a checker call. Preserve their original
+        # metrics as historical views without silently inventing new usage.
+        return all(value == 0 for value in semantic_usage.values())
+    if not isinstance(gate, Mapping) or not isinstance(gate.get("actual_usage"), Mapping):
+        return False
+    if canonical_json_bytes(dict(gate["actual_usage"])) != canonical_json_bytes(semantic_usage):
+        return False
     return True
 
 

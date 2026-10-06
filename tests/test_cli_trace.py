@@ -18,6 +18,8 @@ class TraceValue:
 
 
 class FakeChatAssistant:
+    evidence_rules_version = "general-reference-v3"
+
     def __init__(self, *, rejected: bool) -> None:
         self.calls: list[bool] = []
         self.last_adaptive_result = None

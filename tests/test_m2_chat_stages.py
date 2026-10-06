@@ -196,7 +196,7 @@ def test_stale_staged_turn_cannot_commit_over_changed_memory() -> None:
     assert assistant.export_session_state() == state_after_other_turn
 
 
-def test_pre_retrieval_refusal_is_an_explicit_programmatic_stage() -> None:
+def test_historical_v2_pre_retrieval_refusal_is_an_explicit_programmatic_stage() -> None:
     class _ForbiddenRetriever:
         name = "forbidden"
 
@@ -206,6 +206,7 @@ def test_pre_retrieval_refusal_is_an_explicit_programmatic_stage() -> None:
     assistant = LegalChatAssistant(
         _ForbiddenRetriever(),
         model="deterministic-offline-fixture",
+        evidence_rules_version="general-reference-v2",
     )
     prepared = assistant.prepare_question("这个案子怎么起诉才能胜诉？")
     retrieved = assistant.retrieve_turn(prepared)
@@ -331,7 +332,9 @@ def test_commit_materializes_telemetry_before_any_state_change() -> None:
     generated = assistant.generate_turn(retrieved, generate=True)
     poisoned_retrieved = replace(retrieved, source_id_map=_ExplodingMapping())
     poisoned_generated = replace(generated, retrieved=poisoned_retrieved)
-    poisoned_verified = assistant.verify_turn(poisoned_generated)
+    # Introduce the hostile mapping after verification to exercise commit's
+    # materialization fence; verification itself now rejects it even earlier.
+    poisoned_verified = replace(assistant.verify_turn(generated), generated=poisoned_generated)
 
     with pytest.raises(RuntimeError, match="synthetic mapping failure"):
         assistant.commit_turn(poisoned_verified)

@@ -24,6 +24,8 @@ from .models import (
     VerificationContext,
     VerificationResult,
 )
+from .semantic import SemanticAssessment, SemanticPolicy, build_semantic_input, evaluate_semantic_assessment
+from .request_policy import request_answer_mode
 
 
 CITATION_RE = re.compile(r"\[S([1-9]\d*)\]")
@@ -216,7 +218,18 @@ def verify_answer(
     expected_answer_mode: str | None = None,
     context: VerificationContext | None = None,
     semantic_support_status: str | None = None,
+    semantic_policy: SemanticPolicy | None = None,
+    semantic_assessment: SemanticAssessment | None = None,
+    semantic_question: str | None = None,
+    semantic_boundary_fingerprint: str | None = None,
+    verification_rules_version: str = "general-bound-v2",
 ) -> VerificationResult:
+    if verification_rules_version not in {"m1", "general-bound-v2"}:
+        raise ValueError("verification rules version is unsupported")
+    if semantic_policy is not None and not isinstance(semantic_policy, SemanticPolicy):
+        raise ValueError("semantic policy must be typed")
+    if verification_rules_version == "m1" and (semantic_policy is not None or semantic_assessment is not None):
+        raise ValueError("legacy verification cannot acquire a modern semantic assessment")
     structured = parse_structured_answer(answer)
     catalog_source_ids = [
         f"S{result.rank}"
@@ -302,7 +315,7 @@ def verify_answer(
         semantic_status = "not_checked"
     elif semantic_support_status is None:
         semantic_status = "uncertain" if unsupported_claims else "not_checked"
-    elif semantic_support_status in SEMANTIC_SUPPORT_STATUSES:
+    elif verification_rules_version == "m1" and semantic_support_status in SEMANTIC_SUPPORT_STATUSES:
         semantic_status = semantic_support_status
     else:
         semantic_status = "not_checked"
@@ -322,6 +335,26 @@ def verify_answer(
         failure_reasons.append(
             "response_mode_invalid" if expected_mode_valid else "expected_answer_mode_invalid"
         )
+
+    semantic_required = False
+    if structured.answer_mode == "evidence_answer" and verification_rules_version == "general-bound-v2":
+        if semantic_support_status is not None or (semantic_assessment is not None and semantic_policy is None):
+            semantic_status = "error"
+            failure_reasons.append("semantic_assessment_unbound")
+        elif semantic_policy is not None:
+            semantic_required = semantic_policy.required
+            try:
+                semantic_input = build_semantic_input(
+                    semantic_question, structured, results, semantic_policy,
+                    context=context, boundary_fingerprint=semantic_boundary_fingerprint,
+                    disclaimer=disclaimer,
+                )
+                semantic_gate = evaluate_semantic_assessment(semantic_input, semantic_assessment)
+                semantic_status = semantic_gate.status
+                failure_reasons.extend(semantic_gate.failure_reasons)
+            except (TypeError, ValueError):
+                semantic_status = "error"
+                failure_reasons.append("semantic_input_invalid")
 
     return VerificationResult(
         passed=not failure_reasons,
@@ -346,6 +379,7 @@ def verify_answer(
             *(["evidence_scope"] if scope_check_configured else []),
             *(["disclaimer"] if disclaimer else []),
             "response_mode",
+            *(["semantic_support"] if semantic_required else []),
         ],
         duplicate_source_ids=duplicate_source_ids,
         missing_source_ids=missing_source_ids,
@@ -824,8 +858,11 @@ def _resolve_expected_mode(
 ) -> str | None:
     if expected_answer_mode is not None:
         return expected_answer_mode if expected_answer_mode in ANSWER_MODES else None
-    if set(risk_flags or []) & HIGH_RISK_FLAGS:
-        return "out_of_scope"
+    request_mode = request_answer_mode(risk_flags or [],
+        evidence_rules_version=evidence_check.rules_version if evidence_check is not None else "general-reference-v2",
+        free_generation=True)
+    if request_mode is not None:
+        return request_mode
     if evidence_check is not None and (
         evidence_check.missing_facts
         or evidence_check.stop_reason == "needs_clarification"

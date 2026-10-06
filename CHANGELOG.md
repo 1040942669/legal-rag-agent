@@ -4,7 +4,15 @@
 
 ## [Unreleased]
 
-无额外软件变更。M6 `v0.7.1` 的软件发布、独立回执和治理关闭均已完成；本次仅记录非递归文档收口，M7 未开始。
+当前Elasticsearch＋IK实验源码 `dde6fc3c568b461aa84cfa38351478b239eb20db` 已提交推送到 [Draft PR #31](https://github.com/1040942669/legal-rag-agent/pull/31)。本地精确源码M2通过，最新读取其 [CI 37502817897](https://github.com/1040942669/legal-rag-agent/actions/runs/37502817897) 已四路completed/success；不预写后续文档head通过。前轮SmartCN源码 `8f042fb46b83c7d2e7eb630c1197546f0d98c3cd` 的 [CI 37403867767](https://github.com/1040942669/legal-rag-agent/actions/runs/37403867767) 及随后文档提交 `31a6e63` 的 [CI 37405297646](https://github.com/1040942669/legal-rag-agent/actions/runs/37405297646) 均已四路成功，属于独立历史事实。运行时提交 `04fd389945125c81767745bbdce48137921d26fd` 与文档提交 `e3d32a96d3a37f5ab7c0e559bb000448fb0e603d` 的 [CI 37354368069](https://github.com/1040942669/legal-rag-agent/actions/runs/37354368069) / [37356943303](https://github.com/1040942669/legal-rag-agent/actions/runs/37356943303) 也保留原四路成功与真实broker/worker证据，不改绑到追加实验。PR仍为draft，未合并或发布，后续文档head另行核验；默认、生产配置和版本未变，M6 `v0.7.1` 与既有Tag/回执不变，M7未开始。
+
+- 增加仅实验使用的ES/IK9.1.4自有loopback节点、原默认词典与预冻结v4三臂协议，不接生产CLI/API/M2 selector或共享索引缓存。最终 `chinese_bm25_20261007_ik_fixed_fourth_verified` 的Hit@5/MRR@5为legacy 76/108、0.610184，char 83/108、0.597065，IK 71/108、0.550307；720条执行完整、两遍一致、身份及清理通过，新增模型调用与费用0。char selected但promotion eligible为空，默认仍为 `legacy-v1`，不推广IK或SmartCN，不按题补词、调参或改门槛。完整结果见 [IK验收记录](reports/refactor/ELASTICSEARCH_IK_EXPERIMENT.md)。
+- 最终dde6源码135项离线合同和8项显式真实本地ES checks通过，后者不冒充默认CI已运行ES。clean源码本地M2为25/25 passed、exit0、267732ms；其中2255 passed＋157 subtests、206.58s、JUnit2412/0/0/0、4条jieba上游警告。首轮中断、恢复轮失真的OOV诊断和被取代而取消的c241门禁均保留，不作为最终通过或winner证据。同轮legacy/char/IK第二遍client p95为612.04/30.11/59.41ms，采样进程树RSS为468.02/449.29/1656.56MiB，只是带采样开销的直接排名测量，不证明生产API延迟、容量或安全部署；120题仍为重复开发集、108有gold/12 NA。
+- 增加成熟BM25S及显式jieba/sklearn字符分析器，记录完整依赖/参数身份，不新增场景词典或手写评分公式。前两组固定开发集对照保留负结果与取舍；用户随后选择继续实测SmartCN，而非接受字符方案默认推广。
+- 前轮增加仅实验使用的Lucene 9.12.3/Java17本地桥、独立v3协议与四臂benchmark，不修改旧协议/gold，不接生产API、SmartCN服务selector或共享缓存。第三轮 `chinese_bm25_20261006_smartcn_fixed_third` 的Hit@5/MRR@5依次为legacy 76/108、0.610184，char 83/108、0.597065，BM25S＋SmartCN 73/108、0.506632，原生Lucene＋SmartCN 73/108、0.503237；四臂两pass稳定，错误及模型调用均0。没有候选同时不回退，当轮默认不变、不推广SmartCN；这些是第三轮独立历史结果，随后用户追加IK实测，不是接受char的MRR取舍。12条无gold题保持NA，不当作拒答通过。
+- 前轮SmartCN实验桥合同139项通过（102单元＋37显式实际JVM），不是远端Java CI。clean `8f042fb...` 本地累计M2为25/25 passed、316818ms；其中2120 passed＋157 subtests、245.43s、JUnit2277/0/0/0，4条jieba上游警告。生产代码未改，两次追加实验未重跑本地PG/wheel，旧证据仍绑定04fd；重复开发集不是独立法律质量或生产容量验收。
+- CLI、API和M2统一冻结实际检索配置；现代 `general-reference-v3` / `reference-evidence-v2` 合同移除统一0.01原始分数阈值，历史 `general-reference-v2` / `reference-evidence-v1` 工件保留原判定。现代风险词只作提示信号，不能证明违法意图；原文检索不据此预拒答，自由生成遇到用途不明信号先澄清。
+- 明确引用的选择与法条所有权分离，复杂意图不伪造硬要求；目录保留完整标题，有界查询语法不支持不等于存储身份无效。运行时提交04fd的本地M2累计25/25，其中2018 passed与157 subtests（180.49秒，4条jieba警告）；17文件PostgreSQL回归93 passed（94.32秒），真实重启后的新进程核验schema0008成功。这些旧证据保留原身份，详见 [验收记录](reports/refactor/CHINESE_BM25_OPTIMIZATION.md)，不等于法律质量、生产容量或真实模型验收。
 
 ## [0.7.1] - 2026-10-02
 

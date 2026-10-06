@@ -302,3 +302,34 @@ def test_m6_receipt_json_roundtrip_is_utf8_and_closed(tmp_path: Path) -> None:
     path = tmp_path / "m6-worker-receipt.json"
     path.write_text(json.dumps(_valid_receipt(), ensure_ascii=False), encoding="utf-8")
     assert gate.validate_m6_worker_receipt_file(path, expected_sha="a" * 40) == []
+
+
+def test_current_candidate_migration_contract_is_explicit_not_historical_reinterpretation(tmp_path: Path) -> None:
+    payload = _valid_receipt()
+    payload["database"]["migration_head"] = "0008_execution_money"
+    assert gate.validate_m6_worker_receipt_payload(payload, expected_sha="a" * 40)
+    assert gate.validate_m6_worker_receipt_payload(
+        payload, expected_sha="a" * 40, expected_migration_head="0008_execution_money",
+    ) == []
+    path = tmp_path / "modern-receipt.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    assert gate.validate_m6_worker_receipt_file(
+        path, expected_sha="a" * 40, expected_migration_head="0008_execution_money",
+    ) == []
+    assert gate.validate_m6_worker_receipt_payload(
+        _valid_receipt(), expected_sha="a" * 40, expected_migration_head="0008_execution_money",
+    )
+    assert gate.validate_m6_worker_receipt_payload(_valid_receipt(), expected_sha="a" * 40) == []
+
+
+def test_worker_receipt_cannot_self_select_unrecognized_migration_contract() -> None:
+    payload = _valid_receipt()
+    payload["database"]["migration_head"] = "invented_head"
+    errors = gate.validate_m6_worker_receipt_payload(
+        payload, expected_sha="a" * 40, expected_migration_head="invented_head",
+    )
+    assert "M6 worker receipt expected migration contract is invalid" in errors
+
+
+def test_candidate_migration_head_is_loaded_from_checked_out_alembic_graph() -> None:
+    assert gate.candidate_migration_head(_ROOT) == "0008_execution_money"

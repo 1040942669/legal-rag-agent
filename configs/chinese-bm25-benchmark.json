@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "protocol_id": "chinese-bm25-fixed-v1",
+  "dataset_id": "legal-eval-v3",
+  "dataset_role": "repeated_development_not_holdout",
+  "index": "artifacts/indexes/article/chunks.jsonl",
+  "top_k": 5,
+  "passes": 2,
+  "arms": [
+    {"id": "legacy-v1", "backend": "historical", "lexical_profile": "legacy-v1", "k1": 1.5, "b": 0.75, "law_boost": 40.0, "article_boost": 80.0, "deprecated_penalty": 0.5},
+    {"id": "generic-v3", "backend": "historical", "lexical_profile": "generic-v3", "k1": 1.5, "b": 0.75, "law_boost": 40.0, "article_boost": 80.0, "deprecated_penalty": 0.5},
+    {"id": "bm25s-jieba-precise", "backend": "bm25s", "mode": "precise", "k1": 1.5, "b": 0.75, "hmm": true, "method": "lucene"},
+    {"id": "bm25s-jieba-search", "backend": "bm25s", "mode": "search", "k1": 1.5, "b": 0.75, "hmm": true, "method": "lucene"}
+  ],
+  "modern_index_text": "law_names then article_numbers then original chunk text, newline separated",
+  "modern_query_tokens": "same analyzer, unique nonempty alphanumeric-containing tokens, no expansion",
+  "dictionary": "unmodified jieba 0.42.1 default dictionary and HMM resources; hashes recorded",
+  "metrics": ["hit_at_3", "hit_at_5", "mrr", "target_coverage"],
+  "strata": "existing case_type plus explicit title-and-article shape vs scenario; no production parser gold",
+  "selection": "Among the two modern arms with zero execution errors and deterministic repeats, choose maximum development Hit@5, then MRR, then lower warm p95 latency. This is an engineering/development choice, not independent legal-quality acceptance.",
+  "causal_limit": "Historical vs modern changes engine, analyzer, index text and manual boosts together; it is a system comparison, not an isolated BM25-formula effect. A synthetic identical-token engine contract test isolates the formula separately.",
+  "runtime_scope": "direct lexical ranking only; no chat refusal, exact routing, generation, embedding, reranker or checker",
+  "provider_calls_allowed": 0,
+  "network_allowed": false,
+  "worker_timeout_seconds": 900,
+  "bootstrap": {"seed": 42, "resamples": 2000, "confidence": 0.95},
+  "limits": ["120 reused development cases; 108 retrieval-gold cases, 12 no-gold cases excluded from ranking denominators", "Gold not independently legally reviewed", "No claim about Lucene/IK effectiveness without running them", "No tuning dictionaries, parameters, gold or protocol after observing this run"]
+}

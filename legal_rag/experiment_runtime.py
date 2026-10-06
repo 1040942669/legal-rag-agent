@@ -18,7 +18,8 @@ from .json_utils import (
     validate_json_unicode,
 )
 
-EXPERIMENT_MANIFEST_SCHEMA_VERSION = 2
+EXPERIMENT_MANIFEST_SCHEMA_VERSION = 3
+HISTORICAL_EXPERIMENT_MANIFEST_SCHEMA_VERSION = 2
 STAGE_CACHE_SCHEMA_VERSION = 1
 EXECUTION_MODES = frozenset(
     {"offline", "retrieval", "smoke-generation", "full-regression"}
@@ -73,6 +74,7 @@ EXTERNAL_CALL_KINDS = (
     "embedding",
     "normalizer",
     "generation",
+    "semantic",
     "rerank",
     "judge",
     "other",
@@ -309,6 +311,8 @@ def _stage_contracts(
     corpus: dict[str, Any],
     dataset: dict[str, Any],
     contracts: dict[str, Any],
+    semantic_policy: dict[str, Any] | None = None,
+    modern: bool = False,
 ) -> dict[str, dict[str, Any]]:
     required = {
         "chunking",
@@ -407,6 +411,14 @@ def _stage_contracts(
             "verification": contracts["verification"],
         },
     }
+    if modern:
+        # The checker is a generation substep, not a posthoc quality Judge.
+        # Policy drift must invalidate both its assessment and verification.
+        for stage in ("generation", "verification"):
+            bases[stage]["semantic_policy"] = semantic_policy
+            bases[stage]["semantic_policy_fingerprint"] = (
+                canonical_hash(semantic_policy) if semantic_policy is not None else None
+            )
     return {
         stage: {"fingerprint": canonical_hash(basis), "basis": basis}
         for stage, basis in bases.items()
@@ -599,6 +611,7 @@ def build_experiment_manifest(
     runtime: Mapping[str, Any],
     environment: Mapping[str, Any],
     created_at: str,
+    manifest_schema_version: int = EXPERIMENT_MANIFEST_SCHEMA_VERSION,
 ) -> dict[str, Any]:
     """Build the immutable identity portion of one M2 experiment.
 
@@ -607,6 +620,10 @@ def build_experiment_manifest(
     outputs. Every case attempt records the cache mode actually used.
     """
 
+    if type(manifest_schema_version) is not int or manifest_schema_version not in {
+        EXPERIMENT_MANIFEST_SCHEMA_VERSION, HISTORICAL_EXPERIMENT_MANIFEST_SCHEMA_VERSION
+    }:
+        raise ExperimentContractError("unsupported experiment manifest schema version")
     experiment_id = _require_non_empty_string("experiment_id", experiment_id)
     if execution_mode not in EXECUTION_MODES:
         raise ExperimentContractError(f"unsupported execution_mode: {execution_mode!r}")
@@ -645,6 +662,28 @@ def build_experiment_manifest(
         )
     runtime_payload = _require_mapping("runtime", runtime)
     environment_payload = _require_mapping("environment", environment)
+    semantic_policy = config_payload.get("semantic_policy")
+    if manifest_schema_version == HISTORICAL_EXPERIMENT_MANIFEST_SCHEMA_VERSION:
+        if semantic_policy is not None or "semantic_max_calls_per_case" in config_payload:
+            raise ExperimentContractError("historical manifest cannot grant semantic authority")
+    elif semantic_policy is not None:
+        from .semantic import SemanticPolicy
+
+        try:
+            semantic_policy = SemanticPolicy.from_dict(semantic_policy).to_dict()
+        except (TypeError, ValueError) as error:
+            raise ExperimentContractError("manifest semantic policy is invalid") from error
+        if config_payload.get("generate") is not True or execution_mode not in {
+            "smoke-generation", "full-regression"
+        }:
+            raise ExperimentContractError("semantic policy requires explicit generated execution")
+        if contract_payload.get("verification", {}).get("rules_version") != "general-bound-v2":
+            raise ExperimentContractError("semantic policy requires modern verification rules")
+        budget = config_payload.get("semantic_max_calls_per_case")
+        if type(budget) is not int or not 1 <= budget <= 8:
+            raise ExperimentContractError("semantic_max_calls_per_case must be between 1 and 8")
+    elif "semantic_max_calls_per_case" in config_payload:
+        raise ExperimentContractError("semantic call budget requires a frozen semantic policy")
 
     for field_name in ("snapshot_hash", "index_hash"):
         _require_non_empty_string(
@@ -699,6 +738,8 @@ def build_experiment_manifest(
         corpus=corpus_payload,
         dataset=dataset_payload,
         contracts=contract_payload,
+        semantic_policy=semantic_policy,
+        modern=manifest_schema_version == EXPERIMENT_MANIFEST_SCHEMA_VERSION,
     )
     compatibility_payload = {
         "execution_mode": execution_mode,
@@ -712,7 +753,7 @@ def build_experiment_manifest(
     }
     resume_hash = canonical_hash(compatibility_payload)
     manifest_core = {
-        "manifest_schema_version": EXPERIMENT_MANIFEST_SCHEMA_VERSION,
+        "manifest_schema_version": manifest_schema_version,
         "experiment_id": experiment_id,
         "created_at": created_at,
         "execution_mode": execution_mode,
@@ -746,7 +787,9 @@ def validate_experiment_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
     payload = _require_mapping("manifest", manifest)
     if (
         type(payload.get("manifest_schema_version")) is not int
-        or payload.get("manifest_schema_version") != EXPERIMENT_MANIFEST_SCHEMA_VERSION
+        or payload.get("manifest_schema_version") not in {
+            EXPERIMENT_MANIFEST_SCHEMA_VERSION, HISTORICAL_EXPERIMENT_MANIFEST_SCHEMA_VERSION
+        }
     ):
         raise ExperimentContractError("unsupported experiment manifest schema version")
     cache_policy = _require_mapping(
@@ -766,6 +809,7 @@ def validate_experiment_manifest(manifest: Mapping[str, Any]) -> dict[str, Any]:
             runtime=payload.get("runtime"),
             environment=payload.get("environment"),
             created_at=payload.get("created_at"),
+            manifest_schema_version=payload.get("manifest_schema_version"),
         )
     except (KeyError, TypeError) as exc:
         raise ExperimentContractError("malformed experiment manifest") from exc

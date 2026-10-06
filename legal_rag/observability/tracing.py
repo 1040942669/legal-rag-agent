@@ -15,6 +15,7 @@ from collections.abc import Mapping
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
+from ..experiment_runner import _MODEL_USAGE_ROLE_TO_CALL_KIND
 from .events import ERROR_CATEGORIES, Observation, ObservationContext, Observer
 
 if TYPE_CHECKING:
@@ -30,7 +31,9 @@ _STAGES = {
     "verification": ("verify", "verifier"),
     "judge": ("judge", "judge"),
 }
-_MODEL_CALL_KINDS = ("normalizer", "generation", "rerank", "judge")
+# Completion kinds follow the runner's closed usage-to-ledger contract. Rerank
+# is the existing separately governed model operation, not a completion role.
+_MODEL_CALL_KINDS = (*_MODEL_USAGE_ROLE_TO_CALL_KIND.values(), "rerank")
 _ERROR_MAP = {
     "timeout": "provider_timeout",
     "transport_error": "provider_error",

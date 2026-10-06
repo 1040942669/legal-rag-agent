@@ -311,6 +311,7 @@ def test_m5_t08_untrusted_evidence_cannot_expand_tool_or_scope_boundary(
     assert leaked_messages is None
     assert case.service.get_run(case.boundary.owner, case.run_id).status == "succeeded"
     record_scenario(
+        migrated_engine,
         "M5-T08",
         {
             "unauthorized_tool_calls": 0,

@@ -234,6 +234,15 @@ class SiliconFlowClient:
     usage: CompletionUsage = field(
         default_factory=CompletionUsage, init=False, repr=False, compare=False
     )
+    # Keyword-only opt-ins preserve legacy requests and positional construction.
+    max_tokens: int | None = field(default=None, kw_only=True)
+    enable_thinking: bool | None = field(default=None, kw_only=True)
+    response_format: str | None = field(default=None, kw_only=True)
+    follow_redirects: bool | None = field(default=None, kw_only=True)
+    load_environment_file: bool = field(default=True, kw_only=True)
+    last_response_metadata: dict[str, Any] = field(
+        default_factory=dict, init=False, repr=False, compare=False
+    )
 
     def __post_init__(self) -> None:
         self.request_timeout = validate_timeout_seconds(
@@ -241,6 +250,20 @@ class SiliconFlowClient:
             provider="siliconflow",
             operation="completion",
         )
+        valid = (
+            (self.max_tokens is None or (
+                type(self.max_tokens) is int and 1 <= self.max_tokens <= 32768
+            ))
+            and (self.enable_thinking is None or type(self.enable_thinking) is bool)
+            and (self.response_format is None or self.response_format == "json_object")
+            and (self.follow_redirects is None or type(self.follow_redirects) is bool)
+            and type(self.load_environment_file) is bool
+        )
+        if not valid:
+            raise ProviderCallError(
+                "configuration", provider="siliconflow", operation="completion",
+                cause_type="InvalidCompletionControls",
+            )
 
     def complete(self, prompt: str) -> str:
         require_live_model_calls_allowed("SiliconFlow completion")
@@ -257,6 +280,7 @@ class SiliconFlowClient:
         raise_sanitized_provider_error(error)
 
     def _complete_once(self, prompt: str) -> tuple[str, dict[str, int | None]]:
+        self.last_response_metadata = {}
         client = self._get_client()
 
         def decode(response: Any) -> tuple[str, dict[str, int | None]]:
@@ -266,12 +290,22 @@ class SiliconFlowClient:
                 self.usage.record_tokens(**token_counts)
                 raise TypeError("completion response choices are missing")
             message = getattr(choices[0], "message", None)
+            self.last_response_metadata = _completion_response_metadata(
+                response, choices[0], message, token_counts, self.model,
+            )
             content = getattr(message, "content", None)
             if content is not None and not isinstance(content, str):
                 self.usage.record_tokens(**token_counts)
                 raise TypeError("completion response content is invalid")
             return (content or "").strip(), token_counts
 
+        request_options: dict[str, Any] = {}
+        if self.max_tokens is not None:
+            request_options["max_tokens"] = self.max_tokens
+        if self.enable_thinking is not None:
+            request_options["extra_body"] = {"enable_thinking": self.enable_thinking}
+        if self.response_format is not None:
+            request_options["response_format"] = {"type": self.response_format}
         return _call_and_decode(
             provider="siliconflow",
             operation="completion",
@@ -279,6 +313,7 @@ class SiliconFlowClient:
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=self.temperature,
+                **request_options,
             ),
             decode=decode,
         )
@@ -299,7 +334,8 @@ class SiliconFlowClient:
             error = None
         if error is not None:
             raise error from None
-        load_dotenv()
+        if self.load_environment_file:
+            load_dotenv()
         api_key = os.environ.get(self.api_key_env)
         if not api_key:
             raise ProviderCallError(
@@ -309,11 +345,19 @@ class SiliconFlowClient:
                 cause_type="MissingApiKey",
             )
         try:
+            transport_options: dict[str, Any] = {}
+            if self.follow_redirects is not None:
+                from openai import DefaultHttpxClient
+
+                transport_options["http_client"] = DefaultHttpxClient(
+                    follow_redirects=self.follow_redirects
+                )
             self._client = OpenAI(
                 api_key=api_key,
                 base_url=self.base_url,
                 timeout=self.request_timeout,
                 max_retries=0,
+                **transport_options,
             )
         except ProviderCallError as exc:
             error = exc
@@ -327,7 +371,56 @@ class SiliconFlowClient:
         else:
             return self._client
         api_key = "<redacted>"
+        http_client = transport_options.get("http_client")
+        if http_client is not None:
+            try:
+                http_client.close()
+            except Exception:
+                pass
         raise_sanitized_provider_error(error)
+
+
+def _completion_response_metadata(
+    response: Any,
+    choice: Any,
+    message: Any,
+    counts: dict[str, int | None],
+    requested_model: str,
+) -> dict[str, Any]:
+    """Retain only bounded safety facts, never reasoning or response text."""
+
+    usage = getattr(response, "usage", None)
+    details = getattr(usage, "completion_tokens_details", None)
+    if isinstance(usage, dict):
+        details = usage.get("completion_tokens_details")
+    reasoning_tokens = (
+        details.get("reasoning_tokens") if isinstance(details, dict)
+        else getattr(details, "reasoning_tokens", None)
+    )
+    if reasoning_tokens is not None and (
+        type(reasoning_tokens) is not int or reasoning_tokens < 0
+    ):
+        raise ValueError("provider reasoning token usage is invalid")
+    reasoning_reported = hasattr(message, "reasoning_content")
+    reasoning = getattr(message, "reasoning_content", None)
+    if reasoning is not None and not isinstance(reasoning, str):
+        raise TypeError("provider reasoning content is invalid")
+    finish = getattr(choice, "finish_reason", None)
+    if finish is not None and finish not in (
+        "stop", "length", "tool_calls", "content_filter", "function_call",
+    ):
+        finish = "unknown"
+    return {
+        "finish_reason": finish,
+        # Null is not an observed empty string. Missing facts stay unknown.
+        "reasoning_content_reported": reasoning_reported and isinstance(reasoning, str),
+        "reasoning_content_nonempty": bool(reasoning),
+        "reasoning_tokens": reasoning_tokens,
+        "returned_model_matches": getattr(response, "model", None) == requested_model,
+        "prompt_tokens": counts["input_tokens"],
+        "completion_tokens": counts["output_tokens"],
+        "total_tokens": counts["total_tokens"],
+    }
 
 
 def _run_completion_attempt(

@@ -6,7 +6,10 @@ from collections import Counter, defaultdict
 from dataclasses import replace
 from numbers import Real
 from pathlib import Path
-from typing import Any, Mapping, Protocol, Sequence
+from typing import TYPE_CHECKING, Any, Mapping, Protocol, Sequence
+
+if TYPE_CHECKING:
+    from .bm25_settings import BM25Settings
 
 from .embeddings import (
     EmbeddingModelConfig,
@@ -28,6 +31,9 @@ from .retrieval_contracts import (
     chunk_payload_fingerprint,
     validate_retrieval_top_k,
 )
+
+
+DEFAULT_BM25_LEXICAL_PROFILE = "legacy-v1"
 
 
 class Retriever(Protocol):
@@ -178,15 +184,24 @@ class BM25Retriever:
         law_boost: float = 40.0,
         article_boost: float = 80.0,
         deprecated_penalty: float = 1.0,
+        lexical_profile: str = DEFAULT_BM25_LEXICAL_PROFILE,
     ) -> None:
+        if lexical_profile not in BM25_LEXICAL_PROFILES:
+            raise ValueError("unsupported BM25 lexical profile")
         self.chunks = chunks
         self.k1 = k1
         self.b = b
         self.law_boost = law_boost
         self.article_boost = article_boost
         self.deprecated_penalty = deprecated_penalty
-        self.known_law_hints = build_known_law_hints(chunks)
-        self.doc_tokens = [tokenize(chunk.text) for chunk in chunks]
+        self.lexical_profile = lexical_profile
+        self.query_text_version, self.document_text_version = bm25_text_versions(
+            lexical_profile
+        )
+        self.known_law_hints = tuple(build_known_law_hints(chunks))
+        self.doc_tokens = [
+            tokenize(chunk.text, profile=lexical_profile) for chunk in chunks
+        ]
         self.doc_lengths = [len(tokens) for tokens in self.doc_tokens]
         self.avgdl = sum(self.doc_lengths) / max(len(self.doc_lengths), 1)
         self.term_freqs = [Counter(tokens) for tokens in self.doc_tokens]
@@ -197,7 +212,7 @@ class BM25Retriever:
 
     def retrieve(self, query: str, top_k: int = 5) -> list[SearchResult]:
         resolved_top_k = validate_retrieval_top_k(top_k)
-        query_terms = tokenize(query)
+        query_terms, expansion_terms = self._query_features(query)
         law_hints = extract_law_hints(query, known_hints=self.known_law_hints)
         article_hints = extract_article_terms(query)
         scores: list[tuple[int, float, dict]] = []
@@ -236,6 +251,10 @@ class BM25Retriever:
                     "bm25_b": self.b,
                     "bm25_law_boost": self.law_boost,
                     "bm25_article_boost": self.article_boost,
+                    "lexical_profile": self.lexical_profile,
+                    "lexical_expansion_terms": expansion_terms,
+                    "query_text_version": self.query_text_version,
+                    "document_text_version": self.document_text_version,
                 }
                 if multiplier != 1.0:
                     trace["deprecated_penalty"] = multiplier
@@ -254,6 +273,20 @@ class BM25Retriever:
                 scores[:resolved_top_k], start=1
             )
         ]
+
+    def _query_features(self, query: str) -> tuple[list[str], list[str]]:
+        """One production feature contract; diagnostic subclasses stay explicit."""
+        expansion_terms = (
+            lexical_expansion_terms(query)
+            if self.lexical_profile == "local-lexical-v2"
+            else []
+        )
+        query_terms = tokenize(query, profile=self.lexical_profile)
+        if self.lexical_profile in {"local-lexical-v2", "generic-v3"}:
+            # Only whole features are added, not their generic single characters.
+            query_terms.extend(expansion_terms)
+            query_terms = list(dict.fromkeys(query_terms))
+        return query_terms, expansion_terms
 
 
 class DenseRetriever:
@@ -316,7 +349,7 @@ class CachedDenseRetriever:
             expected_dimension=cache_dimension,
         )
         self.deprecated_penalty = deprecated_penalty
-        self.known_law_hints = build_known_law_hints(chunks)
+        self.known_law_hints = tuple(build_known_law_hints(chunks))
         self.deprecated_indexes = [
             index
             for index, chunk in enumerate(chunks)
@@ -575,16 +608,20 @@ def build_retriever(
     bm25_law_boost: float = 40.0,
     bm25_article_boost: float = 80.0,
     deprecated_penalty: float = 1.0,
+    bm25_lexical_profile: str = DEFAULT_BM25_LEXICAL_PROFILE,
+    bm25_settings: BM25Settings | None = None,
 ) -> Retriever:
-    if kind == "bm25":
-        return BM25Retriever(
-            chunks,
-            k1=bm25_k1,
-            b=bm25_b,
-            law_boost=bm25_law_boost,
-            article_boost=bm25_article_boost,
+    from .bm25_settings import BM25Settings, build_bm25_retriever
+
+    settings = None
+    if kind in {"bm25", "rrf", "hybrid"}:
+        settings = bm25_settings if bm25_settings is not None else BM25Settings(
+            lexical_profile=bm25_lexical_profile, k1=bm25_k1, b=bm25_b,
+            law_boost=bm25_law_boost, article_boost=bm25_article_boost,
             deprecated_penalty=deprecated_penalty,
         )
+    if kind == "bm25":
+        return build_bm25_retriever(chunks, settings)
     if kind == "dense":
         if embedding_cache_dir and embedding_model_config:
             return CachedDenseRetriever(
@@ -596,14 +633,7 @@ def build_retriever(
             )
         return DenseRetriever(chunks, model_name=embedding_model)
     if kind in {"rrf", "hybrid"}:
-        bm25 = BM25Retriever(
-            chunks,
-            k1=bm25_k1,
-            b=bm25_b,
-            law_boost=bm25_law_boost,
-            article_boost=bm25_article_boost,
-            deprecated_penalty=deprecated_penalty,
-        )
+        bm25 = build_bm25_retriever(chunks, settings)
         if embedding_cache_dir and embedding_model_config:
             dense = CachedDenseRetriever(
                 chunks,
@@ -628,10 +658,82 @@ def reciprocal_rank(rank: int, k: int = 60) -> float:
     return 1.0 / (k + rank)
 
 
-def tokenize(text: str) -> list[str]:
+BM25_LEXICAL_PROFILES = frozenset({"legacy-v1", "local-lexical-v2", "generic-v3"})
+
+
+def bm25_text_versions(profile: str) -> tuple[str, str]:
+    if profile == "legacy-v1":
+        return "bm25-tokenize-v1", "bm25-tokenize-v1"
+    if profile == "local-lexical-v2":
+        return "bm25-query-local-lexical-v2", "bm25-document-contiguous-v2"
+    if profile == "generic-v3":
+        return "bm25-query-generic-v3", "bm25-document-generic-contiguous-v3"
+    raise ValueError("unsupported BM25 lexical profile")
+
+
+def lexical_expansion_terms(query: str) -> list[str]:
+    """Add bounded shopping vocabulary, never laws, article numbers or answers.
+
+    The original query (including negation) is retained. These are retrieval
+    features, not findings about legal eligibility. An online channel alone
+    (for example looking up a tax refund) is not a purchase.
+    """
+    purchase_verb = r"购买|订购|购物|(?<![收购])买(?![通断卖])"
+    standalone_online_purchase = r"网购(?!平台|网站|软件|商家|店铺|APP|app)"
+    # Ambiguous, negated and multiple-topic purchases keep the unexpanded query.
+    if re.search(
+        r"(?:没有|没|不|未|并未|不是|并非|不会).{0,6}(?:购买|订购|购物|网购|买(?![通断卖]))"
+        r"|另外|另一个问题|另问|同时问|再问|另一方面"
+        r"|[;；\n]|[。.!！？?]\s*\S"
+        r"|股票|证券|基金|债券|房产|房子|房屋|买房|购房|退学|退税|收买|买通",
+        query,
+    ):
+        return []
+    goods_pattern = (
+        r"商品|货物|物品|用品|东西|衣服|服装|毛衣|裤子|外套|鞋|手机|电脑|"
+        r"家电|家具|电子产品|食品|水果|书籍"
+    )
+    purchasing_clauses = [
+        clause
+        for clause in re.split(r"[，,。.;；!?！？\n]", query)
+        if re.search(f"{purchase_verb}|{standalone_online_purchase}", clause)
+        and re.search(goods_pattern, clause)
+    ]
+    if not purchasing_clauses:
+        return []
+    purchasing_text = "，".join(purchasing_clauses)
+    online_purchase = bool(
+        re.search(
+            f"{standalone_online_purchase}|"
+            r"(?:网上|线上|在线|网络(?:上)?|网店|电商)"
+            r"(?:直接|刚刚?|昨天|今天|已经|曾经|新近|又|再)?"
+            r"(?:购买|购物|订购|买(?![通断卖]))",
+            purchasing_text,
+        )
+    )
+    terms = ["网络"] if online_purchase else []
+    terms.extend(["购买", "商品"])
+    if re.search(
+        r"退货|退回(?:商品|货物|东西)|"
+        r"(?:能|可以|想|要|要求|申请|不让|不能|拒绝|不|可)退"
+        r"(?=(?:吗|么|呢|掉|回去|怎么办)?(?:[，,。;；!?！？]|$))",
+        query,
+    ):
+        terms.append("退货")
+    return terms
+
+
+def tokenize(text: str, *, profile: str = "legacy-v1") -> list[str]:
+    if profile not in BM25_LEXICAL_PROFILES:
+        raise ValueError("unsupported BM25 lexical profile")
     normalized = text.lower()
     chinese_chars = re.findall(r"[\u4e00-\u9fff]", normalized)
-    chinese_bigrams = [a + b for a, b in zip(chinese_chars, chinese_chars[1:])]
+    runs = (
+        ["".join(chinese_chars)]
+        if profile == "legacy-v1"
+        else re.findall(r"[\u4e00-\u9fff]+", normalized)
+    )
+    chinese_bigrams = [a + b for run in runs for a, b in zip(run, run[1:])]
     ascii_terms = re.findall(r"[a-z0-9_]+", normalized)
     law_titles = re.findall(r"《([^》]+)》", text)
     article_terms = re.findall(r"第[^条]{1,30}条", text)
@@ -674,7 +776,7 @@ def build_known_law_hints(chunks: list[Chunk]) -> list[str]:
     return sorted(hints, key=len, reverse=True)
 
 
-def extract_law_hints(text: str, known_hints: list[str] | None = None) -> list[str]:
+def extract_law_hints(text: str, known_hints: Sequence[str] | None = None) -> list[str]:
     explicit_titles = re.findall(r"《([^》]+)》", text)
     candidates = known_hints if known_hints else FALLBACK_LAW_HINTS
     matched: list[str] = []

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import asdict, dataclass
+from .request_policy import advisory_risk_flags, modern_request_rules
 
 
 ARTICLE_NUMBER_RE = re.compile(r"第[零一二三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟\d]+条")
@@ -135,11 +136,11 @@ class QueryAnalysis:
         return asdict(self)
 
 
-def analyze_query(query: str) -> QueryAnalysis:
+def analyze_query(query: str, *, evidence_rules_version: str = "general-reference-v3") -> QueryAnalysis:
     normalized = re.sub(r"\s+", " ", query.strip())
     law_names = extract_law_names(normalized)
     article_numbers = extract_article_numbers(normalized)
-    risk_flags = detect_risk_flags(normalized)
+    risk_flags = detect_risk_flags(normalized, evidence_rules_version=evidence_rules_version)
     complexity_flags = detect_complexity_flags(normalized, law_names, article_numbers, risk_flags)
     case_type_hints = infer_case_type_hints(normalized, law_names, article_numbers, complexity_flags)
     confidence = estimate_confidence(law_names, article_numbers, complexity_flags, risk_flags)
@@ -182,7 +183,8 @@ def extract_law_names(text: str) -> list[str]:
     return unique(names)
 
 
-def detect_risk_flags(text: str) -> list[str]:
+def detect_risk_flags(text: str, *, evidence_rules_version: str = "general-reference-v3") -> list[str]:
+    modern = modern_request_rules(evidence_rules_version)
     flags: list[str] = []
     if any(word in text for word in EMOTIONAL_WORDS):
         flags.append("emotional")
@@ -190,13 +192,13 @@ def detect_risk_flags(text: str) -> list[str]:
         flags.append("case_strategy")
     if any(word in text for word in ILLEGAL_HELP_WORDS):
         flags.append("illegal_help")
-    if any(word in text for word in NON_LEGAL_WORDS) and not extract_law_names(text):
+    if any(word in text for word in NON_LEGAL_WORDS) and (modern or not extract_law_names(text)):
         flags.append("non_legal")
     if any(word in text for word in MEDICAL_FINANCIAL_WORDS):
         flags.append("medical_financial_advice")
     if "!" in text or "！" in text:
         flags.append("emotional")
-    return unique(flags)
+    return advisory_risk_flags(unique(flags), evidence_rules_version=evidence_rules_version)
 
 
 def detect_complexity_flags(

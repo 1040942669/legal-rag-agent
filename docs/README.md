@@ -14,6 +14,7 @@
 8. [Phase 4B 技术调研](PHASE4B_RESEARCH_AND_DECISIONS.md)：reranker/observability 机制、L9 可取原则和暂缓项。
 9. [历史 Phase 执行计划](LEGAL_RAG_EXECUTION_PLAN.md)：截至 2026-09-18 的 Phase 0-5 记录，不是当前 M0-M7 路线。
 10. [M6 验收报告](../reports/refactor/M6.md)、[观测修补报告](../reports/refactor/M6-observability-patch.md)、[v0.7.1 回执](refactor/receipts/M6-v0.7.1.json) 与 [ADR-004](refactor/decisions/ADR-004-m6-batch-jobs-observability.md)：批任务、真实 broker/worker、运行时观测、两版发布、完成的独立回执及治理关闭的真实证据。
+11. [中文检索改善与前三轮比较](../reports/refactor/CHINESE_BM25_OPTIMIZATION.md)、[最新原生 IK 实验](../reports/refactor/ELASTICSEARCH_IK_EXPERIMENT.md) 与 [ADR-007](refactor/decisions/ADR-007-chinese-bm25-and-bounded-rules.md)：成熟组件接线、有限分析器比较、负结果与默认推广边界，不是法律质量或生产容量验收。
 
 ## 文档职责
 

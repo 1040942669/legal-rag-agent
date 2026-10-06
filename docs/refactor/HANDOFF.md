@@ -1,8 +1,117 @@
 # M6 执行交接
 
-> 当前状态以最前面的“当前事实”及 `STATE.json` 为准。后续软件已发布但回执待完成、`v0.7.0` 回执待办、发布前候选及 M5 内容均保留为历史快照，不能把其旧待办或绿灯当作当前状态。
+## 当前任务：有限工程可演示性改善
 
-## 当前事实：M6 软件、独立回执和治理已完成
+2026-10-07 用户委托优化并要求次日形成可解释、可演示的版本。继续 clean `db64d328cb289f4b099c9fc523437fba524809cf` 上的既有 `codex/chinese-bm25-optimization` / Draft PR31，不丢前置实现。origin/master 仍为 `4d9546e06cfe8ff44660943ffd2dd353ac2e61cc`；db64 自身 [CI37505709901](https://github.com/1040942669/legal-rag-agent/actions/runs/37505709901) 已独立读回四路 completed/success，不替代本轮新源码。
+
+本轮 [E1-E6 清单](ENGINEERING_READINESS_TODO.md) 与 [验收记录](../../reports/refactor/ENGINEERING_READINESS_20261008.md) 为当前入口。默认决定为保留 legacy-v1、成熟组件显式opt-in，停止追加分词器；用户委托优化不是删除MRR回退或更改自动门槛。已实现 run 内延迟 BM25、semantic观测漏计修复、vector可选提示属性修复；固定离线合同入口与最终适用运行时验证仍待收口。个人材料仅本地，不 stage/upload，不从源码推断个人贡献或真人口述已通过。
+
+开发期 RED/GREEN 各自保留，定向数字不是最终冻结候选验收。下一步停止所有 tracked 写入后执行固定演示、隔离PG及精确源码累计M2，再明确路径commit/push，更新原Draft PR并读取自身head CI。不新建Release、不移动Tag、不使用剩余付费额度、不进入M7；历史IK及软件发布段落保持各自历史快照含义。
+
+本轮独立冻结源码已是 `3c3b58822e4446a7d6f2412f3bc10eea86ea1b50`，已commit/push并读回远端ref。六组实际showcase98/0/0/0通过、身份稳定；真实PG46/0/0/0、61.22s通过，含M5 T01/T02/T03/并发fencing与M6实际JSONL。自建cluster实际stop/start后新进程核验schema0008成功，最终已停止。该clean源码累计M2于UTC18:07:39至18:11:45完成25/25、exit0、244652ms，2315 passed+157 subtests/192.12s、JUnit2472/0/0/0、1上游warning；期间无tracked写入。这些不是模型/法律质量证明，不与重叠专项叠加。
+
+源码 [CI37508896508](https://github.com/1040942669/legal-rag-agent/actions/runs/37508896508) 当前四路in_progress；本地未跑新的Linux broker。验收结果文档提交的未来head也需自身CI，不改绑源码或旧db64绿灯。个人材料仅local ignored，不发到PR。后续为结果静态复核、commit/push文档及真实CI状态读回；不合并/发版。若需个人文字稿，先由人确认真实贡献并完成口述高危审查，源码审计不能代替。
+
+## 当前任务：有限 Elasticsearch + IK 实测与交接
+
+2026-10-07 用户确认“ok那先测吧”，追加范围仅是固定本地 ES/IK 比较，从已推送且四路 CI 成功的 `31a6e63f32b4640eb77aa6a69ed9ae0171bc2ae9` 继续同一 Draft PR31。最新实验源码 `dde6fc3c568b461aa84cfa38351478b239eb20db` 已提交推送；benchmark 和最终本地门禁前后均为同一 clean HEAD。origin/master 仍是 `4d9546e06cfe8ff44660943ffd2dd353ac2e61cc`。本节是结果文档提交前快照，不虚填自身未来 SHA。
+
+[独立 IK 验收报告](../../reports/refactor/ELASTICSEARCH_IK_EXPERIMENT.md) 与 [I1-I4 清单](CHINESE_RETRIEVAL_TODO.md) 记录最新事实。run `chinese_bm25_20261007_ik_fixed_fourth_verified` 使用固定120题/108有效排名 gold/12 NA、19050 article chunks/205来源；三臂正反两遍720条全部成功，排名/分数重复漂移0，源码/输入/运行时与自有配置身份稳定，自建服务已停止且端口回收通过。legacy Hit@5 76/108、MRR .610184；char 83/108、.597065；原生 ES+IK 71/108、.550307。IK相对legacy为3改善/8回退，Hit@5差异CI95 `[-.1019,.0093]`。char仍是现代候选首选，但符合双指标自动推广者为空；默认不变。
+
+ES/IK固定9.1.4，bundled JDK24.0.2、Lucene10.2.2；官方ZIP内容与685项实际安装文件核验。只用原 bundled 词典，`ik_max_word`建库/`ik_smart`查询、唯一term OR、k1=1.5/b=.75/overlap=true，一分片零副本，服务端在top-k前解决chunk ID并列。不是 stock match、单因子分词试验或生产安全推荐；OpenSearch未跑。查询p95为612.04/30.11/59.41ms、采样含JVM进程树峰值468.02/449.29/1656.56MiB，不能当成完整API延迟或容量。
+
+最终135单元合同通过，JUnit135/0/0/0、1.72s，另有8项显式真实ES/JVM合成检查通过，默认CI不启动该服务。clean `dde6fc3` 最终M2为25/25 passed、报告exit0、267732ms，UTC17:26:07Z至17:30:37Z；全量2255 passed+157 subtests/206.58s、4条jieba上游警告、JUnit2412/0/0/0，`.tmp/ik-dde6fc3-m2-final.json`。不与重叠专项叠加分母。生产包/pyproject/lock与04fd保持一致，本次本地PG/wheel/Linux broker未重跑，旧证据保留原身份。
+
+原 run `..._ik_fixed_fourth` 被中断，exit/原因未知且未形成summary；保留interruption。`..._recovery1`排名完成，但text字段 `_terms_enum` 空返回被误当成OOV，诊断无效；原summary及sidecar都保留，不混用该轮性能。只将后置诊断改为精确term文档计数，固定参数/词典/语料/gold/协议未变，完整复跑形成当前verified结果。120条诊断completed，逐题去重token计数累加1733、OOV415，118部分OOV、0全OOV、0空查询或空检索；这不是排名回退的单一原因。c241旧M2主动取消，不写成通过或产品失败。
+
+当前源码 [CI37502817897](https://github.com/1040942669/legal-rag-agent/actions/runs/37502817897) 最新已四路completed/success；被新提交替代的d19/c241 CI cancelled。8f042fb和31a6e63旧四路CI均成功，均保留独立身份，不冒充未来文档head。最后结果文档head必须独立读取。全部raw数据/二进制/逐题原文只在本地ignored目录，新增模型调用和费用0。Python精确IPv4 TCP loopback守卫、JVM loopback配置和关闭远程词典不等于OS防火墙或airgap。
+
+结果文档静态3/3已通过，覆盖47份Markdown、2份JSON、343份候选文本、无高置信凭证形状，`.tmp/ik-result-docs-static-final.json`；纯元数据收口后commit前重验同组检查。下一步只commit/push、更新现有Draft PR31并核验实际最终head CI，然后报告并停止有限实验。用户若希望成熟库成为默认，须明确是否接受char的排序取舍，或另授权固定整链路质量研究；不继续试分词器直到本开发集赢。没有独立法律审核/未曝光holdout/真实模型质量或生产验证。不得切默认、接生产ES、复用付费额度、合并发布、移动M5/M6 Tag或开始M7。
+
+## 前轮中文检索与 SmartCN 结果快照
+
+2026-10-06 用户授权先研究中文 BM25、编写 TODO、逐项实施并推送 GitHub。当前任务以 `STATE.json.chinese_retrieval_optimization` 和 [优化清单](CHINESE_RETRIEVAL_TODO.md) 为准。下文 local-only 是前轮历史范围，不限制本次已明确授权的 commit/push/review PR；本次不新建 Release、不移动 Tag、不进入 M7、不进行真实模型调用。
+
+开始时核验 HEAD、origin/master 及远端默认 master 均为 `4d9546e06cfe8ff44660943ffd2dd353ac2e61cc`。已有 Smoke、lexical、W1-W8 改动完整保存为前置提交 `914a7e322d2787ec99a2fe1f1117ad5906244e02`。本轮分支 `codex/chinese-bm25-optimization`，运行时改善提交 `04fd389945125c81767745bbdce48137921d26fd` 已包含T4-T7；其后文档head `e3d32a96d3a37f5ab7c0e559bb000448fb0e603d` 与当前仅实验源码 `8f042fb46b83c7d2e7eb630c1197546f0d98c3cd` 均已提交并核验推送到 [Draft PR #31](https://github.com/1040942669/legal-rag-agent/pull/31)。本节是8f之后的结果文档回填，不虚填自身未来commit身份。
+
+前两次预冻结比较保留原身份，见 [本轮报告](../../reports/refactor/CHINESE_BM25_OPTIMIZATION.md)。首轮jieba search72/108低于legacy76/108；第二轮成熟sklearn char83/108，但MRR@5 .597065低于legacy .610184。用户选择第3项继续实测Lucene SmartCN，第三轮 `chinese_bm25_20261006_smartcn_fixed_third` 已completed：legacy Hit@5 76/108、MRR .610184，char 83/108、.597065，BM25S＋SmartCN控制臂73/108、.506632，原生Lucene＋SmartCN73/108、.503237。四臂两pass无排名漂移，代码/输入/实际运行身份稳定，错误与真实模型调用均0。没有候选满足Hit@5和MRR双项不回退；selected_modern_arm=char仅是候选排序，promotion_eligible_modern_arm=null。默认仍legacy，不推广SmartCN，不继续试到赢；用户是否接受char取舍的新选择尚待回复。
+
+SmartCN只增加实验脚本、独立v3协议和本地Java stdio桥，不接生产API、服务selector或共享索引缓存，不改旧协议、语料或gold。139项合同检查通过，组成是102单元＋37显式实际JVM，不能称远端Java CI。8f042fb的本地M2为25/25 passed、exit0、316818ms，其中2120 passed＋157 subtests、245.43s、JUnit2277/0/0/0，4条jieba上游警告；artifact `.tmp/smartcn-8f042fb-m2-final.json`，门禁前后均核验同一clean HEAD。120题仍是重复开发集，只有108检索gold；12无gold题排名NA不代表拒答成功，不能声称独立法律泛化。原失败及各自身份见验收报告，不合并专项分母。
+
+旧运行时04fd的本地累计M2为25/25 passed、234906ms，其中2018 passed+157子测试、180.49s、JUnit2175/0/0/0；17文件隔离PG为93 passed/94.32s，并完成真实stop/start与新进程schema0008恢复。实际仓库外installed-wheel27模块通过，110个包源码模块与候选逐字节一致。本轮生产代码未改，未重跑本地PG/wheel；这些旧证据严格保留04fd身份，不冒充8f新验收。
+
+源码候选 [04fd389精确CI37354368069](https://github.com/1040942669/legal-rag-agent/actions/runs/37354368069) 四路全部completed/success；已下载核验offline/M4/M5/M6累计门禁分别25/25、41/41、51/51、58/58。真实Linux worker JUnit76/0/0/0、累计M5为81/0/0/0，回执严格绑定04fd389与schema0008。仅本地Linux broker因Docker daemon不可用not_run，不能把它与远端实际验证混淆。`c562eec`测试入口收集失败及后续修复原样保留。
+
+旧文档e3d32a9的 [CI 37356943303](https://github.com/1040942669/legal-rag-agent/actions/runs/37356943303) 已四路成功。当前8f042fb的 [CI 37403867767](https://github.com/1040942669/legal-rag-agent/actions/runs/37403867767) 在本次回填观察时已offline/M4/M5 completed/success，M6仍运行中。上述旧CI与当前部分完成状态分开记录，不提前写当前四路通过，也不代表未来文档head。
+
+下一步只完成第三轮结果文档静态检查及push，再独立读取当前源码和后续文档head的精确CI状态，不递归回填未来SHA。用户尚未选择保留默认交付或接受char的MRR取舍；在明确答复前不切默认、不追加实验。PR保持Draft，不合并发布，不移动已有Tag，不进入M7。
+
+最初审计复现的风险词误拒、引用后置否定/转述误归属、分数尺度误判及目录标题合同不一致均按机制修复并增加反例；初始216项旧测试不是修复验收。实施收敛为成熟评分/分析组件、配置与历史身份、规则裁决权收缩，不添加通用意图框架或共享缓存。每run仍重建索引，char已加载后约1.62至1.66秒，legacy约1.06至1.08秒，热查询更快不能称API端到端更快。复杂指代未知、风险无信号不等于安全、机械通过不等于法律语义支持，详见 [ADR-007](decisions/ADR-007-chinese-bm25-and-bounded-rules.md)。
+
+> 以下是前轮历史状态，以各自原始权限和提交时点解释；当前任务只以最上面的中文检索节点为准。M6 保持 released，M7 未开始；旧发布与门禁不能替代当前候选验证。
+
+## 前轮历史改善：通用证据合同与受控服务接线
+
+- 当前分支 `codex/general-rag-improvements`，HEAD/基线为 `4d9546e06cfe8ff44660943ffd2dd353ac2e61cc`，dirty=true。保留既有未提交 Smoke/lexical 代码，不 reset/stash/覆盖；本次未 commit/push/PR/合并/Tag/Release。
+- 用户要求完整设计、复核、择优实施，选择 [ADR-006](decisions/ADR-006-general-evidence-first-improvements.md) 的 W1 至 W8。适用的本地工程实施、独立复核、修复候选运行时门禁及已观察的结果文档静态3/3已完成，原源码scope与27个critical文件身份未变；结果回写后仅重验同组静态。这不是法律质量验收、生产证明或新 Release。真实 RED/GREEN 与处理链见 [独立改善验收记录](../../reports/refactor/GENERAL_EVIDENCE_IMPROVEMENTS.md)。
+- 消费者退货题是既有法律回归，不是新增电商模块。旧购物扩展仅保留显式历史对照；新 generic-v3 不含购物特判，初始 opt-in，legacy-v1 仍为排名默认。现代机械合同逐 `(law, article)` 检查，不沿用旧场景硬闸门，不把高分或机械充分当语义 supported。
+- 精确路由已连接到 PostgreSQL-bound assistant 和 chat/graph；not_found/needs_disambiguation 不得以 fuzzy fallback 冒充 found。完整法条查询与原授权 chunk 分开。生成后使用完整可见输出绑定 assessment；required 未知/失败只能发布安全有限模式并保留草稿失败摘要。
+- 服务冻结允许名单、外发和价格策略，generation 默认 disabled；generation/checker 共用 durable count/Decimal money ledger。仅追加0008，旧 run 不获得 paid 权限，unknown 保留预留不重试，不承诺供应商账单硬上限。
+- W7 strict pending/可信准入/一次 exposure lock 已实现并验证，实际120题审核包仍 `human_review_complete=false`、`holdout_admitted=false`。没有真实法律 gold 审核或独立未曝光集，不能把规则/回归绿灯当泛化证据，默认排名不推广。
+- 有界解析器不是完整自然语言理解，仍有保守误澄清。例如 `《合成甲法》是什么意思？` 当前为 unresolved；历史时间标记加未知指代，或历史甲引用后仅当前解释乙，也可能整体要求澄清。保留这些已知代价，不继续为逐句话术扩展意图词表。
+
+### 修复后最终候选的真实结果
+
+- 全量 pytest：`1752 passed + 157 subtests passed in 160.34s`，JUnit `1909/0/0/0`，`.tmp/general-repaired-candidate-full-pytest.xml`。专项数字重叠，不与全量结果相加。
+- 累计 M2 offline gate：`25/25 passed`、exit 0、217074ms，`.tmp/general-repaired-candidate-m2-final.json`。这是修复后完整候选本轮证据，不借用首轮或旧 M5/M6 门禁。
+- 真实隔离 PostgreSQL 统一回归：150 passed /112.53s，JUnit `150/0/0/0`，`.tmp/general-pg-repaired-candidate-final.xml`。包含新服务合同及适用旧 M3/M4/M5/M6 数据库回归。
+- 当前候选物理 PostgreSQL 重启：26 passed /35.66s，`.tmp/general-pg-repaired-restart-final.xml`；实际 stop/start 后由新的 Python 进程验证 schema8 与持久状态。prepare/stop/start/fresh-process verify 证据保留在 `.tmp/isolated-pg-86b747ec941a4b97b0f88223c659d569/`，不把进程内模拟当服务重启。
+- 实际候选 wheel 构建、仓库外安装与 smoke：23 runtime modules、head `0008_execution_money`、`source_checkout_isolated=true`；SHA-256 `c7d348644a51a7dc258d7e4d6bdff8a2e4306eff529c358101f5a7cd6832b667`，`.tmp/general-repaired-candidate-wheel-probe.json`。这是本地 dirty 候选，不是重新发布现有0.7.1。
+- 八臂消融 `offline_components_20261005_repaired` 已 completed，528815.737ms；固定旧120题含108检索 gold 与12拒答，paired_valid=108、unknown=0、actual_provider_calls=0，code/input/dataset 身份均 stable。运行完成只证明本轮比较可计算，不是独立 holdout 或默认推广；精确组件收益与回退见独立验收记录。
+- 文档首轮真实静态：3/3 passed、exit0，UTC `2026-10-04T20:06:31Z`，`.tmp/general-improvements-static-first.json`；覆盖43个 Markdown、2个 JSON 和305个候选文本，高置信凭证形态无匹配。主执行流程将对本次结果回写后的文档做最终静态复核，后续轮次尚未执行，不能提前称 passed。
+
+### 保留失败与停止边界
+
+- 首次完整候选 M2 gate 为24/25、exit1，三项公共 validator fixture 失败；首轮完整 pytest 分母未保存，不补造总数。首次八臂 `offline_components_20261005_first` 的1920条执行均失败，paired_valid=0、unknown=108、指标为 NA，actual_provider_calls=null/unknown 仍保留，不能改写为质量0或已确认调用0。
+- 后续仅修通用完整标题身份、未知标题边界与真实拒答评分投影，不删题、不改 gold、不调 rank 参数。各轮 RED、首轮 manifest/summary、两份 paid Smoke 和旧 lexical 实验身份、账本与 hashes 均保持原样；新重跑使用独立 run ID。
+- 本次新真实模型调用0、新增模型费用0，无 Key/旧raw/私人资料读取或语料上传，无远端写。未运行项仍为真实 Linux broker/prefork、Ruff（未安装）、checker 校准、权威法律审核与现行性核验、独立未曝光 holdout、第三 paid Smoke、生产容量及远端 CI。工程通过不证明法律准确率提升、checker 等同真人或供应商账单硬上限。
+- 停止边界：结果回写后只重验同组文档静态，汇报已完成的本地明确范围后停止；不擅自追加付费调用、commit/push/PR/合并/Tag/Release或启动 M7。M5/M6 发布历史与 M7 `required=true / not_started` 保持不变。
+
+## 历史本地修复：词汇检索候选与证据闸门
+
+- 用户要求继续完善并在修改后汇报。本轮只做可离线复现的检索与证据检查，不重开已使用的付费账本、不上传密钥或原始语料、不进行远端写操作、服务部署或 M7。
+- 保留默认 `legacy-v1`；新增显式 opt-in `local-lexical-v2` 和 [配置示例](../../configs/lexical-v2.yaml)。候选保持原始 query、风险判断与法名条号提取，只追加有界实物购买词汇；否定、非实物购买、金融和多主题语句保守不扩展。新版本 trace/cache 身份不同，不改 Chunk、scope/profile/snapshot 或语料。
+- 证据检查修正精确法名、显式单法律与条号归属及非法分数；纯 BM25 v2 的商品退货问题新增同结果必要词检查。合法多法问题不推断条号笛卡尔关系；高分、词汇齐全与来源有效仍不代表语义 supported。模型自报 insufficient_evidence 仍不能覆盖流水线预期模式，既有 verifier 和付费 runner 不变。
+- 唯一 A/B 为 `offline_lexical_ab_20261004_first`，UTC `2026-10-04T08:17:45Z` 至 `08:20:57Z`，child/shell exit 0，191551 ms。120 条旧回归包含 108 检索 gold 与 12 拒答；另有 16 合成检查。每题 A/B 与 B/A 重复不漂移，服务失败/unknown/provider 为 0，代码/数据/语料身份稳定。
+- Hit@5 `76/108 -> 78/108`，MRR `0.610184 -> 0.624227`，coverage `0.660494 -> 0.679012`；4 题改善、2 题回退，差异 95% CI `[-0.0278, 0.0648]` 跨 0，故不推广默认。网购退货题未进前 5 变为第 1；工伤、退货与信息多问两题从第 5 跌出前 5。12 拒答两臂 12/12；候选仍有 28 个未命中但启发式充分的案例，不能声称语义覆盖问题已解决。
+- 专项最终 139 passed + 89 subtests、exit 0，JUnit `.tmp/lexical-evidence-safety-final-green.xml`；独立复测 134 passed、exit 0，`.tmp/offline-lexical-independent-final.xml`。早期 RED 与输入字段修正记录保留。本轮冻结候选的完整累计 M2 offline 门禁为 25/25 passed、child/shell exit 0、193624 ms，UTC `2026-10-04T08:30:01Z` 至 `08:33:16Z`；全量 `1294 passed + 157 subtests in 139.51s`，JUnit `1451/0/0/0`，artifact `.tmp/local-lexical-m2-first.json`。这是本轮真实结果，不借用旧门禁；详见 [验收报告](../../reports/refactor/LOCAL_LEXICAL_RETRIEVAL.md)。
+- 实验 manifest / summary SHA-256 为 `506c47fb2d0d1cc0583ee2f0acf7384a80fc7fcfec71fa1fc11c19d02f2ee068` / `eec042f09fe0e03d5ea681bb185799415b76250a3542e4152f2f282f17024f74`。完整输出仅本地 ignored，公开候选仅代码、合成测试与脱敏总结。随后仅补配置示例和文档，不更改已测算法。
+- 分支 `codex/live-smoke-qwen35b`，HEAD `4d9546e06cfe8ff44660943ffd2dd353ac2e61cc`，来自核验后的最新 origin/master；原未提交代码均保留。本次 commit / push / PR / Tag / Release 均未创建；旧 M5 `v0.6.0`、M6 `v0.7.1`、回执与 M7 not_started 不变。真实 API 第三轮、30 题真实生成、Judge、法律人工评审、真实 DB/broker 故障和远端 CI 为 not_run；Ruff 未安装，not_run。
+- 结果回写后的静态三项 3/3 passed、exit 0，UTC `2026-10-04T08:38:24Z` 至 `08:38:25Z`：41 个候选 Markdown 链接、2 个 JSON 状态与 268 个候选文本的凭证风险检查通过，artifact `.tmp/local-lexical-final-static.json`；不覆盖全量门禁或旧实验输出。独立文档审查与代码/历史 hash 复核继续保留。
+- 下一条动作：本轮局部改进与离线验证已完成，运行时代码和测试保持冻结，汇报后停止。候选仅显式可选，默认不变；完整 live Smoke 和法律语义质量验收仍未完成。不自动补付费请求、复用旧额度、发版或进入 M7。
+
+## 历史局部实验：引用格式修复与限额复测
+
+- 用户明确要求继续测试和修 bug。本次只补足 `answer_text` 正文同句引用、句末标点之前放引用、`claims.text` 单句复制的提示要求；不修改既有 verifier 判定、不自动补造引用、不改变 parser schema。提示版本为 `m1-structured-qa-citation-alignment-v2`，生成 manifest 同步版本以避免旧缓存混用。
+- 首轮原 manifest、summary、账本三份证据按原 SHA-256 只读核验，失败与费用完整保留。修复复测身份为 `qwen35b-repair-smoke-20261003`，共用一次性 canonical 账本；旧 2 次 / 0.0009544 元仍计入原总限额，最多再发 8 次、剩余政策额度 1.9990456 元。已通过的 probe 只引用旧证据，不再次付费运行。
+- 执行前累计 M2 offline 门禁 25/25 passed，exit 0；全量 1190 passed + 157 subtests in 131.65s，JUnit 1347/0/0/0，artifact `.tmp/live-smoke-repair-before-m2.json`。独立安全审查通过，专项 177 passed in 3.99s，M2 prompt cache 定向失效回归 1 passed in 0.59s；真实运行 critical code hash 与审查一致。
+- `live_smoke_20261003_repair` 已真实执行并停止，shell/child exit 均为 2。新增 5 次调用、5694 输入 / 1194 输出 / 6888 总 token，估算 0.0060984 元；与首轮合计 7 次、6688 输入 / 1368 输出 / 8056 总 token、0.0070528 元，未核验实际账单。probe 只复用历史证据，本轮 probe 调用 0，无自动重试或额外请求。
+- 前 4 题草稿 schema 与 verifier 通过，首轮专利题的正文引用缺陷得到实测验证。第 5 题网购退货 hit_at_5 / coverage 均为 0，模型选择 insufficient_evidence，而流水线预期 evidence_answer，草稿因 `response_mode_invalid` 被拒绝；此时正文引用检查没有失败。这是历史已有的 BM25 语义检索与启发式证据判定局限，不是新提示引入的检索回归；不放宽 mode 合同或强迫模型编造答案。处理 5/9 题、草稿通过 4/5，剩余 4 题 not_run；最终安全 fallback 通过不能把整轮算成功。
+- 新修复账本已存在，本轮到此停止，不自动第三轮，不用剩余额度补跑。首轮三份 SHA-256 原样保留，新 manifest / summary / ledger 和局部成功、整轮失败分别记录在 [修复复测报告](../../reports/refactor/LIVE_SMOKE_QWEN35B_REPAIR.md)。已新增合成模式失败保护回归，保留 runtime 不变；最终四文件专项 178 passed in 4.59s，JUnit 178/0/0/0，artifact `.tmp/live-smoke-repair-targeted-final.xml`。下一步若要改检索或语义证据策略，需要单独明确范围和质量证据，新的付费复验另行授权。
+- 本次继续本地未提交分支 `codex/live-smoke-qwen35b`，HEAD 仍为 `4d9546e06cfe8ff44660943ffd2dd353ac2e61cc`；本次无远端写操作，不创建 commit / push / PR / Tag / Release，不移动既有 M5/M6 Tag，不进入 M7、30 条完整评测、Judge 或真实 API/worker 服务接入。
+- 首次执行后 M2 门禁为 failed / exit 1、24/25：全量 1191 + 157 subtests / JUnit 1348/0/0/0 已通过，唯一失败是报告链接指向 ignored 历史文件。已仅移除超链接并保留本地历史定位，不修改检查器或 runtime；失败保存在 `.tmp/live-smoke-repair-after-m2.json`。文档修正后的完整复验已 25/25 passed、exit 0、172669 ms；全量 1191 + 157 subtests in 122.66s / JUnit 1348/0/0/0，独立 artifact `.tmp/live-smoke-repair-after-m2-final.json`（UTC 2026-10-02T17:16:12Z 至 17:19:06Z）。不会覆盖或隐去首次失败；最后仅回写真实结果并做候选静态复核。
+- 结果回写后的静态三项全部 passed：39 个候选 Markdown、2 个 JSON、261 个候选文本的凭证风险检查，artifact `.tmp/live-smoke-repair-final-static.json`；`git diff --check` exit 0。顶层 `STATE.next_action` 已更新为修复后的停止交接，首轮旧动作另存历史键。到此停止，未运行的质量评测、服务 live 接入、Ruff 和 M7 保持未运行，不以工程绿灯代替真实法律质量结论。
+
+## 历史局部实验：首轮 Qwen3.5-35B Smoke
+
+- 用户接受首轮策略，已于 2026-10-03 确认价格、实名、余额与模型权限。本次只限固定模型、article + BM25 top-5、1 probe + 9 个已有回归题、最多 10 次尝试 / 2 元政策预算。默认 live 禁止不变，本轮授权独立记录；不启动 M7，不扩大到 Judge 或 30 条评测。
+- 分支 `codex/live-smoke-qwen35b` 从 fresh origin/master `4d9546e06cfe8ff44660943ffd2dd353ac2e61cc` 创建，HEAD 仍为该基线，本次文件未提交。origin 默认 master；开始时工作区 clean。已只读核验没有 open PR、既有 Release 与 Tag；未改本地 master、未强推、未移动 Tag。
+- 已实现 provider keyword-only opt-in 限制、持久单次预算包装和固定 smoke CLI，以及 3 份回归测试；使用说明见 [LIVE_MODEL_SMOKE](../LIVE_MODEL_SMOKE.md)，真实结果与保留的失败见 [验收记录](../../reports/refactor/LIVE_SMOKE_QWEN35B.md)。新输出目录不能重开固定授权账本；未知费用不报 0，不自动重试。
+- 执行前累计 M2 offline 门禁 25/25 passed，全量 1144 + 157 subtests、JUnit 1301/0/0/0；代码与文档独立安全审查通过。真实运行 `live_smoke_20261003_first` 已停止：probe passed，第一题草稿 schema 通过但正文缺 `[S1]`，claims 绑定 S1 后引用对齐失败 `citation_ids_invalid`，降级为 insufficient_evidence。共 2 次尝试、994 输入 / 174 输出 / 1168 总 token，估算费用 0.0009544 元，未核验实际账单；剩余 8 题 not_run。不能把最终安全 fallback 的 verifier 通过当成草稿成功。
+- 固定授权账本已存在，不能换目录或删除账本补跑。已新增相同格式的合成 fake 回归，三个专项 132 passed；执行后累计 M2 再次 25/25 passed，全量 1145 + 157 subtests in 124.34s，JUnit 1302/0/0/0，artifact `.tmp/live-smoke-after-execute-m2.json`。运行时代码 hash 未改变，最终只补结果文档。本轮到此停止，不再发请求；后续提示改进或新的付费轮次须另行明确授权。
+- 本次无 commit / push / PR / Tag / Release，无真实 Langfuse 实发、私人资料上传或生产部署。已有 M5/M6 发布和治理事实不变；本节不是新发布回执。
+
+## 既有事实：M6 软件、独立回执和治理已完成
 
 - M6 的 `execution_status` 与 milestone `status` 均为 `released`，独立回执 `receipt_status=verified`，发布剩余事项为空。[Issue #25](https://github.com/1040942669/legal-rag-agent/issues/25) 于 `2026-10-02T12:27:11Z` 以 `completed` 关闭；[Milestone 7](https://github.com/1040942669/legal-rag-agent/milestone/7) 于 `12:27:23Z` 关闭，`12:27:32Z` 核验为 open 0、closed 3。这些治理动作在精确 receipt master 门禁通过后发生。M7 在总体路线图仍为必需项，保持 `not_started`、`required=true`，只是不进入本次 M6 执行范围。
 - 独立 [回执 PR #29](https://github.com/1040942669/legal-rag-agent/pull/29) 的最终 head 为 `51cbe21a9e08b3df68a8eeed296adfb11d3a0ca7`；[CI 37003455439](https://github.com/1040942669/legal-rag-agent/actions/runs/37003455439) 精确绑定该 head，四路全部 success，于 `2026-10-02T12:08:05Z` 更新完成。PR 于 `12:10:19Z` 普通 merge 为 `7ec13709d90fad1a01b85b9558a3bb8924a0846d`，不是 squash：两父提交为软件 master `582eb8949c1150fc7a12761bd46fbda9c173ef62` 和回执 final head `51cbe21a...`。[精确 merge-target master CI 37005116491](https://github.com/1040942669/legal-rag-agent/actions/runs/37005116491) 四路全部 success，于 `12:25:27Z` 完成。
@@ -11,7 +120,7 @@
 - 回执 master M6 artifact ID `11226250664`，API digest `sha256:35442ff5d6b44e3f63e2a62a4d4336f4bcb8ecd1d53829e64290f22d1537b2a9`；PR final-head M6 artifact ID `11224654642`，digest `sha256:449a9832b6c1b5649a293ab753730c21e5c68fd513610c27fedb0e9e598746f2`。实际回执 master M6 wheel 为 `0.7.1`、438731 bytes、101 entries，SHA-256 `4974cf563c3fdac18b8bd13ce5d18052e6e11405f31a387eba08e97f0c011708`；仓库外 installed-wheel smoke passed，13 modules、jobs CLI、head `0007_m6_jobs_outbox` 及 `source_checkout_isolated=true` 均核验。四路主制品目录为 `.tmp/m6-receipt-final-pr-ci-37003455439` 与 `.tmp/m6-v071-receipt-master-ci-37005116491`；master 三路独立交叉核验目录为 `.tmp/m6-v071-receipt-master-secondary-37005116491`。
 - 软件发布事实保持不变：PR #28 final head `d6fc26882237ca149ab38c7e944b32a260e0430b` 普通 squash 合并至 `582eb8949c1150fc7a12761bd46fbda9c173ef62`，软件精确 head/master CI `36998001012` / `36999853797` 已通过。annotated `v0.7.1` 与正式 Release `401759927` 仍固定软件目标 `582eb894...`，不改指向文档回执或最终化提交。已发布软件 master 的 wheel 仍为 438489 bytes，SHA-256 `00a37901b690c8a2059f930c63310de431b2eef7c591c89a40c31580f6259aa3`；不被上述回执文档构建 wheel 替代。旧 `v0.7.0` 的 31 个原始 M6 字段及 `initial_release_history`、M5 `v0.6.0` 均完整保留。
 
-## 当前唯一剩余动作：非递归治理最终化自身验证后停止
+## 历史快照：非递归治理最终化自身验证后停止
 
 当前分支 `codex/m6-v071-finalization` 从 fresh `origin/master` `7ec13709d90fad1a01b85b9558a3bb8924a0846d` 创建，该 SHA 只是已核验回执 master 和此次最终化基线，不是本次尚未提交文档自己的 SHA。冻结本次唯一最终化提交后再读取实际 candidate SHA，运行适用本地门禁和自身精确 head 四路 CI；按当时 review/保护规则正常合并自身 PR，再核验自身精确 merge-target master 四路 CI，然后停止。当前文档中的未来 finalization SHA、PR、merge、CI URL 均为 null，门禁状态为 `not_run`，没有提前声明绿灯。
 

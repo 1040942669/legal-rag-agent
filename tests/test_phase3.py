@@ -81,14 +81,14 @@ class Phase3Test(unittest.TestCase):
         self.assertIn("2", verification.missing_citations)
         self.assertFalse(verification.disclaimer_present)
 
-    def test_chat_refuses_case_strategy_before_retrieval(self) -> None:
+    def test_historical_v2_chat_refuses_case_strategy_before_retrieval(self) -> None:
         class FailingRetriever:
             name = "bm25"
 
             def retrieve(self, query: str, top_k: int = 5):
                 raise AssertionError("retriever should not be called")
 
-        assistant = LegalChatAssistant(FailingRetriever(), model="fake")
+        assistant = LegalChatAssistant(FailingRetriever(), model="fake", evidence_rules_version="general-reference-v2")
         answer, results = assistant.answer("这个案子怎么起诉才能胜诉？", generate=False)
 
         self.assertEqual(results, [])

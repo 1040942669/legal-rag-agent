@@ -19,6 +19,7 @@ from legal_rag.chat_artifacts import (
 from legal_rag.evaluation_artifacts import search_result_to_artifact
 from legal_rag.experiment_runtime import canonical_hash
 from legal_rag.models import SearchResult
+from legal_rag.request_policy import request_answer_mode
 from legal_rag.services.run_executor import (
     ExecutionFailure,
     RunExecutionInput,
@@ -189,17 +190,9 @@ class BoundedHarnessNodes:
         changed = self._copy(state)
         changed["route"] = (
             "programmatic_terminal"
-            if prepared.analysis.risk_flags
-            and any(
-                flag
-                in {
-                    "case_strategy",
-                    "illegal_help",
-                    "medical_financial_advice",
-                    "non_legal",
-                }
-                for flag in prepared.analysis.risk_flags
-            )
+            if request_answer_mode(prepared.analysis.risk_flags,
+                                   evidence_rules_version=self.assistant.evidence_rules_version,
+                                   free_generation=False) == "out_of_scope"
             else "retrieve"
         )
         return self._complete(changed, "route", "retrieve")
@@ -310,6 +303,23 @@ class BoundedHarnessNodes:
             changed["completion_status"] = "completed_with_limits"
             changed["stop_reason"] = "policy_refusal"
             next_node = "generate"
+        elif getattr(retrieved, "route_outcome", None) is not None and retrieved.route_outcome.route == "exact_reference":
+            outcome = retrieved.route_outcome
+            # Exact lookup misses/ambiguity cannot be repaired by widening to
+            # a fuzzy planner query, even when an optional planner is installed.
+            if outcome.status == "needs_disambiguation":
+                changed["completion_status"] = "needs_clarification"
+                changed["stop_reason"] = "needs_clarification"
+            elif outcome.status != "found":
+                changed["completion_status"] = "completed_with_limits"
+                changed["stop_reason"] = "exact_reference_not_found"
+            elif check is not None and check.sufficient:
+                changed["completion_status"] = "succeeded"
+                changed["stop_reason"] = check.stop_reason or "sufficient"
+            else:
+                changed["completion_status"] = "completed_with_limits"
+                changed["stop_reason"] = check.stop_reason if check is not None else "exact_reference_evidence_insufficient"
+            next_node = "generate"
         elif check is not None and check.sufficient:
             changed["completion_status"] = "succeeded"
             changed["stop_reason"] = check.stop_reason or "sufficient"
@@ -381,7 +391,14 @@ class BoundedHarnessNodes:
         retrieved = self._retrieved(state)
         changed = self._copy(state)
         self.emit_event("generation.started", {})
-        if (
+        if (self.generate_enabled and retrieved.terminal_answer is None
+            and request_answer_mode(retrieved.prepared.analysis.risk_flags,
+                                    evidence_rules_version=self.assistant.evidence_rules_version,
+                                    free_generation=True) == "needs_clarification"):
+            generated = self.assistant.generate_turn(retrieved, generate=True)
+            changed["completion_status"] = "needs_clarification"
+            changed["stop_reason"] = "request_purpose_unresolved"
+        elif (
             self.generate_enabled
             and retrieved.terminal_answer is None
             and self.persistence.has_outcome_unknown(
@@ -399,7 +416,13 @@ class BoundedHarnessNodes:
                 retrieved,
                 generate=False,
             )
+        generated = self.assistant.assess_turn(generated)
         verified = self.assistant.verify_turn(generated)
+        rejected = verified.pre_fallback_verification
+        if (rejected is not None and rejected.semantic_check_required
+            and any(reason.startswith("semantic_") for reason in rejected.failure_reasons)):
+            changed["completion_status"] = "completed_with_limits"
+            changed["stop_reason"] = "semantic_not_supported_or_unknown"
         safe_result = safe_run_result_from_verified(
             self.execution_input,
             retrieved,
@@ -533,6 +556,10 @@ class BoundedHarnessNodes:
         state: HarnessState,
         retrieved: RetrievedTurn,
     ) -> GeneratedTurn:
+        if getattr(self.assistant.llm, "governed", False):
+            # The shared governed client alone reserves both counts and money.
+            # It never retries unknown provider delivery or silently refunds it.
+            return self.assistant.generate_turn(retrieved, generate=True)
         budget = self.persistence.get_budget(self.execution_input.run_id)
         attempt = 0
         while True:

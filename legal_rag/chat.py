@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from collections.abc import Mapping
 from copy import deepcopy
@@ -14,11 +15,17 @@ from .adaptive import (
     retrieve_adaptive,
 )
 from .evidence import (
+    EVIDENCE_RULES_VERSIONS,
+    GENERAL_EVIDENCE_RULES_VERSION,
+    REFERENCE_BASED_EVIDENCE_RULES,
+    reference_rules_for_evidence,
+    query_compatible_title_hints,
     build_low_confidence_answer,
     check_evidence_sufficiency,
     with_stop_reason,
 )
 from .json_utils import validate_json_unicode
+from .legal_references import MAX_REFERENCE_QUERY_CHARS, parse_legal_references
 from .llm import build_completion_client
 from .models import (
     AnswerClaim,
@@ -42,6 +49,13 @@ from .retrieval import (
     retrieval_boundary as resolve_retrieval_boundary,
 )
 from .retrieval_contracts import RetrievalBoundary, RetrievalBoundaryViolation
+from .retrieval_outcomes import RetrievalOutcome
+from .reference_evidence import check_reference_evidence
+from .request_policy import request_answer_mode
+from .semantic import (
+    SemanticAssessment, SemanticChecker, SemanticInput, SemanticPolicy,
+    SegmentAssessment, build_semantic_input, validate_semantic_execution_record,
+)
 from .verifier import (
     SAFE_CLARIFICATION_QUESTION,
     SAFE_CLARIFICATION_RESPONSE,
@@ -59,6 +73,7 @@ ASSISTANT_SESSION_STATE_SCHEMA_VERSION = 1
 MAX_RENDERED_MEMORY_MESSAGES = 8
 CONVERSATION_ROLES = frozenset({"user", "assistant"})
 STRUCTURED_ANSWER_PARSER_VERSION = "m1-structured-answer-v1"
+STRUCTURED_QA_PROMPT_VERSION = "m1-structured-qa-citation-alignment-v2"
 PRE_RETRIEVAL_REFUSAL_FLAGS = {
     "case_strategy",
     "illegal_help",
@@ -320,6 +335,7 @@ class RetrievedTurn:
     terminal_expected_answer_mode: str | None = None
     # Appended to preserve the legacy positional constructor ABI.
     retrieval_boundary: RetrievalBoundary | None = None
+    route_outcome: RetrievalOutcome | None = None
 
 
 @dataclass(frozen=True)
@@ -332,6 +348,9 @@ class GeneratedTurn:
     expected_answer_mode: str | None = None
     raw_response: str | StructuredAnswer | None = None
     parser_version: str | None = None
+    semantic_assessment: SemanticAssessment | None = None
+    semantic_policy_fingerprint: str | None = None
+    semantic_error: str | None = None
 
 
 @dataclass(frozen=True)
@@ -362,7 +381,25 @@ class LegalChatAssistant:
         condense_with_llm: bool = False,
         verification_context: VerificationContext | None = None,
         completion_client: Any | None = None,
+        semantic_policy: SemanticPolicy | None = None,
+        semantic_checker: SemanticChecker | None = None,
+        evidence_rules_version: str = GENERAL_EVIDENCE_RULES_VERSION,
+        verification_rules_version: str = "general-bound-v2",
     ) -> None:
+        if verification_rules_version not in {"general-bound-v2", "m1"}:
+            raise ValueError("verification rules version is unsupported")
+        if verification_rules_version == "m1" and (
+            semantic_policy is not None or semantic_checker is not None
+            or evidence_rules_version != "legacy-hints-and-return-v1"):
+            raise ValueError("legacy verification requires explicit historical evidence and no semantic authority")
+        if evidence_rules_version not in EVIDENCE_RULES_VERSIONS:
+            raise ValueError("evidence rules version is unsupported")
+        if semantic_policy is not None and not isinstance(semantic_policy, SemanticPolicy):
+            raise ValueError("semantic policy must be a frozen SemanticPolicy")
+        if semantic_checker is not None and (
+            semantic_policy is None or getattr(semantic_checker, "policy", None) != semantic_policy
+        ):
+            raise ValueError("semantic checker must match the frozen policy")
         self.retriever = retriever
         self.model = model
         self.top_k = top_k
@@ -373,6 +410,10 @@ class LegalChatAssistant:
         self.normalizer_retries = normalizer_retries
         self.condense_with_llm = condense_with_llm
         self.verification_context = verification_context
+        self.semantic_policy = semantic_policy
+        self.semantic_checker = semantic_checker
+        self.evidence_rules_version = evidence_rules_version
+        self.verification_rules_version = verification_rules_version
         self.last_adaptive_result: AdaptiveRetrievalResult | None = None
         self.last_evidence_check: EvidenceCheck | None = None
         self.last_verification: VerificationResult | None = None
@@ -465,6 +506,7 @@ class LegalChatAssistant:
                 self._clear_observations()
         retrieved = self.retrieve_turn(prepared)
         generated = self.generate_turn(retrieved, generate=generate)
+        generated = self.assess_turn(generated)
         verified = self.verify_turn(generated)
         self.commit_turn(verified)
         return verified.answer_text, list(retrieved.results)
@@ -480,7 +522,7 @@ class LegalChatAssistant:
         return PreparedQuestion(
             original_question=question,
             standalone_question=standalone_question,
-            analysis=analyze_query(standalone_question),
+            analysis=analyze_query(standalone_question, evidence_rules_version=self.evidence_rules_version),
             memory_text=memory_snapshot.rendered,
             session_state_before={
                 "schema_version": ASSISTANT_SESSION_STATE_SCHEMA_VERSION,
@@ -520,7 +562,7 @@ class LegalChatAssistant:
             raise ValueError("analysis must be a QueryAnalysis")
         if analysis.original_query != standalone_question:
             raise ValueError("analysis is not bound to the standalone question")
-        if analysis != analyze_query(standalone_question):
+        if analysis != analyze_query(standalone_question, evidence_rules_version=self.evidence_rules_version):
             raise ValueError("analysis does not match the standalone question")
         if not isinstance(session_state_before, Mapping):
             raise ValueError("session_state_before must be an object")
@@ -571,7 +613,9 @@ class LegalChatAssistant:
         if type(max_followup_rounds) is not int or max_followup_rounds < 0:
             raise ValueError("max_followup_rounds must be a non-negative integer")
         boundary = resolve_retrieval_boundary(self.retriever)
-        if should_refuse_before_retrieval(prepared.analysis.risk_flags):
+        if prepared.analysis != analyze_query(prepared.standalone_question, evidence_rules_version=self.evidence_rules_version):
+            raise ValueError("prepared analysis differs from the frozen request rules")
+        if should_refuse_before_retrieval(prepared.analysis.risk_flags, evidence_rules_version=self.evidence_rules_version):
             answer = programmatic_answer(
                 build_risk_refusal_answer(prepared.analysis.risk_flags),
                 answer_mode="out_of_scope",
@@ -588,33 +632,71 @@ class LegalChatAssistant:
                 terminal_expected_answer_mode="out_of_scope",
             )
 
-        adaptive_result = retrieve_adaptive(
-            prepared.standalone_question,
-            self.retriever,
-            top_k=self.top_k,
-            enabled=self.adaptive_enabled,
-            use_llm=self.adaptive_use_llm,
-            llm_client=self.llm if self.adaptive_use_llm else None,
-            max_queries=self.adaptive_max_queries,
-            per_plan_top_k=self.adaptive_per_plan_top_k,
-            normalizer_retries=self.normalizer_retries,
-            max_followup_rounds=max_followup_rounds,
-        )
+        outcome_method = getattr(self.retriever, "retrieve_outcome", None)
+        known_titles = getattr(self.retriever, "known_law_hints", ())
+        references = None
+        if callable(outcome_method) and len(prepared.standalone_question) <= MAX_REFERENCE_QUERY_CHARS:
+            try:
+                references = parse_legal_references(prepared.standalone_question, known_law_titles=known_titles,
+                    rules_version=reference_rules_for_evidence(self.evidence_rules_version))
+            except (TypeError, ValueError):
+                pass  # The bounded ordinary path reports invalid parsing.
+        route_outcome = None
+        if references is not None and (references.requirements or references.unresolved):
+            if self.evidence_rules_version not in REFERENCE_BASED_EVIDENCE_RULES:
+                raise ValueError("exact routing requires general evidence rules")
+            route_outcome = outcome_method(prepared.standalone_question, top_k=self.top_k)
+            if not isinstance(route_outcome, RetrievalOutcome) or route_outcome.route != "exact_reference":
+                raise ValueError("explicit references require a typed exact route outcome")
+            validate_reference_route(route_outcome, prepared.standalone_question, evidence_rules_version=self.evidence_rules_version)
+            checked = check_evidence_sufficiency(
+                prepared.standalone_question, list(route_outcome.results),
+                rules_version=self.evidence_rules_version, known_law_titles=known_titles)
+            checked = constrain_reference_route(checked, route_outcome)
+            adaptive_result = AdaptiveRetrievalResult(
+                results=deepcopy(list(route_outcome.results)), analysis=prepared.analysis,
+                normalized_query=None, plans=[], planner_trace={"mode": "exact_reference"},
+                merge_trace={"mode": "exact_reference", "input_result_count": len(route_outcome.results),
+                             "deduped_count": len(route_outcome.results)},
+                evidence_check=checked,
+                followup_trace={"controller": "reference_router", "rounds_used": 0,
+                                "queries": [], "stop_reason": checked.stop_reason},
+                adaptive_used=False, adaptive_enabled=self.adaptive_enabled, trigger_reasons=[])
+        else:
+            adaptive_result = retrieve_adaptive(
+                prepared.standalone_question,
+                self.retriever,
+                top_k=self.top_k,
+                enabled=self.adaptive_enabled,
+                use_llm=self.adaptive_use_llm,
+                llm_client=self.llm if self.adaptive_use_llm else None,
+                max_queries=self.adaptive_max_queries,
+                per_plan_top_k=self.adaptive_per_plan_top_k,
+                normalizer_retries=self.normalizer_retries,
+                max_followup_rounds=max_followup_rounds,
+                evidence_rules_version=self.evidence_rules_version,
+            )
         results, rejected_source_ids, source_id_map = filter_results_to_context(
             adaptive_result.results,
             self.verification_context,
         )
-        if rejected_source_ids:
+        context_configured = self.verification_context is not None and (
+            self.verification_context.snapshot_id is not None
+            or self.verification_context.allowed_scope_ids is not None)
+        if rejected_source_ids or context_configured:
             evidence_check = check_evidence_sufficiency(
                 prepared.standalone_question,
                 results,
                 analysis=adaptive_result.analysis,
                 normalized_query=adaptive_result.normalized_query,
                 plans=adaptive_result.plans,
+                rules_version=self.evidence_rules_version,
+                known_law_titles=known_titles,
+                snapshot_id=self.verification_context.snapshot_id if context_configured else None,
+                allowed_scope_ids=self.verification_context.allowed_scope_ids if context_configured else None,
             )
-            evidence_check = replace(
-                evidence_check, stop_reason="evidence_scope_filtered"
-            )
+            if rejected_source_ids and evidence_check.stop_reason != "needs_clarification":
+                evidence_check = replace(evidence_check, stop_reason="evidence_scope_filtered")
             adaptive_result = replace(
                 adaptive_result,
                 results=results,
@@ -628,6 +710,21 @@ class LegalChatAssistant:
                     },
                 },
             )
+
+        if route_outcome is not None:
+            resolved = surviving_reference_pairs(route_outcome, results)
+            status, reasons = route_outcome.status, route_outcome.reason_codes
+            if status == "found" and set(resolved) != set(route_outcome.requested_pairs):
+                status, reasons = "not_found", (*reasons, "evidence_scope_filtered")
+            route_outcome = replace(route_outcome, results=tuple(results), status=status,
+                                    resolved_pairs=resolved, reason_codes=tuple(dict.fromkeys(reasons)))
+            checked = constrain_reference_route(adaptive_result.evidence_check, route_outcome)
+            adaptive_result = replace(adaptive_result, evidence_check=checked,
+                                      followup_trace={**adaptive_result.followup_trace,
+                                                      "stop_reason": checked.stop_reason})
+        elif callable(outcome_method):
+            route_outcome = RetrievalOutcome(tuple(results), "lexical", "found" if results else "not_found",
+                                             ("lexical_results" if results else "lexical_no_results",))
 
         evidence_check = adaptive_result.evidence_check
         # Detach the staged result from every mutable object owned by a
@@ -659,6 +756,7 @@ class LegalChatAssistant:
             terminal_kind=terminal_kind,
             terminal_answer=terminal_answer,
             terminal_expected_answer_mode=terminal_expected_answer_mode,
+            route_outcome=route_outcome,
         )
 
     def merge_followup_turn(
@@ -680,6 +778,8 @@ class LegalChatAssistant:
             retrieved,
             stage="chat follow-up input",
         )
+        if retrieved.route_outcome is not None and retrieved.route_outcome.route == "exact_reference":
+            raise ValueError("exact reference routes cannot enter fuzzy follow-up")
         if retrieved.adaptive_result is None or retrieved.evidence_check is None:
             raise ValueError("follow-up requires a completed retrieval stage")
         if (
@@ -718,6 +818,10 @@ class LegalChatAssistant:
             analysis=retrieved.adaptive_result.analysis,
             normalized_query=retrieved.adaptive_result.normalized_query,
             plans=retrieved.adaptive_result.plans,
+            rules_version=self.evidence_rules_version,
+            known_law_titles=getattr(self.retriever, "known_law_hints", ()),
+            snapshot_id=self.verification_context.snapshot_id if self.verification_context else None,
+            allowed_scope_ids=self.verification_context.allowed_scope_ids if self.verification_context else None,
         )
         stop_reason = (
             "sufficient_after_followup"
@@ -765,6 +869,9 @@ class LegalChatAssistant:
             terminal_kind=terminal_kind,
             terminal_answer=terminal_answer,
             terminal_expected_answer_mode=terminal_expected_answer_mode,
+            route_outcome=(RetrievalOutcome(tuple(filtered), "lexical", "found" if filtered else "not_found",
+                                           ("lexical_results" if filtered else "lexical_no_results",))
+                           if retrieved.route_outcome is not None else None),
         )
 
     def generate_turn(
@@ -796,6 +903,14 @@ class LegalChatAssistant:
                 kind="retrieval_only",
                 answer_text=answer_text,
             )
+
+        if request_answer_mode(retrieved.prepared.analysis.risk_flags,
+                               evidence_rules_version=self.evidence_rules_version,
+                               free_generation=True) == "needs_clarification":
+            answer = safe_terminal_answer("needs_clarification")
+            return GeneratedTurn(retrieved=retrieved, kind="request_clarification",
+                                 answer_text=answer.answer_text, answer=answer,
+                                 expected_answer_mode="needs_clarification")
 
         prompt = build_qa_prompt(
             question=retrieved.prepared.standalone_question,
@@ -838,9 +953,83 @@ class LegalChatAssistant:
             expected_answer_mode="evidence_answer",
             raw_response=raw_response,
             parser_version=STRUCTURED_ANSWER_PARSER_VERSION,
+            semantic_policy_fingerprint=(self.semantic_policy.fingerprint if self.semantic_policy is not None else None),
         )
 
+    def _semantic_input(self, generated: GeneratedTurn) -> SemanticInput:
+        if generated.answer is None or self.semantic_policy is None:
+            raise ValueError("semantic assessment requires a draft and frozen policy")
+        results = self._validated_stage_results(generated.retrieved, stage="semantic input")
+        boundary = generated.retrieved.retrieval_boundary
+        return build_semantic_input(
+            generated.retrieved.prepared.standalone_question, generated.answer, results,
+            self.semantic_policy, context=self.verification_context,
+            boundary_fingerprint=boundary.fingerprint if boundary is not None else None,
+            disclaimer=LEGAL_DISCLAIMER,
+        )
+
+    def assess_turn(self, generated: GeneratedTurn) -> GeneratedTurn:
+        """Explicit inference stage; deterministic verification never calls a checker.
+
+        Service callers must inject the governed completion operation view. A
+        cached assessment is not a permission to reissue an external request.
+        """
+        if not isinstance(generated, GeneratedTurn):
+            raise TypeError("semantic stage requires a GeneratedTurn")
+        if generated.kind == "model" and request_answer_mode(generated.retrieved.prepared.analysis.risk_flags,
+                               evidence_rules_version=self.evidence_rules_version,
+                               free_generation=True) is not None:
+            raise ValueError("unresolved request purpose cannot obtain model assessment")
+        if generated.kind != "model" or self.semantic_policy is None:
+            return generated
+        if self.verification_rules_version != "general-bound-v2":
+            raise ValueError("legacy verification cannot acquire semantic authority")
+        if generated.semantic_policy_fingerprint != self.semantic_policy.fingerprint:
+            raise ValueError("semantic draft policy differs from current frozen policy")
+        if generated.semantic_assessment is not None or generated.semantic_error is not None:
+            return generated
+        structural = verify_answer(
+            generated.answer, self._validated_stage_results(generated.retrieved, stage="pre-semantic structure"),
+            evidence_check=generated.retrieved.evidence_check,
+            risk_flags=generated.retrieved.prepared.analysis.risk_flags,
+            expected_answer_mode=generated.expected_answer_mode,
+            disclaimer=LEGAL_DISCLAIMER, context=self.verification_context,
+            verification_rules_version=self.verification_rules_version,
+        )
+        if not structural.passed:
+            return generated
+        if self.semantic_checker is None:
+            return replace(generated, semantic_error="checker_unavailable")
+        try:
+            request = self._semantic_input(generated)
+        except (TypeError, ValueError):
+            return replace(generated, semantic_error="input_invalid")
+        try:
+            assessment = self.semantic_checker.assess(request)
+            if not isinstance(assessment, SemanticAssessment):
+                raise ValueError("checker did not return a typed assessment")
+            return replace(generated, semantic_assessment=deepcopy(assessment))
+        except Exception as error:
+            client = getattr(self.semantic_checker, "client", self.semantic_checker)
+            if should_propagate_controlled_error(error, client):
+                raise
+            assessment = SemanticAssessment(
+                request.fingerprint, self.semantic_policy.fingerprint,
+                self.semantic_policy.checker_id, self.semantic_policy.checker_revision,
+                self.semantic_policy.prompt_version,
+                tuple(SegmentAssessment(segment.segment_id, "error", (), ("checker_error",))
+                      for segment in request.segments),
+            )
+            return replace(generated, semantic_assessment=assessment, semantic_error="checker_error")
+
     def verify_turn(self, generated: GeneratedTurn) -> VerifiedTurn:
+        if not isinstance(generated, GeneratedTurn):
+            raise TypeError("verification requires a GeneratedTurn")
+        validate_semantic_execution_record(generated.semantic_policy_fingerprint,
+                                          generated.semantic_assessment, generated.semantic_error)
+        if generated.kind != "model" and any(value is not None for value in (
+            generated.semantic_assessment, generated.semantic_policy_fingerprint, generated.semantic_error)):
+            raise ValueError("nonmodel turns cannot carry semantic authority")
         retrieved = generated.retrieved
         results = self._validated_stage_results(
             retrieved, stage="chat verification input"
@@ -948,7 +1137,19 @@ class LegalChatAssistant:
                 disclaimer=LEGAL_DISCLAIMER,
                 context=self.verification_context,
             )
+        elif generated.kind == "request_clarification":
+            from .chat_artifacts import _validate_generated_relationships
+            _validate_generated_relationships(generated)
+            answer, verification = self._verify_programmatic_answer(
+                generated.answer, results, expected_answer_mode="needs_clarification",
+                evidence_check=retrieved.evidence_check,
+                risk_flags=retrieved.prepared.analysis.risk_flags,
+                disclaimer=LEGAL_DISCLAIMER, context=self.verification_context)
         elif generated.kind == "model":
+            if request_answer_mode(retrieved.prepared.analysis.risk_flags,
+                                   evidence_rules_version=self.evidence_rules_version,
+                                   free_generation=True) is not None:
+                raise RuntimeError("unresolved request purpose cannot obtain free generation")
             if retrieved.adaptive_result is None or retrieved.evidence_check is None:
                 raise RuntimeError("model generation requires retrieved evidence")
             if (
@@ -973,7 +1174,18 @@ class LegalChatAssistant:
                 expected_answer_mode=generated.expected_answer_mode,
                 disclaimer=LEGAL_DISCLAIMER,
                 context=self.verification_context,
+                semantic_policy=self.semantic_policy,
+                semantic_assessment=generated.semantic_assessment,
+                semantic_question=retrieved.prepared.standalone_question,
+                semantic_boundary_fingerprint=(retrieved.retrieval_boundary.fingerprint
+                                               if retrieved.retrieval_boundary is not None else None),
+                verification_rules_version=self.verification_rules_version,
             )
+            if generated.semantic_policy_fingerprint != (
+                self.semantic_policy.fingerprint if self.semantic_policy is not None else None
+            ):
+                verification = replace(verification, passed=False, semantic_support_status="error",
+                                       failure_reasons=[*verification.failure_reasons, "semantic_policy_mismatch"])
             if not verification.passed:
                 pre_fallback_answer = answer
                 pre_fallback_verification = verification
@@ -1024,12 +1236,22 @@ class LegalChatAssistant:
         if not isinstance(retrieved, RetrievedTurn):
             raise TypeError("retrieved stage must be a RetrievedTurn")
         current_boundary = resolve_retrieval_boundary(self.retriever)
+        if retrieved.prepared.analysis != analyze_query(retrieved.prepared.standalone_question,
+                                                        evidence_rules_version=self.evidence_rules_version):
+            raise RetrievalBoundaryViolation(f"{stage} request analysis differs from the current execution contract")
         captured_boundary = retrieved.retrieval_boundary
         if current_boundary != captured_boundary:
             raise RetrievalBoundaryViolation(
                 f"{stage} retrieval boundary changed after retrieval"
             )
+        if retrieved.evidence_check is not None and retrieved.evidence_check.rules_version != self.evidence_rules_version:
+            raise RetrievalBoundaryViolation(f"{stage} evidence rules differ from the current execution contract")
         results = deepcopy(list(retrieved.results))
+        if retrieved.route_outcome is not None:
+            if retrieved.route_outcome.results != retrieved.results:
+                raise RetrievalBoundaryViolation(f"{stage} route and staged evidence snapshots differ")
+            validate_reference_route(retrieved.route_outcome, retrieved.prepared.standalone_question,
+                                     evidence_rules_version=self.evidence_rules_version)
         if retrieved.adaptive_result is not None and tuple(
             retrieved.adaptive_result.results
         ) != tuple(retrieved.results):
@@ -1037,6 +1259,32 @@ class LegalChatAssistant:
                 f"{stage} adaptive and staged evidence snapshots differ"
             )
         assert_results_match_boundary(results, captured_boundary, stage=stage)
+        # Use the same full relationship/terminal contract as the codec. A
+        # direct stage call must not bypass derived programmatic-answer checks.
+        from .chat_artifacts import validate_retrieved_turn_contract
+        try:
+            validate_retrieved_turn_contract(retrieved)
+        except (TypeError, ValueError, RuntimeError):
+            raise RetrievalBoundaryViolation(f"{stage} retrieved contract is invalid") from None
+        if retrieved.evidence_check is not None and self.evidence_rules_version in REFERENCE_BASED_EVIDENCE_RULES:
+            adaptive = retrieved.adaptive_result
+            current = check_evidence_sufficiency(
+                retrieved.prepared.standalone_question, results,
+                analysis=retrieved.prepared.analysis,
+                normalized_query=adaptive.normalized_query if adaptive is not None else None,
+                plans=adaptive.plans if adaptive is not None else None,
+                rules_version=self.evidence_rules_version,
+                known_law_titles=getattr(self.retriever, "known_law_hints", ()),
+                snapshot_id=self.verification_context.snapshot_id if self.verification_context else None,
+                allowed_scope_ids=self.verification_context.allowed_scope_ids if self.verification_context else None)
+            if retrieved.route_outcome is not None:
+                current = constrain_reference_route(current, retrieved.route_outcome)
+            # Stop reasons and follow-up exhaustion belong to the controller.
+            # Facts, owned coverage and actual scores must still match now.
+            for name in ("sufficient", "missing_facts", "missing_law_support", "low_coverage",
+                         "checked_result_count", "covered_laws", "covered_articles", "mechanical_check"):
+                if getattr(current, name) != getattr(retrieved.evidence_check, name):
+                    raise RetrievalBoundaryViolation(f"{stage} mechanical evidence assessment changed")
         return results
 
     def commit_turn(self, verified: VerifiedTurn) -> None:
@@ -1132,6 +1380,7 @@ class LegalChatAssistant:
             risk_flags=risk_flags,
             disclaimer=disclaimer,
             context=context,
+            verification_rules_version=self.verification_rules_version,
         )
         if verification.passed:
             return answer, verification
@@ -1145,6 +1394,7 @@ class LegalChatAssistant:
             risk_flags=risk_flags,
             disclaimer=disclaimer,
             context=context,
+            verification_rules_version=self.verification_rules_version,
         )
         if not safe_verification.passed:
             raise RuntimeError("programmatic terminal response failed verification")
@@ -1164,6 +1414,20 @@ class LegalChatAssistant:
         )
         if not last_question:
             return question
+        if self.evidence_rules_version in REFERENCE_BASED_EVIDENCE_RULES:
+            # Current explicit references remain original request authority.
+            # Historical dialogue is still available as separate memory, but
+            # neither a rule concatenation nor model rewrite may add old pairs.
+            try:
+                references = parse_legal_references(
+                    question, known_law_titles=getattr(self.retriever, "known_law_hints", ()),
+                    rules_version=reference_rules_for_evidence(self.evidence_rules_version),
+                )
+            except (TypeError, ValueError):
+                return question
+            if (references.mentions or references.excluded or references.requirements
+                or references.required_law_titles or references.unresolved):
+                return question
         pronouns = ("这个", "这条", "上一条", "刚才", "它", "该条", "这一条")
         if not any(word in question for word in pronouns):
             return question
@@ -1234,12 +1498,30 @@ def build_qa_prompt(
             f"[S{result.rank}] 来源: {law} {article}; 文件: {chunk.source_files[0] if chunk.source_files else ''}\n{chunk.text}"
         )
     context = "\n\n".join(context_lines)
+    example_claim = "检索资料支持的单条结论"
+    example_source = f"S{results[0].rank}" if results else None
+    layout_example = {
+        "answer_text": (
+            f"{example_claim} [{example_source}]。\n{LEGAL_DISCLAIMER}"
+            if example_source
+            else f"当前检索资料不足，无法给出可靠结论。\n{LEGAL_DISCLAIMER}"
+        ),
+        "answer_mode": "evidence_answer" if example_source else "insufficient_evidence",
+        "claims": (
+            [{"claim_id": "C1", "text": example_claim, "source_ids": [example_source]}]
+            if example_source
+            else []
+        ),
+        "limitations": [] if example_source else ["检索资料不足。"],
+        "clarification_question": None,
+    }
+    example_json = json.dumps(layout_example, ensure_ascii=False)
     return f"""你是一个中国现行法律文本学习助手。
 你只能根据给定的检索资料回答。资料不足时必须拒答，不能编造法律依据。
 回答要求:
 1. 用中文回答。
 2. 先给结论，再列出依据。
-3. 必须引用资料编号，例如 [S1]。
+3. 必须引用资料编号，例如 [S1]。可见引用必须写在 answer_text 正文的对应断言同一句内，放在句末标点之前，例如“单条断言 [S1]。”。只在 claims.source_ids 中填写编号不算正文引用；只在回答末尾集中列出引用不能替代同句引用。
 4. 具体案件策略、胜诉判断、个性化法律意见必须拒答。
 5. 末尾保留免责声明: {LEGAL_DISCLAIMER}
 6. 只输出一个 JSON 对象，不要输出 Markdown 代码围栏或额外说明。
@@ -1249,8 +1531,11 @@ def build_qa_prompt(
    - claims: 数组；每项只能包含 claim_id、text、source_ids
    - limitations: 字符串数组
    - clarification_question: 字符串或 null
-8. 每条需要证据支撑的 claim 都要绑定本次资料中的 source_ids，禁止生成不存在的编号。
+8. 每条需要证据支撑的 claim 都要绑定本次资料中的 source_ids，禁止生成不存在的编号。将 answer_text 中对应单句断言的正文逐字复制到 claims.text，不包含引用标注和句末标点；每条 claim 不得跨句或跨行。source_ids 使用 ["S1"] 这样的字符串数组，不使用 ["[S1]"]，并与该断言同句内的可见引用一致。示例里的占位结论必须根据本次检索资料替换，不能把格式示例当作证据。
 9. 不要在 JSON 中填写 snapshot、用户、权限或其他系统字段。
+
+引用布局示例（仅说明格式，不是检索证据，禁止复制示例结论）:
+{example_json}
 
 最近对话:
 {memory or "无"}
@@ -1319,13 +1604,64 @@ def sanitize_source_tokens(text: str) -> str:
     return re.sub(r"\[S(\d+)\]", r"S\1", text)
 
 
+def _route_analysis(outcome: RetrievalOutcome, question: str, *, evidence_rules_version=GENERAL_EVIDENCE_RULES_VERSION):
+    titles = (*[law for law, _ in outcome.requested_pairs],
+              *[law for result in outcome.results for law in result.chunk.law_names])
+    if evidence_rules_version == GENERAL_EVIDENCE_RULES_VERSION:
+        titles = query_compatible_title_hints(titles)
+    return parse_legal_references(question, known_law_titles=titles,
+                                  rules_version=reference_rules_for_evidence(evidence_rules_version))
+
+
+def surviving_reference_pairs(outcome: RetrievalOutcome, results: list[SearchResult]):
+    surviving = []
+    for law, article in outcome.resolved_pairs:
+        analysis = parse_legal_references(f"《{law}》{article}", known_law_titles=(law,))
+        checked = check_reference_evidence(analysis, results)
+        if not checked.missing_pairs and not checked.missing_laws:
+            surviving.append((law, article))
+    return tuple(surviving)
+
+
+def validate_reference_route(outcome: RetrievalOutcome, question: str, *, evidence_rules_version=GENERAL_EVIDENCE_RULES_VERSION) -> None:
+    if not isinstance(outcome, RetrievalOutcome):
+        raise ValueError("reference route must be typed")
+    analysis = _route_analysis(outcome, question, evidence_rules_version=evidence_rules_version)
+    expected = tuple(dict.fromkeys((item.law_title, item.article_number) for item in analysis.requirements))
+    if len(expected) > 16:
+        if (outcome.route != "exact_reference" or outcome.status != "needs_disambiguation"
+            or outcome.reason_codes != ("too_many_references",) or outcome.results
+            or outcome.requested_pairs or outcome.resolved_pairs):
+            raise ValueError("reference overflow requires an empty controlled clarification outcome")
+        return
+    if outcome.route == "lexical":
+        if expected or analysis.unresolved:
+            raise ValueError("lexical route cannot replace explicit or unresolved references")
+        return
+    if set(outcome.requested_pairs) != set(expected):
+        raise ValueError("exact route requirements differ from the original question")
+    if analysis.unresolved and outcome.status != "needs_disambiguation":
+        raise ValueError("unresolved exact references require disambiguation")
+    if set(surviving_reference_pairs(outcome, list(outcome.results))) != set(outcome.resolved_pairs):
+        raise ValueError("exact resolved pairs are not supported by the original chunks")
+
+
+def constrain_reference_route(check: EvidenceCheck, outcome: RetrievalOutcome) -> EvidenceCheck:
+    if outcome.route != "exact_reference" or outcome.status == "found":
+        return check
+    stop_reason = "needs_clarification" if outcome.status == "needs_disambiguation" else "exact_reference_not_found"
+    return replace(check, sufficient=False, followup_queries=[], stop_reason=stop_reason,
+                   missing_law_support=list(dict.fromkeys((*check.missing_law_support,
+                                                           "exact_route:" + outcome.status))))
+
+
 def build_limited_structured_answer(check: EvidenceCheck) -> StructuredAnswer:
     limitations = [
         *check.missing_law_support,
         *check.missing_facts,
         *check.low_coverage,
     ]
-    if check.missing_facts:
+    if expected_limited_answer_mode(check) == "needs_clarification":
         return programmatic_answer(
             SAFE_CLARIFICATION_RESPONSE,
             answer_mode="needs_clarification",
@@ -1343,7 +1679,7 @@ def build_limited_structured_answer(check: EvidenceCheck) -> StructuredAnswer:
 
 
 def expected_limited_answer_mode(check: EvidenceCheck) -> str:
-    return "needs_clarification" if check.missing_facts else "insufficient_evidence"
+    return "needs_clarification" if check.missing_facts or check.stop_reason == "needs_clarification" else "insufficient_evidence"
 
 
 def render_retrieval_only_answer(results: list[SearchResult]) -> str:
@@ -1354,8 +1690,9 @@ def render_retrieval_only_answer(results: list[SearchResult]) -> str:
     return "检索到以下可能相关的法律依据：\n\n" + "\n\n".join(snippets)
 
 
-def should_refuse_before_retrieval(risk_flags: list[str]) -> bool:
-    return bool(set(risk_flags) & PRE_RETRIEVAL_REFUSAL_FLAGS)
+def should_refuse_before_retrieval(risk_flags: list[str], *, evidence_rules_version="general-reference-v2") -> bool:
+    return request_answer_mode(risk_flags, evidence_rules_version=evidence_rules_version,
+                               free_generation=False) == "out_of_scope"
 
 
 def build_risk_refusal_answer(risk_flags: list[str]) -> str:

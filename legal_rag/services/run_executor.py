@@ -28,6 +28,14 @@ SafePayload: TypeAlias = Mapping[str, JsonValue]
 
 _SAFE_NAME = re.compile(r"^[a-z][a-z0-9_.-]{0,63}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_REJECTED_CHECK_REASONS = frozenset({
+    "schema_invalid", "evidence_catalog_invalid", "citation_ids_invalid", "evidence_scope_invalid",
+    "missing_disclaimer", "response_mode_invalid", "expected_answer_mode_invalid",
+    "semantic_assessment_unbound", "semantic_input_invalid", "semantic_required_not_checked",
+    "semantic_assessment_invalid", "semantic_input_mismatch", "semantic_coverage_invalid",
+    "semantic_sources_invalid", "semantic_error", "semantic_unsupported", "semantic_uncertain",
+    "semantic_not_checked", "semantic_policy_mismatch", "verification_failure_unknown",
+})
 _FORBIDDEN_PUBLIC_KEYS = frozenset(
     {
         "draft",
@@ -208,6 +216,7 @@ class RunExecutionInput:
     profile_id: str
     boundary_fingerprint: str
     request_options: Mapping[str, JsonValue] = field(default_factory=dict)
+    execution_policy: Mapping[str, JsonValue] | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "run_id", _identifier("run_id", self.run_id, maximum=64))
@@ -239,6 +248,10 @@ class RunExecutionInput:
             "request_options",
             _json_object("request_options", self.request_options),
         )
+        if self.execution_policy is not None:
+            from .execution_policy import ServiceExecutionPolicy
+            policy = ServiceExecutionPolicy.from_dict(dict(self.execution_policy))
+            object.__setattr__(self, "execution_policy", policy.to_dict())
 
     @property
     def options(self) -> Mapping[str, JsonValue]:
@@ -284,6 +297,24 @@ class SafeRunResult:
             raise ValueError("answer_payload must contain the verified answer_text")
         if verification.get("passed") is not True:
             raise ValueError("verification_payload must describe a passed final result")
+        if "rejected_draft_check" in verification:
+            rejected = verification["rejected_draft_check"]
+            if not isinstance(rejected, dict) or set(rejected) != {
+                "schema_version", "passed", "structural_passed", "semantic_check_required",
+                "semantic_support_status", "failure_reasons",
+            }:
+                raise ValueError("rejected draft check fields are invalid")
+            if (type(rejected["schema_version"]) is not int or rejected["schema_version"] != 1
+                or rejected["passed"] is not False or type(rejected["structural_passed"]) is not bool
+                or type(rejected["semantic_check_required"]) is not bool
+                or not isinstance(rejected["semantic_support_status"], str)
+                or rejected["semantic_support_status"] not in {"supported", "unsupported", "uncertain", "not_checked", "error"}
+                or not isinstance(rejected["failure_reasons"], list) or not rejected["failure_reasons"]
+                or any(not isinstance(reason, str) or reason not in _REJECTED_CHECK_REASONS for reason in rejected["failure_reasons"])
+                or len(rejected["failure_reasons"]) != len(set(rejected["failure_reasons"]))):
+                raise ValueError("rejected draft check is invalid")
+            if verification.get("fallback_used") is not True:
+                raise ValueError("rejected draft check requires a verified fallback")
         object.__setattr__(self, "answer_text", answer_text)
         object.__setattr__(self, "answer_payload", answer)
         object.__setattr__(self, "evidence_payload", evidence)
@@ -540,6 +571,18 @@ def _verified_payloads(
             "fallback_used": fallback_used,
         },
     )
+    rejected = verified.pre_fallback_verification
+    if rejected is not None:
+        # Keep the failed gate, not the rejected text, arbitrary model reasons,
+        # claim IDs or parse error strings. Old results acquire no new summary.
+        reasons = list(dict.fromkeys(reason if reason in _REJECTED_CHECK_REASONS
+                                    else "verification_failure_unknown" for reason in rejected.failure_reasons))
+        verification_payload["rejected_draft_check"] = {
+            "schema_version": 1, "passed": False, "structural_passed": rejected.structural_passed,
+            "semantic_check_required": rejected.semantic_check_required,
+            "semantic_support_status": rejected.semantic_support_status,
+            "failure_reasons": reasons or ["verification_failure_unknown"],
+        }
     return answer_payload, verification_payload, True, fallback_used
 
 
@@ -622,6 +665,21 @@ class LegalChatRunExecutor:
                 raise ExecutionFailure(
                     code="invalid_assistant_factory", stage="assistant_factory"
                 )
+            if input.execution_policy is not None:
+                from .execution_policy import ServiceExecutionPolicy
+                if ServiceExecutionPolicy.from_dict(dict(input.execution_policy)).generation.enabled:
+                    raise ExecutionFailure(code="paid_policy_requires_graph", stage="assistant_factory")
+            from ..llm import SiliconFlowClient
+            from ..semantic import CompletionSemanticChecker
+            from .governed_calls import GovernedCompletionClient
+            # The linear executor has no lease/epoch context to acquire monetary
+            # authority. A custom factory must not unlock a paid checker here.
+            if isinstance(assistant.llm, SiliconFlowClient) and self.generate:
+                raise ExecutionFailure(code="paid_policy_requires_graph", stage="assistant_factory")
+            if isinstance(assistant.semantic_checker, CompletionSemanticChecker) and not isinstance(
+                assistant.semantic_checker.client, GovernedCompletionClient
+            ):
+                raise ExecutionFailure(code="ungoverned_checker_disabled", stage="assistant_factory")
             with self._seen_lock:
                 if assistant in self._seen_assistants:
                     raise ExecutionFailure(
@@ -660,6 +718,8 @@ class LegalChatRunExecutor:
                     code="invalid_generation_output", stage="generation"
                 )
 
+            stage = "semantic_assessment"
+            generated = assistant.assess_turn(generated)
             stage = "verification"
             verified = assistant.verify_turn(generated)
             if not isinstance(verified, VerifiedTurn) or verified.generated != generated:

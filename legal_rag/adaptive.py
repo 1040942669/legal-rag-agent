@@ -4,7 +4,11 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from .models import NormalizedQuery, RetrievalPlan, SearchResult
-from .evidence import check_evidence_sufficiency, with_stop_reason
+from .evidence import (
+    EVIDENCE_RULES_VERSIONS, GENERAL_EVIDENCE_RULES_VERSION, REFERENCE_BASED_EVIDENCE_RULES,
+    check_evidence_sufficiency, with_stop_reason,
+)
+from .legal_references import MAX_REFERENCE_QUERY_CHARS
 from .planning import build_retrieval_plans
 from .query import QueryAnalysis, analyze_query, should_use_adaptive
 from .query_understanding import (
@@ -65,19 +69,33 @@ def retrieve_adaptive(
     per_plan_top_k: int | None = None,
     normalizer_retries: int = 0,
     max_followup_rounds: int = 1,
+    evidence_rules_version: str = GENERAL_EVIDENCE_RULES_VERSION,
 ) -> AdaptiveRetrievalResult:
+    if evidence_rules_version not in EVIDENCE_RULES_VERSIONS:
+        raise ValueError("unsupported evidence rules version")
     top_k = validate_retrieval_top_k(top_k)
     if per_plan_top_k is not None:
         per_plan_top_k = validate_retrieval_top_k(per_plan_top_k)
     boundary = retrieval_boundary(retriever)
-    analysis = analyze_query(query)
+    analysis = analyze_query(query, evidence_rules_version=evidence_rules_version)
+    known_law_titles = getattr(retriever, "known_law_hints", ())
+    if evidence_rules_version in REFERENCE_BASED_EVIDENCE_RULES and len(query) > MAX_REFERENCE_QUERY_CHARS:
+        evidence = check_evidence_sufficiency(query, [], rules_version=evidence_rules_version)
+        return AdaptiveRetrievalResult(
+            [], analysis, None, [], {"mode": "query_limit"},
+            {"mode": "not_executed", "input_result_count": 0, "deduped_count": 0}, evidence,
+            {"max_rounds": max_followup_rounds, "rounds_used": 0, "queries": [],
+             "stop_reason": evidence.stop_reason, "evidence_rules_version": evidence_rules_version},
+            False, enabled, analysis.adaptive_reasons if enabled else [])
     trigger = enabled and should_use_adaptive(analysis)
     if not trigger:
         results = retriever.retrieve(query, top_k=top_k)
         assert_results_match_boundary(
             results, boundary, stage="adaptive direct retrieval"
         )
-        evidence = check_evidence_sufficiency(query, results, analysis=analysis)
+        evidence = check_evidence_sufficiency(query, results, analysis=analysis,
+                                               rules_version=evidence_rules_version,
+                                               known_law_titles=known_law_titles)
         results, evidence, followup_trace = run_bounded_followup(
             query,
             retriever,
@@ -86,6 +104,7 @@ def retrieve_adaptive(
             top_k=top_k,
             max_rounds=max_followup_rounds,
             analysis=analysis,
+            evidence_rules_version=evidence_rules_version,
         )
         assert_results_match_boundary(
             results, boundary, stage="adaptive direct/follow-up merge"
@@ -114,6 +133,7 @@ def retrieve_adaptive(
         llm_client=llm_client,
         use_llm=use_llm,
         max_retries=normalizer_retries,
+        evidence_rules_version=evidence_rules_version,
     )
     plans, planner_trace = build_retrieval_plans(
         normalized,
@@ -132,6 +152,8 @@ def retrieve_adaptive(
         analysis=analysis,
         normalized_query=normalized,
         plans=plans,
+        rules_version=evidence_rules_version,
+        known_law_titles=known_law_titles,
     )
     merged, evidence, followup_trace = run_bounded_followup(
         query,
@@ -143,6 +165,7 @@ def retrieve_adaptive(
         analysis=analysis,
         normalized_query=normalized,
         plans=plans,
+        evidence_rules_version=evidence_rules_version,
     )
     assert_results_match_boundary(
         merged, boundary, stage="adaptive multi-plan/follow-up merge"
@@ -256,7 +279,12 @@ def run_bounded_followup(
     analysis: QueryAnalysis | None = None,
     normalized_query: NormalizedQuery | None = None,
     plans: list[RetrievalPlan] | None = None,
+    evidence_rules_version: str = GENERAL_EVIDENCE_RULES_VERSION,
 ) -> tuple[list[SearchResult], Any, dict[str, Any]]:
+    if evidence_rules_version not in EVIDENCE_RULES_VERSIONS:
+        raise ValueError("unsupported evidence rules version")
+    if evidence.rules_version != evidence_rules_version:
+        raise ValueError("follow-up evidence rules identity changed")
     top_k = validate_retrieval_top_k(top_k)
     boundary = retrieval_boundary(retriever)
     assert_results_match_boundary(
@@ -267,6 +295,7 @@ def run_bounded_followup(
         "rounds_used": 0,
         "queries": [],
         "stop_reason": evidence.stop_reason,
+        "evidence_rules_version": evidence_rules_version,
     }
     if evidence.sufficient:
         trace["stop_reason"] = "sufficient"
@@ -301,6 +330,8 @@ def run_bounded_followup(
         analysis=analysis,
         normalized_query=normalized_query,
         plans=plans,
+        rules_version=evidence_rules_version,
+        known_law_titles=getattr(retriever, "known_law_hints", ()),
     )
     stop_reason = (
         "sufficient_after_followup" if checked.sufficient else "max_rounds_reached"

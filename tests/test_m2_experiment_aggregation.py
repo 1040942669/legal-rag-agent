@@ -159,6 +159,7 @@ class _AssistantHarness:
             adaptive_enabled=False,
             adaptive_use_llm=False,
             condense_with_llm=False,
+            evidence_rules_version="general-reference-v2",
         )
         client = self.client_factory()
         assistant.llm = client
@@ -283,7 +284,7 @@ def _manifest(
                 "prompt_version": "prompt-v1",
                 "parameters": {"temperature": 0},
             },
-            "verification": {"schema_version": 2, "rules_version": "m1"},
+            "verification": {"schema_version": 2, "rules_version": "general-bound-v2"},
             "judge": {"enabled": False},
         },
         runtime={

@@ -14,6 +14,7 @@ from typing import Any, Protocol, TypeVar
 
 from .experiment_runtime import (
     CACHE_MODES,
+    EXPERIMENT_MANIFEST_SCHEMA_VERSION,
     EXTERNAL_CALL_KINDS,
     ExperimentContractError,
     canonical_hash,
@@ -23,7 +24,8 @@ from .experiment_runtime import (
 from .experiment_store import ArtifactInventory, ExperimentStore
 
 
-RUNNER_RESULT_SCHEMA_VERSION = 2
+RUNNER_RESULT_SCHEMA_VERSION = 3
+HISTORICAL_RUNNER_RESULT_SCHEMA_VERSION = 2
 OBSERVATION_STAGES = (
     "query_analysis",
     "query_embedding",
@@ -46,7 +48,7 @@ _SAFE_ERROR_CODE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 _T = TypeVar("_T")
 _ACTIVE_EXPERIMENTS_LOCK = threading.Lock()
 _ACTIVE_EXPERIMENTS: set[str] = set()
-MODEL_USAGE_ROLES = ("assistant", "normalizer", "judge")
+MODEL_USAGE_ROLES = ("assistant", "normalizer", "semantic", "judge")
 _MODEL_USAGE_FIELDS = frozenset(
     {
         "calls",
@@ -61,6 +63,7 @@ _MODEL_USAGE_FIELDS = frozenset(
 _MODEL_USAGE_ROLE_TO_CALL_KIND = {
     "assistant": "generation",
     "normalizer": "normalizer",
+    "semantic": "semantic",
     "judge": "judge",
 }
 
@@ -469,11 +472,15 @@ class AttemptControls:
         *,
         cache_mode: str,
         external_calls_allowed: bool,
+        semantic_max_calls: int = 0,
     ) -> None:
         if cache_mode not in CACHE_MODES:
             raise ExperimentContractError(f"unsupported cache mode: {cache_mode!r}")
         if not isinstance(external_calls_allowed, bool):
             raise ExperimentContractError("external_calls_allowed must be a boolean")
+        if type(semantic_max_calls) is not int or not 0 <= semantic_max_calls <= 8:
+            raise ExperimentContractError("semantic_max_calls must be between 0 and 8")
+        self._semantic_max_calls = semantic_max_calls
         self._provider_controller = provider_controller
         self._stop_event = stop_event
         self._cache_mode = cache_mode
@@ -499,6 +506,11 @@ class AttemptControls:
             raise ExperimentContractError(f"unsupported observation stage: {stage!r}")
         if kind not in EXTERNAL_CALL_KINDS:
             raise ExperimentContractError(f"unsupported external call kind: {kind!r}")
+        if kind == "semantic":
+            if stage != "generation":
+                raise ExperimentContractError("semantic inference is allowed only as a generation substep")
+            if self._semantic_max_calls == 0:
+                raise ExperimentContractError("frozen manifest grants no semantic dispatch authority")
         if self._cache_mode == "replay":
             raise ExperimentContractError(
                 "replay mode forbids external calls before provider dispatch"
@@ -516,6 +528,8 @@ class AttemptControls:
             started = time.perf_counter()
             with self._lock:
                 ledger = self._by_stage[stage][kind]
+                if kind == "semantic" and ledger["attempted"] >= self._semantic_max_calls:
+                    raise ExperimentContractError("semantic per-case call budget exhausted before dispatch")
                 ledger["attempted"] += 1
                 ledger["provider_wait_ms"] += wait_ms
             try:
@@ -990,11 +1004,14 @@ def validate_persisted_runner_attempt(
         raise RunnerContractError(
             f"persisted runner result fields are invalid for {case_id}"
         )
-    if (
-        type(result["runner_schema_version"]) is not int
-        or result["runner_schema_version"] != RUNNER_RESULT_SCHEMA_VERSION
-    ):
+    if type(result["runner_schema_version"]) is not int or result["runner_schema_version"] not in {
+        RUNNER_RESULT_SCHEMA_VERSION, HISTORICAL_RUNNER_RESULT_SCHEMA_VERSION
+    }:
         raise RunnerContractError("persisted runner result schema is unsupported")
+    if result["runner_schema_version"] == HISTORICAL_RUNNER_RESULT_SCHEMA_VERSION:
+        # Pure historical view only. Do not rewrite persisted bytes or infer a
+        # checker/policy from current server configuration.
+        result = _historical_runner_result_view(result)
     expected_case = {
         "case_id": case_id,
         "case_hash": case["case_hash"],
@@ -1125,6 +1142,38 @@ def validate_persisted_runner_attempt(
         timings_ms=_json_copy(normalized_timings),
         error=error_payload,
     )
+
+
+def _historical_runner_result_view(result: Mapping[str, Any]) -> dict[str, Any]:
+    value = _json_copy(result)
+    usage = value.get("model_usage")
+    if not isinstance(usage, dict) or set(usage) != {"assistant", "normalizer", "judge"}:
+        raise RunnerContractError("historical model_usage roles are invalid")
+    usage["semantic"] = _zero_model_usage()
+    ledger = value.get("call_ledger")
+    if not isinstance(ledger, dict) or set(ledger) != {"actual", "source"}:
+        raise RunnerContractError("historical call ledger fields are invalid")
+    actual, source = ledger["actual"], ledger["source"]
+    historical_kinds = set(EXTERNAL_CALL_KINDS) - {"semantic"}
+    if not isinstance(actual, dict) or set(actual) != historical_kinds:
+        raise RunnerContractError("historical actual call ledger is invalid")
+    if not isinstance(source, dict) or set(source) - historical_kinds:
+        raise RunnerContractError("historical source call ledger is invalid")
+    actual["semantic"] = {"attempted": 0, "succeeded": 0, "failed": 0,
+                          "duration_ms": 0.0, "provider_wait_ms": 0.0}
+    source["semantic"] = 0
+    observations = value.get("stage_observations")
+    if not isinstance(observations, dict):
+        raise RunnerContractError("historical stage observations are invalid")
+    for observation in observations.values():
+        if not isinstance(observation, dict):
+            raise RunnerContractError("historical stage observation is invalid")
+        for field in ("external_calls", "failed_external_calls", "source_external_calls"):
+            counts = observation.get(field)
+            if not isinstance(counts, dict) or set(counts) - historical_kinds:
+                raise RunnerContractError("historical stage call counts are invalid")
+            counts["semantic"] = 0
+    return value
 
 
 def validate_persisted_attempt_history(
@@ -1284,6 +1333,11 @@ class ExperimentRunner:
         if not self.execution_environment:
             raise ExperimentContractError("execution_environment must not be empty")
         runtime = self.manifest["runtime"]
+        self.semantic_max_calls = (
+            self.manifest["config"]["summary"]["semantic_max_calls_per_case"]
+            if self.manifest["manifest_schema_version"] == EXPERIMENT_MANIFEST_SCHEMA_VERSION
+            and self.manifest["config"]["summary"].get("semantic_policy") is not None else 0
+        )
         self.concurrency = runtime["concurrency"]
         self.max_attempts = 1 + runtime["max_retries"]
         provider_limits = runtime.get("provider_limits")
@@ -1631,6 +1685,7 @@ class ExperimentRunner:
                 self._stop_event,
                 cache_mode=attempt_cache_mode,
                 external_calls_allowed=self.external_calls_allowed,
+                semantic_max_calls=self.semantic_max_calls,
             )
             with self._result_lock:
                 self._attempted.add(case_id)

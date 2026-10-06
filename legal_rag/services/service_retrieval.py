@@ -1,21 +1,31 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from collections.abc import Callable
+from copy import deepcopy
+from threading import Lock
+from typing import Any
 
 from sqlalchemy import Engine, select
 
 from legal_rag.chat import LegalChatAssistant
 from legal_rag.embedding_contracts import EmbeddingProfileIdentity
+from legal_rag.evidence import reference_rules_for_evidence
 from legal_rag.models import VerificationContext
-from legal_rag.retrieval import BM25Retriever
+from legal_rag.llm import SiliconFlowClient
+from legal_rag.bm25_settings import BM25Settings, build_bm25_retriever
 from legal_rag.retrieval_contracts import RetrievalBoundary
 from legal_rag.storage.retrieval import (
     BoundaryBoundRetriever,
+    BoundCorpus,
     PostgresExactRetrievalRepository,
 )
 from legal_rag.storage.schema import embedding_profiles
+from legal_rag.storage.catalog import PostgresLegalCatalogRepository
 
 from .run_executor import ExecutionFailure, RunExecutionInput
+from .execution_policy import GenerationPolicy, ServiceExecutionPolicy
+from .exact_retrieval import ExactReferenceRetriever
 
 
 class _ProviderDisabledCompletionClient:
@@ -24,18 +34,53 @@ class _ProviderDisabledCompletionClient:
         raise RuntimeError("generation is disabled for the provider-free service profile")
 
 
+class _RunLocalLazyBM25:
+    """Delay only index construction, not the authorized corpus resolution.
+
+    Every instance owns detached inputs for exactly one assistant/run. The lock
+    protects concurrent first use, not retrieval or any cross-run cache. A failed
+    constructor leaves the index unset; a later explicit retrieval can retry from
+    pristine inputs without reusing partially initialized state.
+    """
+
+    name = "bm25"
+
+    def __init__(self, corpus: BoundCorpus, settings: BM25Settings) -> None:
+        self._chunks = tuple(corpus.chunks)
+        self._settings = BM25Settings.from_dict(settings.to_dict())
+        self._retriever = None
+        self._build_lock = Lock()
+
+    def retrieve(self, query: str, top_k: int = 5):
+        retriever = self._retriever
+        if retriever is None:
+            with self._build_lock:
+                retriever = self._retriever
+                if retriever is None:
+                    # Give each attempt disposable input: a failed builder may
+                    # have mutated its arguments before raising.
+                    retriever = build_bm25_retriever(list(deepcopy(self._chunks)), self._settings)
+                    self._retriever = retriever
+        return retriever.retrieve(query, top_k=top_k)
+
+
 @dataclass(frozen=True, slots=True)
 class PostgresAssistantFactory:
-    """Create one database-bound, provider-free assistant for each M4 run.
+    """Create one database-bound assistant from the run's frozen server policy.
 
     The factory reloads the immutable snapshot/profile named on the run rather
     than following the current active pointer.  PostgreSQL applies every hard
-    boundary before BM25 sees the corpus.  Generation remains disabled by the
-    corresponding ``LegalChatRunExecutor(generate=False)`` configuration.
+    boundary before BM25 sees the corpus. Exact-routing runs build BM25 only on
+    their first lexical retrieval; non-routing historical runs remain eager.
+    There is no index reuse across runs. Generation defaults to disabled; an
+    enabled policy creates a lazy adapter (or an explicitly trusted test fake).
+    The graph runner, not this factory, supplies lease/epoch authority and the
+    shared monetary invoker before generation or semantic checking can execute.
     """
 
     engine: Engine
     memory_token_limit: int = 2_000
+    completion_client_factory: Callable[[GenerationPolicy], Any] | None = None
 
     def __post_init__(self) -> None:
         if self.engine.dialect.name != "postgresql":
@@ -48,6 +93,7 @@ class PostgresAssistantFactory:
             raise ValueError("memory_token_limit must be a positive integer")
 
     def __call__(self, execution: RunExecutionInput) -> LegalChatAssistant:
+        policy = ServiceExecutionPolicy.from_dict(dict(execution.execution_policy)) if execution.execution_policy is not None else ServiceExecutionPolicy.historical()
         boundary = RetrievalBoundary(
             scope_id=execution.scope_id,
             snapshot_id=execution.snapshot_id,
@@ -100,23 +146,45 @@ class PostgresAssistantFactory:
             filters=boundary,
             expected_profile=profile,
         )
-        retriever = BoundaryBoundRetriever(
-            BM25Retriever(corpus.chunks),
-            corpus=corpus,
+        settings = policy.resolved_bm25_settings
+        lexical = (
+            _RunLocalLazyBM25(corpus, settings)
+            if policy.exact_reference_routing
+            else build_bm25_retriever(corpus.chunks, settings)
         )
+        retriever = BoundaryBoundRetriever(lexical, corpus=corpus)
+        if policy.exact_reference_routing:
+            retriever = ExactReferenceRetriever(
+                corpus=corpus, lexical=retriever,
+                catalog=PostgresLegalCatalogRepository(self.engine),
+                pointer_revision=execution.snapshot_revision, activation_id=execution.activation_id,
+                reference_rules_version=reference_rules_for_evidence(policy.evidence_rules_version),
+            )
         top_k = execution.request_options.get("top_k", 5)
         if isinstance(top_k, bool) or not isinstance(top_k, int) or not 1 <= top_k <= 20:
             raise ExecutionFailure(code="invalid_top_k", stage="assistant_factory")
+        generation = policy.generation
+        client = _ProviderDisabledCompletionClient()
+        if generation.enabled:
+            if execution.scope_id not in generation.allowed_scope_ids:
+                raise ExecutionFailure(code="egress_scope_not_authorized", stage="assistant_factory")
+            client = self.completion_client_factory(generation) if self.completion_client_factory else SiliconFlowClient(
+                model=generation.model, base_url=generation.base_url, api_key_env=generation.api_key_env,
+                request_timeout=30, max_tokens=generation.max_output_tokens, enable_thinking=False,
+                response_format="json_object", follow_redirects=False, load_environment_file=False,
+            )
         return LegalChatAssistant(
             retriever,
-            model="service-provider-disabled",
+            model=generation.model if generation.enabled else "service-provider-disabled",
             top_k=top_k,
             memory_token_limit=self.memory_token_limit,
             verification_context=VerificationContext(
                 snapshot_id=execution.snapshot_id,
                 allowed_scope_ids=[execution.scope_id],
             ),
-            completion_client=_ProviderDisabledCompletionClient(),
+            completion_client=client,
+            semantic_policy=policy.semantic_policy,
+            evidence_rules_version=policy.evidence_rules_version,
         )
 
 

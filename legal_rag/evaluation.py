@@ -11,7 +11,7 @@ from typing import Any
 
 from .adaptive import retrieve_adaptive
 from .chat import LegalChatAssistant
-from .evidence import check_evidence_sufficiency
+from .evidence import GENERAL_EVIDENCE_RULES_VERSION, check_evidence_sufficiency
 from .evaluation_contracts import validate_eval_case as validate_eval_case
 from .evaluation_scoring import (
     CompletedCaseOutcome,
@@ -259,7 +259,8 @@ def _evaluate_cases(
             ):
                 assistant.reset_memory()
         active_session_group = case.session_group
-        analysis = analyze_query(case.question)
+        evidence_rules_version = getattr(assistant, "evidence_rules_version", GENERAL_EVIDENCE_RULES_VERSION)
+        analysis = analyze_query(case.question, evidence_rules_version=evidence_rules_version)
         adaptive_trace: dict[str, Any] = {"enabled": adaptive_enabled, "used": False}
         started = time.perf_counter()
         answer = ""
@@ -315,6 +316,7 @@ def _evaluate_cases(
                     max_queries=adaptive_max_queries,
                     per_plan_top_k=adaptive_per_plan_top_k,
                     normalizer_retries=normalizer_retries,
+                    evidence_rules_version=evidence_rules_version,
                 )
                 results = adaptive_result.results
                 analysis = adaptive_result.analysis
@@ -335,7 +337,7 @@ def _evaluate_cases(
             generation_kind = "service_error" if generate else "retrieval_only"
         if evidence_check is None:
             evidence_check = check_evidence_sufficiency(
-                case.question, results, analysis=analysis
+                case.question, results, analysis=analysis, rules_version=evidence_rules_version
             )
         if generate and verification is None and not error:
             verification = verify_answer(

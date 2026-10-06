@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 import pytest
-from sqlalchemy import Engine, func, select
+from sqlalchemy import Engine, func, select, text
 
 from integration_tests.test_m6_handlers_db import _registration
 from legal_rag.experiment_store import ExperimentStore
@@ -221,7 +221,16 @@ def _attempt_counts(root: Path, job_id: str) -> list[int]:
     return [len(artifact.load_attempts(case_id)) for case_id in case_ids]
 
 
-def _receipt(scenario: str, selector: str, evidence: dict[str, bool | int]) -> None:
+def _database_migration_head(engine: Engine) -> str:
+    with engine.connect() as connection:
+        heads = connection.execute(text("SELECT version_num FROM alembic_version")).scalars().all()
+    if (len(heads) != 1 or not isinstance(heads[0], str)
+        or re.fullmatch(r"[a-z0-9_]{1,64}", heads[0]) is None):
+        pytest.fail("cannot determine a unique database migration head")
+    return heads[0]
+
+
+def _receipt(scenario: str, selector: str, evidence: dict[str, bool | int], *, engine: Engine) -> None:
     path_value = os.environ.get("LEGAL_RAG_M6_RECEIPT")
     if not path_value:
         return
@@ -231,12 +240,14 @@ def _receipt(scenario: str, selector: str, evidence: dict[str, bool | int]) -> N
     path = Path(path_value)
     if not path.is_absolute():
         pytest.fail("LEGAL_RAG_M6_RECEIPT must be absolute")
+    migration_head = _database_migration_head(engine)
     existing: dict[str, Any] = {}
     if path.exists():
         existing = json.loads(path.read_text(encoding="utf-8"))
     scenarios = (
         existing.get("scenarios", {})
-        if existing.get("candidate_sha") == candidate_sha
+        if (existing.get("candidate_sha") == candidate_sha
+            and existing.get("database") == {"backend": "postgresql", "migration_head": migration_head})
         else {}
     )
     scenarios[scenario] = {
@@ -252,7 +263,7 @@ def _receipt(scenario: str, selector: str, evidence: dict[str, bool | int]) -> N
         "live_model_calls": False,
         "database": {
             "backend": "postgresql",
-            "migration_head": "0007_m6_jobs_outbox",
+            "migration_head": migration_head,
         },
         "broker": {
             "backend": "redis",
@@ -318,6 +329,7 @@ def test_m6_t01_outbox_recovery(
         "M6-T01",
         "test_m6_t01_outbox_recovery",
         {"committed_before_publish": True, "recovery_dispatch_observed": True},
+        engine=migrated_engine,
     )
 
 
@@ -358,6 +370,7 @@ def test_m6_t02_duplicate_delivery(
         "M6-T02",
         "test_m6_t02_duplicate_delivery",
         {"duplicate_delivery_observed": True, "unique_business_result": True},
+        engine=migrated_engine,
     )
 
 
@@ -420,6 +433,7 @@ def test_m6_t03_kill_resume(
             "first_pid": first_pid,
             "resume_pid": resume_pid,
         },
+        engine=migrated_engine,
     )
 
 
@@ -466,6 +480,7 @@ def test_m6_t04_broker_disconnect(
             "job_state_explainable": True,
             "persisted_records_unchanged": True,
         },
+        engine=migrated_engine,
     )
 
 
@@ -538,6 +553,7 @@ def test_m6_t05_index_failure(
         "M6-T05",
         "test_m6_t05_index_failure",
         {"index_failure_observed": True, "active_snapshot_unchanged": True},
+        engine=migrated_engine,
     )
 
 
@@ -618,4 +634,5 @@ def test_m6_t07_parallel_progress(
             "new_job_progress_observed": True,
             "queue_wait_recorded": True,
         },
+        engine=migrated_engine,
     )

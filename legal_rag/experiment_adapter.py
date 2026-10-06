@@ -57,6 +57,7 @@ from .experiment_runner import (
     WorkUnit,
 )
 from .experiment_runtime import (
+    EXPERIMENT_MANIFEST_SCHEMA_VERSION,
     EXTERNAL_CALL_KINDS,
     CacheConflictError,
     CacheCorruptionError,
@@ -80,6 +81,7 @@ from .provider_errors import (
 )
 from .query import analyze_query
 from .retrieval import BM25Retriever, Retriever
+from .semantic import CompletionSemanticChecker, SemanticAssessment, SemanticPolicy, SegmentAssessment
 
 
 ADAPTER_ARTIFACT_SCHEMA_VERSION = 1
@@ -111,6 +113,8 @@ class EvaluationRuntimeSpec:
     judge_client_factory: Callable[[], CompletionClient] | None = None
     adaptive_llm_client_factory: Callable[[], CompletionClient] | None = None
     trace_metadata: Mapping[str, Any] | None = None
+    semantic_policy: SemanticPolicy | None = None
+    semantic_client_factory: Callable[[], CompletionClient] | None = None
 
 
 def build_manifest_case(case: EvalCase, *, ordinal: int) -> dict[str, Any]:
@@ -213,6 +217,17 @@ class LegalEvaluationRuntimeFactory:
             raise ExperimentContractError(
                 "assistant model does not match the evaluation runtime spec"
             )
+        if assistant.verification_rules_version != self.spec.manifest["contracts"]["verification"]["rules_version"]:
+            raise ExperimentContractError("assistant verification rules differ from manifest")
+        if assistant.evidence_rules_version not in {"general-reference-v2", "general-reference-v3"}:
+            raise ExperimentContractError("modern experiment requires general evidence rules")
+        frozen_evidence_version = _manifest_evidence_rules_version(self.spec.manifest)
+        if assistant.evidence_rules_version != frozen_evidence_version:
+            raise ExperimentContractError("assistant evidence rules differ from frozen manifest")
+        if assistant.semantic_policy != self.spec.semantic_policy:
+            raise ExperimentContractError("assistant semantic policy differs from frozen manifest")
+        if assistant.semantic_checker is not None:
+            raise ExperimentContractError("experiment semantic checker must be adapter-controlled")
         expected_top_k = self.spec.manifest["contracts"]["retrieval"]["parameters"][
             "top_k"
         ]
@@ -254,6 +269,10 @@ class LegalEvaluationRuntimeFactory:
             if self.spec.adaptive_llm_client_factory is not None
             else None
         )
+        semantic_client = (
+            self.spec.semantic_client_factory()
+            if self.spec.semantic_client_factory is not None else None
+        )
         expected_timeouts = _manifest_provider_timeouts(self.spec.manifest)
         actual_timeouts = {
             "assistant": _provider_timeout_value(
@@ -266,6 +285,10 @@ class LegalEvaluationRuntimeFactory:
                 "adaptive", getattr(adaptive_client, "request_timeout", None)
             ),
         }
+        if self.spec.semantic_policy is not None:
+            actual_timeouts["semantic"] = _provider_timeout_value(
+                "semantic", getattr(semantic_client, "request_timeout", None)
+            )
         if canonical_json_bytes(actual_timeouts) != canonical_json_bytes(
             expected_timeouts
         ):
@@ -276,6 +299,8 @@ class LegalEvaluationRuntimeFactory:
             _require_completion_usage("judge completion client", judge_client)
         if adaptive_client is not None:
             _require_completion_usage("adaptive completion client", adaptive_client)
+        if semantic_client is not None:
+            _require_completion_usage("semantic completion client", semantic_client)
         if self.spec.generate and adaptive_client is not None:
             raise ExperimentContractError(
                 "generated evaluation cannot use a separate adaptive client"
@@ -299,6 +324,8 @@ class LegalEvaluationRuntimeFactory:
             owned.extend((judge_client, judge_client.usage))
         if adaptive_client is not None:
             owned.extend((adaptive_client, adaptive_client.usage))
+        if semantic_client is not None:
+            owned.extend((semantic_client, semantic_client.usage))
         if len({id(item) for item in owned}) != len(owned):
             raise ExperimentContractError(
                 "assistant, generation, normalizer, and judge clients must be isolated"
@@ -355,6 +382,7 @@ class LegalEvaluationRuntimeFactory:
             assistant=assistant,
             judge_client=judge_client,
             adaptive_client=adaptive_client,
+            semantic_client=semantic_client,
             session_group=work_unit.session_group,
             cache_mode=controls.cache_mode,
         )
@@ -368,6 +396,7 @@ class CaseRuntime:
         assistant: LegalChatAssistant,
         judge_client: CompletionClient | None,
         adaptive_client: CompletionClient | None,
+        semantic_client: CompletionClient | None,
         session_group: str | None,
         cache_mode: str,
     ) -> None:
@@ -375,6 +404,7 @@ class CaseRuntime:
         self.assistant = assistant
         self.judge_client = judge_client
         self.adaptive_client = adaptive_client
+        self.semantic_client = semantic_client
         self.session_group = session_group
         self.cache_mode = cache_mode
         self._assistant_client = assistant.llm
@@ -497,16 +527,18 @@ class CaseRuntime:
         retrieved_artifact = retrieved_turn_to_artifact(retrieved)
         evidence_hash = canonical_hash(retrieved_artifact)
         assistant_usage_before = usage_snapshot(self._assistant_client)
+        semantic_usage_before = usage_snapshot(self.semantic_client)
 
         def produce_generated() -> Mapping[str, Any]:
-            return self._with_assistant_client(
+            generated_draft = self._with_assistant_client(
                 controls,
                 stage="generation",
                 kind="generation",
-                operation=lambda: generated_turn_to_artifact(
-                    self.assistant.generate_turn(retrieved, generate=True)
-                ),
+                operation=lambda: self.assistant.generate_turn(retrieved, generate=True),
             )
+            # Assessment is explicit and cached with the exact generated draft.
+            # Verification and commit only consume this immutable evidence.
+            return generated_turn_to_artifact(self._assess_generated(generated_draft, controls))
 
         generated, observations["generation"], generated_execution = self._cached_stage(
             cache_stage="generation",
@@ -516,6 +548,7 @@ class CaseRuntime:
                 "evidence_hash": evidence_hash,
                 "prepared_artifact_sha256": canonical_hash(prepared_artifact),
                 "retrieved_artifact_sha256": evidence_hash,
+                "semantic_policy_fingerprint": self._semantic_policy_fingerprint,
             },
             artifact_kind="generated_turn",
             producer=produce_generated,
@@ -538,6 +571,13 @@ class CaseRuntime:
             (("generation", "generation"),),
             model_usage_role="assistant",
         )
+        semantic_usage = ModelUsageDelta.from_mapping(
+            usage_delta(semantic_usage_before, usage_snapshot(self.semantic_client))
+        )
+        _validate_usage_ledger(
+            "semantic gate", semantic_usage, controls, (("generation", "semantic"),),
+            model_usage_role="semantic",
+        )
         if generated.generation_error is not None:
             observations["generation"] = _observation_from_execution(
                 generated_execution,
@@ -554,6 +594,7 @@ class CaseRuntime:
                 "evidence_hash": evidence_hash,
                 "scope_hash": canonical_hash(scope_payload),
                 "generated_artifact_sha256": canonical_hash(generated_artifact),
+                "semantic_policy_fingerprint": self._semantic_policy_fingerprint,
             },
             artifact_kind="verified_turn",
             producer=lambda: verified_turn_to_artifact(
@@ -710,11 +751,7 @@ class CaseRuntime:
             assistant_usage=assistant_usage,
             normalizer_usage=normalizer_usage,
             judge_usage=judge_usage,
-            trace_metadata=(
-                _without_raw_response(self.spec.trace_metadata)
-                if self.spec.trace_metadata is not None
-                else None
-            ),
+            trace_metadata=self._semantic_trace_metadata(generated, semantic_usage),
         )
         evaluated = score_completed_case(outcome)
         stage_executions = {
@@ -797,7 +834,7 @@ class CaseRuntime:
                 },
                 artifact_kind="query_analysis",
                 producer=lambda: query_analysis_to_artifact(
-                    analyze_query(case.question)
+                    analyze_query(case.question, evidence_rules_version=self.assistant.evidence_rules_version)
                 ),
                 decoder=query_analysis_from_artifact,
                 observations=observations,
@@ -829,6 +866,7 @@ class CaseRuntime:
                 max_queries=self.assistant.adaptive_max_queries,
                 per_plan_top_k=self.assistant.adaptive_per_plan_top_k,
                 normalizer_retries=self.assistant.normalizer_retries,
+                evidence_rules_version=self.assistant.evidence_rules_version,
             )
             if adaptive.analysis != analysis:
                 raise ExperimentContractError(
@@ -1095,6 +1133,42 @@ class CaseRuntime:
         finally:
             self.assistant.llm = self._assistant_client
 
+    @property
+    def _semantic_policy_fingerprint(self) -> str | None:
+        return self.spec.semantic_policy.fingerprint if self.spec.semantic_policy is not None else None
+
+    def _assess_generated(self, generated: Any, controls: AttemptControls) -> Any:
+        if self.assistant.semantic_policy != self.spec.semantic_policy or self.assistant.semantic_checker is not None:
+            raise ExperimentContractError("semantic policy/checker changed outside the adapter")
+        if self.spec.semantic_policy is None:
+            return self.assistant.assess_turn(generated)
+        if self.semantic_client is None:
+            return self.assistant.assess_turn(generated)
+        controlled = _ControlledCompletionClient(
+            self.semantic_client, controls, stage="generation", kind="semantic",
+            max_calls=self.spec.manifest["config"]["summary"]["semantic_max_calls_per_case"],
+        )
+        self.assistant.semantic_checker = _ControlledSemanticChecker(self.spec.semantic_policy, controlled)
+        try:
+            return self.assistant.assess_turn(generated)
+        finally:
+            self.assistant.semantic_checker = None
+
+    def _semantic_trace_metadata(self, generated: Any, usage: ModelUsageDelta) -> Mapping[str, Any] | None:
+        metadata = _without_raw_response(self.spec.trace_metadata) if self.spec.trace_metadata is not None else {}
+        metadata = dict(metadata)
+        if "semantic_gate" in metadata:
+            raise ExperimentContractError("trace metadata cannot override semantic gate facts")
+        metadata["semantic_gate"] = {
+            "policy_fingerprint": self._semantic_policy_fingerprint,
+            "assessment": generated.semantic_assessment.to_dict() if generated.semantic_assessment is not None else None,
+            "error_code": generated.semantic_error,
+            "actual_usage": asdict(usage),
+            "not_checked_reason": ("no_policy" if self.spec.semantic_policy is None else
+                                   "checker_unavailable" if self.semantic_client is None else None),
+        }
+        return metadata
+
     def _without_assistant_provider(
         self,
         operation: Callable[[], _T],
@@ -1180,8 +1254,25 @@ def decode_evaluation_output(
             "evaluation record disagrees with its scoring facts"
         )
     trace_record = _json_object(payload["trace_record"])
+    recomputed_trace = deepcopy(recomputed.trace_record)
+    evidence_artifact = facts["evidence_check"]
+    historical_evidence = (
+        isinstance(evidence_artifact, dict)
+        and evidence_artifact.get("artifact_schema_version") == 1
+        and isinstance(evidence_artifact.get("payload"), dict)
+        and "rules_version" not in evidence_artifact["payload"]
+        and "mechanical_check" not in evidence_artifact["payload"]
+        and outcome.evidence_check.rules_version == "legacy-hints-and-return-v1"
+        and outcome.evidence_check.mechanical_check is None
+    )
+    if historical_evidence:
+        # Explicit historical field projection, not permission to reinterpret
+        # old structural-only results as modern reference/semantic checks.
+        # All original trace fields, record fields and hashes remain exact.
+        recomputed_trace["evidence"].pop("rules_version")
+        recomputed_trace["evidence"].pop("mechanical_check")
     if canonical_json_bytes(trace_record) != canonical_json_bytes(
-        recomputed.trace_record
+        recomputed_trace
     ):
         raise ExperimentContractError(
             "evaluation trace disagrees with its scoring facts"
@@ -1198,6 +1289,28 @@ def decode_evaluation_output(
     return EvaluatedCase(record=record, trace_record=deepcopy(trace_record))
 
 
+class _ControlledSemanticChecker(CompletionSemanticChecker):
+    """Keep invalid semantic payloads as failed assessments, never a pass.
+
+    Transport/stop/accounting failures still abort the producer and are retained
+    as failed attempts. A syntactically invalid checker result consumed a real
+    call, so its independently bound ``error`` decision is cacheable evidence.
+    """
+
+    def assess(self, request: Any) -> SemanticAssessment:
+        try:
+            return super().assess(request)
+        except (ProviderCallError, RunnerStopped, RunnerContractError, ExperimentContractError):
+            raise
+        except (TypeError, ValueError, RecursionError):
+            return SemanticAssessment(
+                request.fingerprint, self.policy.fingerprint, self.policy.checker_id,
+                self.policy.checker_revision, self.policy.prompt_version,
+                tuple(SegmentAssessment(segment.segment_id, "error", (), ("checker_payload_invalid",))
+                      for segment in request.segments),
+            )
+
+
 class _ControlledCompletionClient:
     def __init__(
         self,
@@ -1206,11 +1319,13 @@ class _ControlledCompletionClient:
         *,
         stage: str,
         kind: str,
+        max_calls: int | None = None,
     ) -> None:
         self._client = client
         self._controls = controls
         self._stage = stage
         self._kind = kind
+        self._max_calls = max_calls
 
     @property
     def usage(self) -> Any:
@@ -1231,6 +1346,8 @@ class _ControlledCompletionClient:
     def complete(self, prompt: str) -> Any:
         usage_before = usage_snapshot(self._client)
         attempted_before, failed_before = self._controls.stage_counts(self._stage)
+        if self._max_calls is not None and attempted_before[self._kind] >= self._max_calls:
+            raise ExperimentContractError("semantic per-case call budget exhausted before dispatch")
 
         def dispatch() -> Any:
             try:
@@ -1317,12 +1434,20 @@ def _run_without_assistant_provider(
 ) -> _T:
     client = assistant.llm
     proxy = _ProviderForbiddenCompletionClient(client, phase=phase)
+    checker = assistant.semantic_checker
+    semantic_proxy = None
+    if checker is not None:
+        if not isinstance(checker, CompletionSemanticChecker):
+            raise ExperimentContractError("uncontrolled semantic checker is forbidden in experiment stages")
+        semantic_proxy = _ProviderForbiddenCompletionClient(checker.client, phase=phase)
+        assistant.semantic_checker = CompletionSemanticChecker(checker.policy, semantic_proxy)
     assistant.llm = proxy
     try:
         result = operation()
     finally:
         assistant.llm = client
-    if proxy.attempted:
+        assistant.semantic_checker = checker
+    if proxy.attempted or (semantic_proxy is not None and semantic_proxy.attempted):
         raise ExperimentContractError(
             f"assistant {phase} attempted a forbidden completion call"
         )
@@ -1531,10 +1656,36 @@ def _validate_stage_outcome_consistency(
         )
 
 
+def _manifest_evidence_rules_version(manifest: Mapping[str, Any]) -> str:
+    retrieval = manifest["contracts"]["retrieval"]
+    query_contract = retrieval.get("query_analysis", {})
+    version = query_contract.get("evidence_rules_version", "general-reference-v2")
+    if version not in {"general-reference-v2", "general-reference-v3"}:
+        raise ExperimentContractError("unsupported frozen evidence rules")
+    if "evidence_rules_version" in query_contract:
+        expected_reference = version.replace("general-reference", "legal-reference")
+        if query_contract.get("reference_rules_version") != expected_reference:
+            raise ExperimentContractError("reference and evidence rules disagree")
+    if "bm25_settings" in retrieval["parameters"] and (
+        query_contract.get("evidence_rules_version") != version
+        or manifest["config"]["summary"].get("evidence_rules_version") != version
+    ):
+        raise ExperimentContractError("modern BM25 requires explicitly frozen evidence rules")
+    return version
+
+
 def _validate_outcome_manifest_contract(
     outcome: CompletedCaseOutcome,
     manifest: Mapping[str, Any],
 ) -> None:
+    if manifest["manifest_schema_version"] == EXPERIMENT_MANIFEST_SCHEMA_VERSION and (
+        outcome.evidence_check.rules_version not in {"general-reference-v2", "general-reference-v3"}
+    ):
+        raise ExperimentContractError("modern output cannot acquire historical evidence authority")
+    if manifest["manifest_schema_version"] == EXPERIMENT_MANIFEST_SCHEMA_VERSION and (
+        outcome.evidence_check.rules_version != _manifest_evidence_rules_version(manifest)
+    ):
+        raise ExperimentContractError("output evidence rules differ from frozen manifest")
     expected = {
         "model": manifest["contracts"]["generation"]["model"],
         "retriever": manifest["contracts"]["retrieval"]["kind"],
@@ -1560,6 +1711,48 @@ def _validate_outcome_manifest_contract(
         raise ExperimentContractError(
             "evaluation adaptive facts disagree with the manifest contract"
         )
+    gate = (outcome.trace_metadata or {}).get("semantic_gate")
+    raw_policy = manifest["config"]["summary"].get("semantic_policy")
+    policy = SemanticPolicy.from_dict(raw_policy) if raw_policy is not None else None
+    modern = manifest["manifest_schema_version"] == EXPERIMENT_MANIFEST_SCHEMA_VERSION
+    if gate is None:
+        if modern and outcome.generate:
+            raise ExperimentContractError("modern generated output lacks semantic gate facts")
+        return
+    if not isinstance(gate, dict) or set(gate) != {
+        "policy_fingerprint", "assessment", "error_code", "actual_usage", "not_checked_reason"
+    }:
+        raise ExperimentContractError("semantic gate facts fields are invalid")
+    expected_fingerprint = policy.fingerprint if policy is not None else None
+    if gate["policy_fingerprint"] != expected_fingerprint:
+        raise ExperimentContractError("semantic gate policy disagrees with frozen manifest")
+    try:
+        usage = ModelUsageDelta.from_mapping(gate["actual_usage"])
+        assessment = (SemanticAssessment.from_dict(gate["assessment"])
+                      if gate["assessment"] is not None else None)
+    except (TypeError, ValueError) as error:
+        raise ExperimentContractError("semantic gate facts are invalid") from error
+    if policy is None:
+        if assessment is not None or usage != ModelUsageDelta() or gate["error_code"] is not None:
+            raise ExperimentContractError("output without a semantic policy cannot acquire authority")
+        if gate["not_checked_reason"] != "no_policy":
+            raise ExperimentContractError("semantic no-policy reason is inconsistent")
+    else:
+        if not modern or not outcome.generate:
+            raise ExperimentContractError("historical or retrieval-only output cannot acquire semantic authority")
+        if usage.calls > manifest["config"]["summary"]["semantic_max_calls_per_case"]:
+            raise ExperimentContractError("semantic actual usage exceeds frozen call budget")
+        if gate["error_code"] not in {None, "checker_error", "checker_unavailable", "input_invalid"}:
+            raise ExperimentContractError("semantic error code is invalid")
+        if gate["not_checked_reason"] not in {None, "checker_unavailable"}:
+            raise ExperimentContractError("semantic not-checked reason is invalid")
+        if assessment is not None and (
+            assessment.policy_fingerprint != policy.fingerprint
+            or assessment.checker_id != policy.checker_id
+            or assessment.checker_revision != policy.checker_revision
+            or assessment.prompt_version != policy.prompt_version
+        ):
+            raise ExperimentContractError("semantic assessment identity disagrees with frozen policy")
 
 
 def _expected_eval_case(value: EvalCase | Mapping[str, Any]) -> EvalCase:
@@ -2076,6 +2269,10 @@ def _validate_spec(spec: EvaluationRuntimeSpec) -> EvaluationRuntimeSpec:
     if not isinstance(spec, EvaluationRuntimeSpec):
         raise TypeError("spec must be an EvaluationRuntimeSpec")
     manifest = validate_experiment_manifest(spec.manifest)
+    if manifest["manifest_schema_version"] != EXPERIMENT_MANIFEST_SCHEMA_VERSION:
+        raise ExperimentContractError("historical manifest is view-only, not new execution authority")
+    if manifest["contracts"]["verification"]["rules_version"] != "general-bound-v2":
+        raise ExperimentContractError("historical verification rules are view-only")
     if not isinstance(spec.cache, ExactStageCache):
         raise ExperimentContractError("spec.cache must be an ExactStageCache")
     if not isinstance(spec.model, str) or not spec.model.strip():
@@ -2105,6 +2302,12 @@ def _validate_spec(spec: EvaluationRuntimeSpec) -> EvaluationRuntimeSpec:
         )
     _manifest_assistant_runtime(manifest)
     _manifest_provider_timeouts(manifest)
+    raw_policy = manifest["config"]["summary"].get("semantic_policy")
+    policy = SemanticPolicy.from_dict(raw_policy) if raw_policy is not None else None
+    if spec.semantic_policy != policy:
+        raise ExperimentContractError("spec semantic policy must equal frozen manifest policy")
+    if spec.semantic_client_factory is not None and (policy is None or not spec.generate):
+        raise ExperimentContractError("semantic client requires explicit generated policy")
     execution_mode = manifest["execution_mode"]
     allowed_execution_modes = (
         {"smoke-generation", "full-regression"}
@@ -2116,11 +2319,47 @@ def _validate_spec(spec: EvaluationRuntimeSpec) -> EvaluationRuntimeSpec:
             "manifest execution_mode is incompatible with spec.generate"
         )
     retrieval_contract = manifest["contracts"]["retrieval"]
+    _manifest_evidence_rules_version(manifest)
     parameters = retrieval_contract["parameters"]
-    if set(parameters) != {"top_k"}:
+    if set(parameters) not in ({"top_k"}, {"top_k", "bm25_settings"}):
         raise ExperimentContractError(
-            "D4c retrieval contract parameters must contain only top_k"
+            "D4c retrieval contract parameters require top_k and optional frozen bm25_settings"
         )
+    from .bm25_settings import BM25Settings
+    from .chinese_bm25 import ChineseBM25Retriever
+    if "bm25_settings" in parameters:
+        try:
+            settings = BM25Settings.from_dict(parameters["bm25_settings"])
+        except (TypeError, ValueError) as exc:
+            raise ExperimentContractError("invalid frozen BM25 settings") from exc
+        if settings.to_dict() != manifest["config"]["summary"].get("bm25_settings"):
+            raise ExperimentContractError("BM25 config and retrieval contract differ")
+        if type(spec.retriever) is ChineseBM25Retriever:
+            actual_identity = spec.retriever.config_identity
+        elif type(spec.retriever) is BM25Retriever:
+            actual_identity = BM25Settings(
+                lexical_profile=spec.retriever.lexical_profile, k1=spec.retriever.k1,
+                b=spec.retriever.b, law_boost=spec.retriever.law_boost,
+                article_boost=spec.retriever.article_boost,
+                deprecated_penalty=spec.retriever.deprecated_penalty,
+            ).identity
+        else:
+            raise ExperimentContractError("frozen BM25 settings require the known concrete engine")
+        if actual_identity != settings.identity:
+            raise ExperimentContractError("actual BM25 engine differs from frozen settings")
+    elif type(spec.retriever) is ChineseBM25Retriever:
+        raise ExperimentContractError("modern BM25 requires complete frozen settings")
+    elif type(spec.retriever) is BM25Retriever:
+        # The old top-k-only contract implied these exact original defaults.
+        # Non-default historical experiments need the same explicit identity as
+        # modern ones; merely calling an engine "bm25" cannot share that cache.
+        historical_parameters = (
+            spec.retriever.lexical_profile, spec.retriever.k1, spec.retriever.b,
+            spec.retriever.law_boost, spec.retriever.article_boost,
+            spec.retriever.deprecated_penalty,
+        )
+        if historical_parameters != ("legacy-v1", 1.5, .75, 40.0, 80.0, 1.0):
+            raise ExperimentContractError("non-default historical BM25 requires frozen settings")
     if retrieval_contract["filters"] != {}:
         raise ExperimentContractError("D4c does not support implicit retrieval filters")
     retriever_name = getattr(spec.retriever, "name", None)
@@ -2132,7 +2371,7 @@ def _validate_spec(spec: EvaluationRuntimeSpec) -> EvaluationRuntimeSpec:
         )
     if not isinstance(spec.retriever_provider_free, bool):
         raise ExperimentContractError("retriever_provider_free must be a boolean")
-    if type(spec.retriever) is not BM25Retriever:
+    if type(spec.retriever) not in {BM25Retriever, ChineseBM25Retriever}:
         if not spec.retriever_provider_free or (
             getattr(spec.retriever, "provider_free", None) is not True
         ):
@@ -2171,6 +2410,8 @@ def _validate_spec(spec: EvaluationRuntimeSpec) -> EvaluationRuntimeSpec:
     copied_metadata = (
         _json_object(spec.trace_metadata) if spec.trace_metadata is not None else None
     )
+    if copied_metadata is not None and "semantic_gate" in copied_metadata:
+        raise ExperimentContractError("trace metadata cannot override semantic gate facts")
     return EvaluationRuntimeSpec(
         manifest=manifest,
         cache=spec.cache,
@@ -2183,6 +2424,8 @@ def _validate_spec(spec: EvaluationRuntimeSpec) -> EvaluationRuntimeSpec:
         judge_client_factory=spec.judge_client_factory,
         adaptive_llm_client_factory=spec.adaptive_llm_client_factory,
         trace_metadata=copied_metadata,
+        semantic_policy=policy,
+        semantic_client_factory=spec.semantic_client_factory,
     )
 
 
@@ -2215,6 +2458,8 @@ def _manifest_provider_timeouts(manifest: Mapping[str, Any]) -> dict[str, float 
     summary = manifest["config"]["summary"]
     value = summary.get("provider_timeouts")
     required = {"assistant", "judge", "adaptive"}
+    if summary.get("semantic_policy") is not None:
+        required.add("semantic")
     if not isinstance(value, Mapping) or set(value) != required:
         raise ExperimentContractError(
             "manifest config.summary.provider_timeouts fields are invalid"

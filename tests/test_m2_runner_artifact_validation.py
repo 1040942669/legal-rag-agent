@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from legal_rag.experiment_runner import (
+    MODEL_USAGE_ROLES,
     OBSERVATION_STAGES,
     RUNNER_RESULT_SCHEMA_VERSION,
     RunnerContractError,
@@ -93,7 +94,7 @@ def _zero_model_usage() -> dict[str, Any]:
             "token_usage_calls": 0,
             "latency_ms": 0.0,
         }
-        for role in ("assistant", "normalizer", "judge")
+        for role in MODEL_USAGE_ROLES
     }
 
 
@@ -192,10 +193,26 @@ def test_public_attempt_validator_returns_defensive_frozen_view() -> None:
     assert view.output == {"case_id": "single", "attempt": 1}
     assert view.session_checkpoint is None
     assert view.retryable is None
+    assert set(view.model_usage) == {"assistant", "normalizer", "semantic", "judge"}
+    assert view.model_usage["semantic"] == _zero_model_usage()["semantic"]
     with pytest.raises(FrozenInstanceError):
         view.status = "failed"  # type: ignore[misc]
     payload["result"]["output"]["case_id"] = "mutated-after-validation"
     assert view.output == {"case_id": "single", "attempt": 1}
+
+
+def test_public_modern_attempt_cannot_omit_semantic_usage_role() -> None:
+    case = _case("modern-missing-semantic", 0)
+    unit = _unit(case)
+    payload = _attempt(unit=unit, case=case, attempt_number=1, status="succeeded")
+    assert payload["result"]["runner_schema_version"] == RUNNER_RESULT_SCHEMA_VERSION
+    payload["result"]["model_usage"].pop("semantic")
+    frozen = deepcopy(payload)
+
+    with pytest.raises(RunnerContractError, match="model_usage roles are invalid"):
+        validate_persisted_runner_attempt(payload, case=case, unit=unit, state_before=None)
+
+    assert payload == frozen
 
 
 def test_public_attempt_history_validates_retry_order_and_numbers() -> None:

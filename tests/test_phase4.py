@@ -422,7 +422,7 @@ class EvaluationContractTest(unittest.TestCase):
         refusal_cases = [case for case in full if case.case_type == "refusal"]
         self.assertTrue(
             all(
-                set(analyze_query(case.question).risk_flags) & refusal_flags
+                set(analyze_query(case.question, evidence_rules_version="general-reference-v2").risk_flags) & refusal_flags
                 for case in refusal_cases
             )
         )

@@ -89,12 +89,14 @@ def _write_wheel(
     duplicate_extra_dependency: str | None = None,
     celery_redis_extra: bool = True,
     jobs_entry_point: str = "legal_rag.jobs.command:main",
+    additional_files: tuple[str, ...] = (),
 ) -> Path:
     required = set(release_probe._m4.REQUIRED_RUNTIME_FILES)
     if profile in {"M5", "M6"}:
         required.update(release_probe.M5_REQUIRED_RUNTIME_FILES)
     if profile == "M6":
         required.update(release_probe.M6_REQUIRED_RUNTIME_FILES)
+    required.update(additional_files)
     if omit_file is not None:
         required.discard(omit_file)
     dist_info = f"legal_rag_assistant-{version}.dist-info"
@@ -482,6 +484,64 @@ def test_m6_smoke_requests_installed_api_jobs_and_migration_proof(
         "jobs_cli_help": "passed",
         "migration_head": "0007_m6_jobs_outbox",
     }
+
+
+def test_modern_m6_candidate_cannot_reuse_historical_wheel_contract(tmp_path: Path) -> None:
+    wheel = _write_wheel(
+        tmp_path / "legal_rag_assistant-0.7.1-py3-none-any.whl",
+        version="0.7.1", profile="M6",
+    )
+    with pytest.raises(release_probe.ProbeFailure) as raised:
+        release_probe.probe_release_wheel(
+            wheel, profile="M6", expected_migration_head="0008_execution_money",
+        )
+    assert raised.value.code == "general_required_runtime_file_missing"
+    # The unchanged historical wheel remains valid under its own contract.
+    assert release_probe.probe_release_wheel(wheel, profile="M6")["status"] == "passed"
+
+
+def test_modern_m6_candidate_smoke_binds_requested_head_and_modules(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    files = (
+        "legal_rag/bm25_settings.py", "legal_rag/chinese_bm25.py",
+        "legal_rag/request_policy.py", "legal_rag/legacy_reference_v2.py",
+        "legal_rag/legal_references.py", "legal_rag/reference_evidence.py",
+        "legal_rag/retrieval_outcomes.py", "legal_rag/semantic.py",
+        "legal_rag/evaluation_governance.py", "legal_rag/governed_protocol.py",
+        "legal_rag/services/execution_policy.py", "legal_rag/services/governed_calls.py",
+        "legal_rag/services/exact_retrieval.py",
+        "legal_rag/storage/alembic/versions/0008_execution_money.py",
+    )
+    wheel = _write_wheel(
+        tmp_path / "legal_rag_assistant-0.7.1-py3-none-any.whl",
+        version="0.7.1", profile="M6", additional_files=files,
+    )
+    calls = []
+    monkeypatch.setattr(release_probe._m4, "_smoke_in_temporary_venv", lambda *a, **k: {})
+    monkeypatch.setattr(release_probe, "_smoke_m5_modules_with_locked_runtime", lambda *a, **k: {})
+
+    def smoke(*args: Any, **kwargs: Any) -> dict[str, object]:
+        calls.append(kwargs)
+        return {"status": "passed", "migration_head": kwargs["expected_migration_head"]}
+
+    monkeypatch.setattr(release_probe, "_smoke_m6_installed_wheel", smoke)
+    receipt = release_probe.probe_release_wheel(
+        wheel, profile="M6", smoke=True, expected_migration_head="0008_execution_money",
+    )
+    assert calls[0]["expected_migration_head"] == "0008_execution_money"
+    assert receipt["checks"]["general_runtime_files"] == "passed"
+    assert receipt["expected_migration_head"] == "0008_execution_money"
+    assert receipt["smoke"]["m6_installed_runtime"]["migration_head"] == "0008_execution_money"
+
+
+@pytest.mark.parametrize("profile,head", [("M5", "0008_execution_money"), ("M6", "invented_head")])
+def test_migration_contract_rejects_unrecognized_or_wrong_profile_head(tmp_path, profile, head):
+    with pytest.raises(release_probe.ProbeFailure) as raised:
+        release_probe.probe_release_wheel(
+            tmp_path / "not_read.whl", profile=profile, expected_migration_head=head,
+        )
+    assert raised.value.code == "invalid_migration_contract"
 
 
 def test_m5_runtime_smoke_imports_from_extracted_wheel_not_checkout(

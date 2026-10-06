@@ -99,6 +99,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "bm25_b": 0.75,
         "bm25_law_boost": 40.0,
         "bm25_article_boost": 80.0,
+        "bm25_lexical_profile": "legacy-v1",
+        "bm25_hmm": True,
         "rrf_k": 60,
         "rrf_bm25_weight": 1.0,
         "rrf_dense_weight": 1.0,

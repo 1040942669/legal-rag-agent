@@ -1247,7 +1247,9 @@ class M1VerificationTest(unittest.TestCase):
                 assistant = LegalChatAssistant(StaticRetriever(), model="fake")
                 assistant.llm = MalformedModel(payload)
 
-                answer, _ = assistant.answer("第一条规定了什么？", generate=True)
+                # Specify ownership so this provider-payload test reaches generation,
+                # rather than the modern unpaired-reference clarification gate.
+                answer, _ = assistant.answer("《合成示例法》第一条规定了什么？", generate=True)
 
                 self.assertNotIn("not a string input", answer)
                 self.assertEqual(
@@ -1318,7 +1320,7 @@ class M1VerificationTest(unittest.TestCase):
 
         assistant = LegalChatAssistant(EmptyRetriever(), model="fake")
 
-        answer, results = assistant.answer("第一条规定了什么？", generate=False)
+        answer, results = assistant.answer("《合成示例法》第一条规定了什么？", generate=False)
 
         self.assertEqual(results, [])
         self.assertIn("资料", answer)
@@ -1376,7 +1378,7 @@ class M1VerificationTest(unittest.TestCase):
         assistant = LegalChatAssistant(StaticRetriever(), model="fake")
         assistant.llm = InvalidCitationModel()
 
-        answer, _ = assistant.answer("第一条规定了什么？", generate=True)
+        answer, _ = assistant.answer("《合成示例法》第一条规定了什么？", generate=True)
 
         self.assertNotIn("S999", answer)
         self.assertIsNotNone(assistant.last_pre_fallback_verification)
@@ -1406,7 +1408,7 @@ class M1VerificationTest(unittest.TestCase):
         assistant = LegalChatAssistant(StaticRetriever(), model="fake")
         assistant.llm = FailingModel()
 
-        answer, _ = assistant.answer("第一条规定了什么？", generate=True)
+        answer, _ = assistant.answer("《合成示例法》第一条规定了什么？", generate=True)
 
         self.assertNotIn("PROVIDER_SECRET", answer)
         self.assertNotIn("S999", answer)
@@ -1430,7 +1432,7 @@ class M1VerificationTest(unittest.TestCase):
         assistant = LegalChatAssistant(StaticRetriever(), model="fake")
         assistant.llm = FailingModel()
 
-        answer, _ = assistant.answer("第一条规定了什么？", generate=True)
+        answer, _ = assistant.answer("《合成示例法》第一条规定了什么？", generate=True)
 
         self.assertNotIn("UNTRUSTED_PROVIDER_DETAIL", answer)
         self.assertNotIn("[S999]", answer)
@@ -1468,7 +1470,7 @@ class M1VerificationTest(unittest.TestCase):
         assistant = LegalChatAssistant(StaticRetriever(), model="fake")
         assistant.llm = HiddenCitationModel()
 
-        answer, _ = assistant.answer("第一条规定了什么？", generate=True)
+        answer, _ = assistant.answer("《合成示例法》第一条规定了什么？", generate=True)
 
         self.assertNotIn("经营者应当保护消费者权益。", answer)
         self.assertFalse(assistant.last_pre_fallback_verification.citation_alignment_valid)
@@ -1507,7 +1509,7 @@ class M1VerificationTest(unittest.TestCase):
         )
         assistant.llm = model
 
-        answer, _ = assistant.answer("第一条规定了什么？", generate=True)
+        answer, _ = assistant.answer("《合成示例法》第一条规定了什么？", generate=True)
 
         self.assertNotIn("跨快照私有合成内容", answer)
         self.assertEqual(model.calls, 0)
