@@ -4,15 +4,19 @@
 
 2026-10-06 用户授权先研究中文 BM25、编写 TODO、逐项实施并推送 GitHub。当前任务以 `STATE.json.chinese_retrieval_optimization` 和 [优化清单](CHINESE_RETRIEVAL_TODO.md) 为准。下文 local-only 是前轮历史范围，不限制本次已明确授权的 commit/push/review PR；本次不新建 Release、不移动 Tag、不进入 M7、不进行真实模型调用。
 
-开始时核验 HEAD、origin/master 及远端默认 master 均为 `4d9546e06cfe8ff44660943ffd2dd353ac2e61cc`。已有 Smoke、lexical、W1-W8 改动完整保存为前置提交 `914a7e322d2787ec99a2fe1f1117ad5906244e02`。本轮分支 `codex/chinese-bm25-optimization`，运行时最终候选 `04fd389945125c81767745bbdce48137921d26fd` 已提交且核验推送，T4-T7接线均已包含，对应 [Draft PR #31](https://github.com/1040942669/legal-rag-agent/pull/31)。本节回填为其后的纯结果文档更新，不虚填自身未来commit身份。
+开始时核验 HEAD、origin/master 及远端默认 master 均为 `4d9546e06cfe8ff44660943ffd2dd353ac2e61cc`。已有 Smoke、lexical、W1-W8 改动完整保存为前置提交 `914a7e322d2787ec99a2fe1f1117ad5906244e02`。本轮分支 `codex/chinese-bm25-optimization`，运行时改善提交 `04fd389945125c81767745bbdce48137921d26fd` 已包含T4-T7；其后文档head `e3d32a96d3a37f5ab7c0e559bb000448fb0e603d` 与当前仅实验源码 `8f042fb46b83c7d2e7eb630c1197546f0d98c3cd` 均已提交并核验推送到 [Draft PR #31](https://github.com/1040942669/legal-rag-agent/pull/31)。本节是8f之后的结果文档回填，不虚填自身未来commit身份。
 
-两次预冻结比较已完成，见 [本轮报告](../../reports/refactor/CHINESE_BM25_OPTIMIZATION.md)。首轮jieba search72/108低于legacy76/108；第二轮成熟sklearn char83/108，但MRR@5 .597065低于legacy .610184，不满足预声明自动推广条件。已询问用户是否接受维护/召回与排序取舍、保留候选或继续SmartCN；未回复前默认未变。真实模型新调用0，没有动旧输出或gold。
+前两次预冻结比较保留原身份，见 [本轮报告](../../reports/refactor/CHINESE_BM25_OPTIMIZATION.md)。首轮jieba search72/108低于legacy76/108；第二轮成熟sklearn char83/108，但MRR@5 .597065低于legacy .610184。用户选择第3项继续实测Lucene SmartCN，第三轮 `chinese_bm25_20261006_smartcn_fixed_third` 已completed：legacy Hit@5 76/108、MRR .610184，char 83/108、.597065，BM25S＋SmartCN控制臂73/108、.506632，原生Lucene＋SmartCN73/108、.503237。四臂两pass无排名漂移，代码/输入/实际运行身份稳定，错误与真实模型调用均0。没有候选满足Hit@5和MRR双项不回退；selected_modern_arm=char仅是候选排序，promotion_eligible_modern_arm=null。默认仍legacy，不推广SmartCN，不继续试到赢；用户是否接受char取舍的新选择尚待回复。
 
-最终候选本地累计M2为25/25 passed、234906ms，其中全量2018 passed+157子测试、180.49s、JUnit2175/0/0/0；17文件隔离PG为93 passed/94.32s，并完成真实stop/start与新进程schema0008恢复。实际仓库外installed-wheel27模块通过，110个包源码模块与候选逐字节一致。原失败及各自身份见验收报告，不合并专项分母。
+SmartCN只增加实验脚本、独立v3协议和本地Java stdio桥，不接生产API、服务selector或共享索引缓存，不改旧协议、语料或gold。139项合同检查通过，组成是102单元＋37显式实际JVM，不能称远端Java CI。8f042fb的本地M2为25/25 passed、exit0、316818ms，其中2120 passed＋157 subtests、245.43s、JUnit2277/0/0/0，4条jieba上游警告；artifact `.tmp/smartcn-8f042fb-m2-final.json`，门禁前后均核验同一clean HEAD。120题仍是重复开发集，只有108检索gold；12无gold题排名NA不代表拒答成功，不能声称独立法律泛化。原失败及各自身份见验收报告，不合并专项分母。
+
+旧运行时04fd的本地累计M2为25/25 passed、234906ms，其中2018 passed+157子测试、180.49s、JUnit2175/0/0/0；17文件隔离PG为93 passed/94.32s，并完成真实stop/start与新进程schema0008恢复。实际仓库外installed-wheel27模块通过，110个包源码模块与候选逐字节一致。本轮生产代码未改，未重跑本地PG/wheel；这些旧证据严格保留04fd身份，不冒充8f新验收。
 
 源码候选 [04fd389精确CI37354368069](https://github.com/1040942669/legal-rag-agent/actions/runs/37354368069) 四路全部completed/success；已下载核验offline/M4/M5/M6累计门禁分别25/25、41/41、51/51、58/58。真实Linux worker JUnit76/0/0/0、累计M5为81/0/0/0，回执严格绑定04fd389与schema0008。仅本地Linux broker因Docker daemon不可用not_run，不能把它与远端实际验证混淆。`c562eec`测试入口收集失败及后续修复原样保留。
 
-下一步是完成这次纯结果文档静态检查及push，报告该文档提交自身的CI状态，不递归回填其未来SHA。默认取舍仍待用户选择；源码候选CI不自动代表后续文档head已通过。PR保持Draft，不合并发布。
+旧文档e3d32a9的 [CI 37356943303](https://github.com/1040942669/legal-rag-agent/actions/runs/37356943303) 已四路成功。当前8f042fb的 [CI 37403867767](https://github.com/1040942669/legal-rag-agent/actions/runs/37403867767) 在本次回填观察时已offline/M4/M5 completed/success，M6仍运行中。上述旧CI与当前部分完成状态分开记录，不提前写当前四路通过，也不代表未来文档head。
+
+下一步只完成第三轮结果文档静态检查及push，再独立读取当前源码和后续文档head的精确CI状态，不递归回填未来SHA。用户尚未选择保留默认交付或接受char的MRR取舍；在明确答复前不切默认、不追加实验。PR保持Draft，不合并发布，不移动已有Tag，不进入M7。
 
 最初审计复现的风险词误拒、引用后置否定/转述误归属、分数尺度误判及目录标题合同不一致均按机制修复并增加反例；初始216项旧测试不是修复验收。实施收敛为成熟评分/分析组件、配置与历史身份、规则裁决权收缩，不添加通用意图框架或共享缓存。每run仍重建索引，char已加载后约1.62至1.66秒，legacy约1.06至1.08秒，热查询更快不能称API端到端更快。复杂指代未知、风险无信号不等于安全、机械通过不等于法律语义支持，详见 [ADR-007](decisions/ADR-007-chinese-bm25-and-bounded-rules.md)。
 

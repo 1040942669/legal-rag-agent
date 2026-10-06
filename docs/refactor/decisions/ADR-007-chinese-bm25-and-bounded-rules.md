@@ -1,7 +1,7 @@
 # ADR-007：成熟中文词汇检索与有界规则
 
 - 日期：2026-10-06。
-- 状态：工程设计已实施，本地适用工程验证与源码候选04fd的远端四路CI通过；默认分析器取舍待用户选择，后续文档提交另行验证CI，不是已发布或已推广决策。
+- 状态：工程设计及用户追加的SmartCN固定对照已实施；04fd的远端四路CI保留为历史证据，新增源码8f042fb本地累计门禁通过、远端CI尚未全部完成。默认分析器取舍仍待用户选择，不是已发布或已推广决策。
 - 范围：[中文检索TODO](../CHINESE_RETRIEVAL_TODO.md)，不进入M7，不增加付费模型、共享索引服务或新的通用意图框架。
 - 证据：[本轮固定比较与验收](../../../reports/refactor/CHINESE_BM25_OPTIMIZATION.md)。旧ADR-005/006与其运行记录保持原历史含义。
 
@@ -15,9 +15,17 @@
 
 直接BM25S是本次Python内核；jieba精确/搜索及sklearn字符/字符bigram分别作为明确版本的分析器。未修改依赖词典，没有按失败case补同义词，没有把gold交给检索器。LlamaIndex现有适配的tokenizer参数实际未接入，不能只传一个函数就宣称解决中文分析。Lucene/SmartCN和IK是成熟候选，但增加运行时/运维成本，未实测不能宣传更优。
 
+用户随后选择继续实测SmartCN，仅授权 [v3固定四臂协议](../../../configs/chinese-bm25-benchmark-v3.json) 和实验Java桥接，不授权生产selector或默认切换。第三轮`chinese_bm25_20261006_smartcn_fixed_third`在精确源码`8f042fb46b83c7d2e7eb630c1197546f0d98c3cd`完成：legacy为76/108、MRR0.610184，char为83/108、0.597065；同SmartCN token流的BM25S控制为73/108、0.506632，原生Lucene为73/108、0.503237。四臂exit0、正反排名一致、源码/输入/运行时身份稳定，新增模型调用与费用0。现代候选首选仍char，但符合原双指标推广条件者为空。决定是不推广SmartCN、不盲增词典或逐题调参；当前默认仍legacy。若用户另行接受char的召回与MRR取舍，应明确记录例外选择，不更改历史自动门槛或负结果。
+
+两种SmartCN共同使用Java17.0.18、Lucene9.12.3三份校验JAR及原默认分析器，无追加应用词表/alnum过滤，文档TF保留、查询唯一term OR、65536唯一词溢出拒绝而不截断。原生排序在top-k前解决并列；控制臂复用相同Java token流而非另一分词器。相同token不保证同分：原生采用intToByte4量化、float及非空字段统计，BM25S采用精确长度、float64及全部输入文档总体。本轮两臂均1,342,119 tokens/19,050非空文档、零token文档0，不能用空文档分母差解释本轮排序差异。全部实现仅实验，不改变精确路由、授权/快照、语义检查或生产服务链路。
+
+该pin依据为9.12.3官方 [analyzer](https://lucene.apache.org/core/9_12_3/analysis/smartcn/org/apache/lucene/analysis/cn/smart/SmartChineseAnalyzer.html)、[BM25Similarity](https://lucene.apache.org/core/9_12_3/core/org/apache/lucene/search/similarities/BM25Similarity.html) 与 [系统要求](https://lucene.apache.org/core/9_12_3/SYSTEM_REQUIREMENTS.html)。Lucene该版要求Java11或更高；选择9.12.3是本机现有Java17的实验适配和复现决定，不是最新版声明或生产安全认证。原生默认k1为1.2，本实验显式设1.5/b=.75，不能称完全使用默认评分配置。
+
 两次协议分别预先冻结，第二轮字符方案Hit@5为83/108，旧版76/108；MRR@5为0.5971，旧版0.6102。由于未满足两项都不回退的自动推广条件，默认尚未切换。若用户接受取舍，应新增显式决策记录，而不是改写旧协议为通过。现有数据是重复开发集，不是独立holdout。
 
 每个run当前仍重建索引。依赖已加载后的字符建库约1.62至1.66秒，旧版约1.06至1.08秒；热查询快不等于当前API总延迟更低。本轮不为了速度额外引入跨run缓存。将来如确有需求，缓存必须另行评估容量、逐出、授权与snapshot/config身份，不能省掉这些合同。
+
+第三轮编译992.65ms在worker前单列，复用编译类而不复用索引；建库含JVM启动，查询含分析、IPC及评分完整wall time。原生第二遍p95约21.31ms、控制54.70ms、char49.06ms，只是本轮带采样开销的直接排名测量。RSS采样包含Python和活Java，20ms是等待配置、进程枚举耗时额外，parent和worker双采样的实际频率不保证50Hz；固定顺序、单次冷建库和系统负载限制跨轮绝对耗时对比。不能将char第三轮10.45秒相对前轮4.51秒直接归因算法，也不据此宣称API更快或生产容量改善。
 
 ## 配置与历史
 
@@ -42,3 +50,5 @@ CLI、API、M2共用有效配置与同一个构造入口，冻结引擎/分析�
 新增测试用于证伪具体机制错误，包括局部否定双向反例、异常条号、配置串版本、参数漂移、跨scope/snapshot与真实PG恢复。它们不是独立法律评审，不能以测试全绿断言不存在过拟合。失败、未运行项、重复开发集选择偏差、建库开销及排名回退都随报告保留；不改旧gold、原始结果或发布Tag来制造改进。
 
 本轮没有真实或付费模型调用；本地未运行Linux broker/worker门禁，远端已在精确04fd head的独立CI中验证真实broker/worker，二者运行环境不可混记。独立法律审核或holdout、生产容量及live checker校准仍未完成。这些未验证项不能由pytest、PostgreSQL恢复、worker门禁或固定开发集比较替代。
+
+新增8f042fb源码已推送至同一Draft PR31；新增四文件139合同通过（102默认unit、32显式真实Java、5显式真实Python/JVM），不将缺Java的默认CI说成已跑显式JVM合同。该clean源码本地M2为25/25、316818ms，全量2120 passed+157 subtests/245.43s、JUnit2277/0/0/0，证据`.tmp/smartcn-8f042fb-m2-final.json`。新增 [CI37403867767](https://github.com/1040942669/legal-rag-agent/actions/runs/37403867767) 本次最新观察offline/M4/M5成功、M6仍in_progress；04fd绿灯不证明8f或后续文档head通过。真实失败、fixture修正及第三轮精确manifest/summary hash均见验收报告。三轮仍是重复开发集，第三轮追加选择增加偏差，不等于独立holdout；不发布、不移动Tag、不进入M7。

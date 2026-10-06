@@ -1,6 +1,6 @@
 # 中文 BM25 组件替换与规则收缩
 
-日期：2026-10-06。状态：运行时实现、最终本地工程门禁与源码候选四路CI已通过；默认选型仍待确认。本轮不合并发布。
+日期：2026-10-06。状态：用户追加选择的SmartCN固定对照已完成，新增源码候选8f042fb本地累计门禁通过，远端CI尚未全部完成；默认选型仍待确认。前轮04fd四路CI是历史证据，不替代新候选。本轮不合并发布。
 
 ## 范围与研究结论
 
@@ -49,6 +49,8 @@ BM25 是评分与索引内核，中文效果还取决于分析器及应用接线
 
 char是已测试现代候选中召回最高者，较legacy为9改善/2回退，配对Hit@5差异区间 `[0.0093, 0.1296]`。但MRR@5回退，明确引用形状层为8/9（旧版9/9），**未达到预注册自动推广条件**。不能删除排名回退、改门槛或把重复开发集区间称独立泛化证明。是否接受维护成本/前五条召回与靠前排序的取舍，已向用户单独说明并请求选择；未收到选择前不切默认。没有扩展“不断增加候选直到赢”的搜索。
 
+上一段是第二轮结束时点的选择请求。用户随后明确选择继续SmartCN固定对照，见本文第三轮；该追加选择不是接受char的MRR回退或允许改变默认。
+
 此轮仍是直接词汇排名，不包含精确目录路由。并行开发期只锁定清单内运行依赖，结果由manifest中的精确源码hash绑定，而不是把未提交的整个工作区说成一个干净commit。hash清单补入实际使用的evaluation/retrieval_contracts，bootstrap显式传2000/.95/42。性能仍有固定顺序、单次建库和并行负载的限制。协议SHA256 `70404487e28838dc3b97d9ddf17e3194bc288d816471169b8dcd1be12877b5d5`，summary SHA256 `ec4793e771b2718cf246361843806d7eed605e13b88cfe49a7b0383570a59940`，输出保存在同名本地忽略目录。
 
 ## 建库成本与实际服务边界
@@ -84,7 +86,7 @@ T4至T7已实现并保存为运行时提交`04fd389945125c81767745bbdce48137921d
 - 第一轮累计M2为24/25、exit1、234409ms，`.tmp/chinese-candidate-m2-first.json`。唯一失败检查是全量pytest中2个CLI trace测试替身未带实际助手的evidence_rules_version字段；生产链路不放松，修复替身后CLI+版本专项17 passed，`.tmp/chinese-cli-version-final-green.xml`。
 - 当前wheel实际仓库外安装成功，27模块/schema8 smoke通过，`.tmp/chinese-candidate-wheel-probe.json`，wheel SHA256 `cab21c051ed911939f728b2ffd3c29eb02500b5c535e965ab675a442c3f4e78d`。随后逐文件比较110个包源码模块，全部与当前候选相同。wheel合同fixture新增模块前1 failed/23 passed，补齐真实新模块后24 passed，不取消缺文件检查。
 
-## 最终运行时候选验证与交付
+## 前轮04fd运行时候选验证与交付：保留历史快照
 
 运行时候选为`04fd389945125c81767745bbdce48137921d26fd`。本地门禁开始前后观察到同一clean HEAD，运行期间没有编辑tracked文件，远端同名分支已核验指向该提交。下面是这一候选的验证，不将较早比较manifest改绑为它，也不把后续仅文档提交冒充已运行的源码身份。
 
@@ -104,4 +106,54 @@ T4至T7已实现并保存为运行时提交`04fd389945125c81767745bbdce48137921d
 
 结果文档静态3/3在最终CI回填前后分别通过，artifacts为`.tmp/chinese-result-docs-static-first.json`与`.tmp/chinese-result-docs-static-final.json`，覆盖46份Markdown、2份JSON、326份候选文本，无高置信凭证形状，diff检查通过。记录此结果后的纯元数据收口在提交前重验同组静态。本文是文档提交前快照，后续纯文档提交的SHA/CI通过GitHub读取并在交接回复中报告，不递归创建新的回执提交。
 
-尚待用户对默认取舍的选择；本次文档提交推送后仍须独立读取其head CI状态。没有通过改门槛宣布字符方案自动胜出；未回复时`legacy-v1`仍是默认、成熟候选显式opt-in。没有独立未曝光集、人工法律验收、真实模型质量或生产容量结论。上述重叠专项不相加为最终分母。真实模型新增调用和费用均0，既有付费历史及账本未改动。
+以上是04fd及随后结果文档提交前的历史快照：当时尚待用户对默认取舍的选择，文档提交推送后须独立读取其head CI。没有通过改门槛宣布字符方案自动胜出；`legacy-v1`保持默认，成熟候选显式opt-in。没有独立未曝光集、人工法律验收、真实模型质量或生产容量结论。上述重叠专项不相加为最终分母。真实模型新增调用和费用均0，既有付费历史及账本未改动。后续用户追加SmartCN及当前默认待取舍状态以以下第三轮为准。
+
+## 用户追加选择后的第三轮：SmartCN固定对照
+
+用户于2026-10-06选择继续实测SmartCN，而不是接受字符方案的MRR回退。追加范围从已推送的`e3d32a96d3a37f5ab7c0e559bb000448fb0e603d`继续同一Draft PR31，独立 [v3协议](../../configs/chinese-bm25-benchmark-v3.json) 在实际运行前冻结。实验源码提交`8f042fb46b83c7d2e7eb630c1197546f0d98c3cd`已推送；前两协议、结果、gold和各自源码身份保持原样，不能改绑为该提交。
+
+run `chinese_bm25_20261006_smartcn_fixed_third`，UTC `2026-10-06T02:23:11Z`至`02:25:44Z`。使用同一19,050条article/205个来源、已注册120题；108题为有效排名分母，12无gold题为NA，不推断拒答成功。四臂各用新进程、正反两遍，每个Java臂新建JVM和索引。四个worker均exit0，每臂两遍120题均无执行错误，排名重复不一致为0；源码、输入和Java运行时身份检查稳定，末尾复验无错误，实际新增模型调用和费用均0。
+
+| 候选 | Hit@5 | MRR@5 | 场景形状分层 Hit@5 | 建库毫秒 | 第二遍完整查询p95毫秒 | 采样进程树峰值MiB |
+| --- | --- | --- | --- | --- | --- | --- |
+| 历史 legacy-v1 | 76/108 | 0.610184 | 67/99 | 1825.46 | 598.91 | 467.63 |
+| BM25S + sklearn char | 83/108 | 0.597065 | 75/99 | 10453.38 | 49.06 | 449.42 |
+| BM25S + SmartCN同token控制 | 73/108 | 0.506632 | 65/99 | 6459.55 | 54.70 | 555.05 |
+| 原生 Lucene + SmartCN | 73/108 | 0.503237 | 65/99 | 4042.68 | 21.31 | 455.85 |
+
+两种SmartCN相对同轮legacy均为4题改善、7题回退，配对Hit@5差异95%区间`[-0.0833, 0.0278]`；明确引用形状层均8/9，旧版9/9。这些是固定开发集直接排名，不是精确目录路由表现。协议仍选char为现代候选首选，`promotion_eligible_modern_arm=null`：char的MRR仍低于legacy，两种SmartCN则Hit@5和MRR都低于legacy。**本轮不支持推广SmartCN，也不支持自动切换char默认。**建议保留当前默认完成交付，不继续以盲增词典、逐题词表或调参数追求本开发集胜出；若用户接受char的维护/召回与排名取舍，另记显式决定，不能把旧自动门禁改成通过。用户最终默认选择尚未回复。
+
+### 机制、身份与成本边界
+
+新增 [Python桥接](../../scripts/smartcn_bridge.py) 与 [Java helper](../../scripts/java/SmartCnBridge.java) 仅供实验，没有接入CLI/API生产selector。实际Java/Javac为17.0.18、Lucene为9.12.3；三份官方Maven JAR的SHA在v3协议中冻结并实际核验。使用原SmartChineseAnalyzer默认标点停用项与随JAR固定的词典，不追加alnum过滤或应用词表。现代索引文本仍是法名、条号、原正文以换行拼接；同一分析器处理文档和查询，文档TF保留，查询按唯一term的OR语义，65536唯一词上限溢出拒绝而不截断。
+
+版本依据为Lucene9.12.3官方 [SmartChineseAnalyzer API](https://lucene.apache.org/core/9_12_3/analysis/smartcn/org/apache/lucene/analysis/cn/smart/SmartChineseAnalyzer.html)、[BM25Similarity API](https://lucene.apache.org/core/9_12_3/core/org/apache/lucene/search/similarities/BM25Similarity.html) 和 [系统要求](https://lucene.apache.org/core/9_12_3/SYSTEM_REQUIREMENTS.html)。官方要求Java11或更高；9.12.3是适配本机现有Java17并冻结可复现身份的实验pin，不是宣称最新版，也不是生产安全认证。官方BM25默认k1为1.2，本实验明确设1.5/b=.75以保持所列现代候选参数一致，不能误称完全使用默认评分配置。
+
+Lucene在top-k截断前以分数降序、chunk ID的UTF-8顺序全局排序；BM25S控制臂使用同一Java导出的token流、lucene/IDF-lucene和numpy float64，没有手写公式强制对齐分数。两臂实际均为1,342,119 tokens、19,050非空文档、0个零token文档，平均非空字段长度70.45244。Lucene采用`intToByte4`长度量化、float分数和非空字段统计；BM25S采用精确长度、float64及全部输入文档总体。相同token不保证相同排序；本轮零token文档为0，不能把实际差异归因为空文档分母不同。
+
+编译在worker前单独完成，992.65ms；复用的是核验source/JAR/classes/JDK身份后的编译类，不是索引。Java启动加建库分别约3103.61ms（控制臂）和3843.09ms（原生）；控制臂另有Python索引1624.54ms。表内建库记录完整构造成本，查询p95记录完整`retrieve` wall time，包含分析和IPC，不使用不同范围的`last_engine_ns`比较。原生内部时间包括分析与搜索，控制臂该字段只有分析、另记Python评分，不能只取更小字段宣传端到端性能。
+
+RSS是worker和活子进程的同时占用之和，含Python/JVM，排除预先javac。20ms是采样等待配置，不是实际50Hz保证；进程枚举另耗时，本轮parent和worker都运行采样器。固定臂顺序、单次冷建库、系统负载及采样开销均影响绝对耗时，第三轮char的10.45秒与第二轮4.51秒不能直接归因为算法变慢。采样峰值不是精确OS峰值或索引独占大小；热查询更快不证明当前每run重建索引的API更快，也不证明生产吞吐。
+
+Python执行网络审计守卫，Java helper只有本地文件/stdio/Lucene操作，未在benchmark中下载依赖、调用Maven或模型。它不是OS级断网或恶意fork sandbox。Java选项和应用密钥环境不转交；超时/协议错误/关闭均回收自有进程树，文件保留本地受控忽略目录，不将JAR、语料或逐题原文上传。
+
+证据目录为`artifacts/experiments/chinese_bm25_20261006_smartcn_fixed_third/`。协议SHA256 `d0c079d1d26e1b1906f39c9cb5c6dcf209950c393c061f572d4a9c2f18e3b8a8`，manifest SHA256 `8458391710e42367bdc3939d45975f00b1fa344cc7b74e3f6e4e9a85039779dd`，summary SHA256 `42959fdc6c480288e9f46e3ab5e69148f5bcacca0633d3855dff043921936a5f`。index SHA与前两轮相同；manifest保留精确critical文件、JAR、编译类和Java launcher身份。数据仍为未独立法律审核的重复开发集，第三次用户追加比较增加选择偏差，不称holdout或法律质量提升。
+
+### 合同验证、失败保留与新候选门禁
+
+- 四文件139 passed/25.64s、exit0，JUnit139/0/0/0、XML time25.624s，`.tmp/smartcn-all-contract-root-first.xml`。其中102项unit进入默认tests；32项真实Java与5项真实Python/JVM合成合同须显式运行，不能说普通CI已跑这些JVM测试。它们验证token流、同分排序、空/OOV、UTF-8、依赖漂移、协议/进程清理等，不提供法律质量证明。
+- 初始模块/Java源码未存在的collection或setup错误保留，不冒充产品RED。退出清理失败仍允许选winner的真实失败为53项中1 failed，`.tmp/smartcn-benchmark-failure-contract-first.xml`；修复后严格拒绝选择。末尾输入漂移等新增反例首次已通过，只记录覆盖，不编造RED。
+- stdout断管真实28项中1 failed，`.tmp/smartcn-java-contract-final-green.xml`；修复Java双层输出错误检查后28/0，`...-repaired-green.xml`。不能依据文件名中green将原失败写成通过。
+- query bound真实日志`.tmp/smartcn-query-bound-red.xml`为4 failed：A/Q溢出和旧1024词边界是协议缺陷；65536长句生成器受分段影响产生额外token是fixture假设错误，修正合成隔断符而非改analyzer。Python唯一词上限先1 failed/1 passed，`.tmp/smartcn-python-query-bound-red.xml`，后46项unit通过；最终Java32项通过。两臂上限一致且不截断，不限制文档TF。
+- clean候选`8f042fb...`前后HEAD一致，本地M2累计25/25、exit0、316818ms，UTC `02:25:57Z`至`02:31:15Z`，`.tmp/smartcn-8f042fb-m2-final.json`；全量2120 passed+157 subtests、245.43s、4条上游警告，JUnit2277/0/0/0。不可把重叠专项再加为总分母，也不借04fd门禁冒充新候选。
+- [8f042fb CI37403867767](https://github.com/1040942669/legal-rag-agent/actions/runs/37403867767) 在本次回填最新观察时offline/M4/M5 completed/success，M6仍in_progress，尚不写四路通过。后续结果文档head须另读CI，不递归回填自身未来SHA。当前PR31仍Draft，未合并、未发布、未动Tag，M7未启动，`legacy-v1`默认未变。
+
+复现入口如下，须先备齐v3协议中核验过的JAR和Java17；每次实际比较选择未使用的run ID，不覆盖已有第三轮。下面是复现命令，不表示已经额外执行第二次语料比较：
+
+```powershell
+uv run --offline --frozen --no-sync python -m pytest -q tests/test_smartcn_bridge.py tests/test_smartcn_benchmark.py
+uv run --offline --frozen --no-sync python -m pytest -q scripts/smartcn_contract_tests.py scripts/smartcn_python_contract_tests.py
+uv run --offline --frozen --no-sync python scripts/benchmark_smartcn.py --protocol configs/chinese-bm25-benchmark-v3.json --dependency-dir .tmp/smartcn-deps/9.12.3 --run-id chinese_bm25_smartcn_reproduction_001
+```
+
+新源码的本地Linux broker/生产服务SmartCN接线、真实模型、独立法律审核及未曝光holdout均未由本追加实验验证；仍不新增搜索服务、共享索引cache或通用安全/语言框架。后续仅核验真实远端门禁、完成结果文档交付与用户默认取舍，不自动追加新候选或付费调用。

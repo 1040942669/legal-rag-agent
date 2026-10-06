@@ -4,11 +4,13 @@
 
 ## [Unreleased]
 
-中文检索与规则收缩的运行时候选 `04fd389945125c81767745bbdce48137921d26fd` 已提交并推送，见 [Draft PR #31](https://github.com/1040942669/legal-rag-agent/pull/31)，不是新的软件发布。该源码候选的 [CI 37354368069](https://github.com/1040942669/legal-rag-agent/actions/runs/37354368069) 已四路completed/success（offline 25/25、M4 41/41、M5 51/51、M6 58/58），远端真实broker/worker已验证。PR仍为draft，本轮未合并或发布，后续文档提交须另行验证其精确head的CI。M6 `v0.7.1` 与既有Tag/回执不变，M7未开始。
+中文检索与规则收缩的运行时提交 `04fd389945125c81767745bbdce48137921d26fd` 与其后文档提交 `e3d32a96d3a37f5ab7c0e559bb000448fb0e603d` 已推送，精确 [CI 37354368069](https://github.com/1040942669/legal-rag-agent/actions/runs/37354368069) / [37356943303](https://github.com/1040942669/legal-rag-agent/actions/runs/37356943303) 均四路成功，旧运行时remote gate为offline 25/25、M4 41/41、M5 51/51、M6 58/58，真实broker/worker已验证。当前SmartCN实验源码 `8f042fb46b83c7d2e7eb630c1197546f0d98c3cd` 也已提交推送到 [Draft PR #31](https://github.com/1040942669/legal-rag-agent/pull/31)；回填时其 [CI 37403867767](https://github.com/1040942669/legal-rag-agent/actions/runs/37403867767) 已offline/M4/M5 completed/success，M6仍运行中，不借旧CI称当前全绿。PR仍为draft，未合并或发布，后续文档head另行核验。M6 `v0.7.1` 与既有Tag/回执不变，M7未开始。
 
-- 增加成熟BM25S及显式jieba/sklearn字符分析器，记录完整依赖/参数身份，不新增场景词典或手写评分公式。两组固定开发集对照保留负结果与取舍；char的83/108召回优于旧76/108，但MRR回退。默认仍为 `legacy-v1`，用户是否接受取舍尚待确认，不自动推广默认。
+- 增加成熟BM25S及显式jieba/sklearn字符分析器，记录完整依赖/参数身份，不新增场景词典或手写评分公式。前两组固定开发集对照保留负结果与取舍；用户随后选择继续实测SmartCN，而非接受字符方案默认推广。
+- 增加仅实验使用的Lucene 9.12.3/Java17本地桥、独立v3协议与四臂benchmark，不修改旧协议/gold，不接生产API、SmartCN服务selector或共享缓存。第三轮 `chinese_bm25_20261006_smartcn_fixed_third` 的Hit@5/MRR@5依次为legacy 76/108、0.610184，char 83/108、0.597065，BM25S＋SmartCN 73/108、0.506632，原生Lucene＋SmartCN 73/108、0.503237；四臂两pass稳定，错误及模型调用均0。没有候选同时不回退，默认仍为 `legacy-v1`，不推广SmartCN，不继续试到赢；字符取舍仍待另行确认。12条无gold题保持NA，不当作拒答通过。
+- 实验桥合同139项通过（102单元＋37显式实际JVM），不是远端Java CI。clean `8f042fb...` 本地累计M2为25/25 passed、316818ms；其中2120 passed＋157 subtests、245.43s、JUnit2277/0/0/0，4条jieba上游警告。生产代码未改，本轮未重跑本地PG/wheel，旧证据仍绑定04fd；重复开发集不是独立法律质量或生产容量验收。
 - CLI、API和M2统一冻结实际检索配置；现代 `general-reference-v3` / `reference-evidence-v2` 合同移除统一0.01原始分数阈值，历史 `general-reference-v2` / `reference-evidence-v1` 工件保留原判定。现代风险词只作提示信号，不能证明违法意图；原文检索不据此预拒答，自由生成遇到用途不明信号先澄清。
-- 明确引用的选择与法条所有权分离，复杂意图不伪造硬要求；目录保留完整标题，有界查询语法不支持不等于存储身份无效。本地M2累计25/25项检查通过，其中全量pytest为2018 passed与157 subtests（180.49秒，4条jieba警告）；17文件PostgreSQL回归93 passed（94.32秒），真实重启后的新进程核验schema0008成功。详见 [验收记录](reports/refactor/CHINESE_BM25_OPTIMIZATION.md)，上述本地工程结果不等于法律质量、生产容量或真实模型验收。
+- 明确引用的选择与法条所有权分离，复杂意图不伪造硬要求；目录保留完整标题，有界查询语法不支持不等于存储身份无效。运行时提交04fd的本地M2累计25/25，其中2018 passed与157 subtests（180.49秒，4条jieba警告）；17文件PostgreSQL回归93 passed（94.32秒），真实重启后的新进程核验schema0008成功。这些旧证据保留原身份，详见 [验收记录](reports/refactor/CHINESE_BM25_OPTIMIZATION.md)，不等于法律质量、生产容量或真实模型验收。
 
 ## [0.7.1] - 2026-10-02
 
