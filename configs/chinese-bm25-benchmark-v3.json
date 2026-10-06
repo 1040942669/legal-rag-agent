@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "protocol_id": "chinese-bm25-smartcn-fixed-v3",
+  "dataset_id": "legal-eval-v3",
+  "dataset_role": "repeated_development_not_holdout",
+  "index": "artifacts/indexes/article/chunks.jsonl",
+  "top_k": 5,
+  "passes": 2,
+  "arms": [
+    {"id": "legacy-v1", "backend": "historical", "lexical_profile": "legacy-v1", "k1": 1.5, "b": 0.75, "law_boost": 40.0, "article_boost": 80.0, "deprecated_penalty": 0.5},
+    {"id": "bm25s-sklearn-char", "backend": "bm25s", "mode": "char", "k1": 1.5, "b": 0.75, "hmm": null, "method": "lucene"},
+    {"id": "bm25s-smartcn", "backend": "bm25s-smartcn", "k1": 1.5, "b": 0.75},
+    {"id": "lucene-smartcn", "backend": "lucene-smartcn", "k1": 1.5, "b": 0.75}
+  ],
+  "dependencies": {
+    "version": "9.12.3",
+    "java_major": 17,
+    "artifacts": [
+      {"artifact": "lucene-core", "filename": "lucene-core-9.12.3.jar", "sha256": "b64a3f8098a7572034fb30085cdee01b34ec81fb0e5a31b471536af58dc6c01b", "url": "https://repo.maven.apache.org/maven2/org/apache/lucene/lucene-core/9.12.3/lucene-core-9.12.3.jar"},
+      {"artifact": "lucene-analysis-common", "filename": "lucene-analysis-common-9.12.3.jar", "sha256": "fa571bd7caf0f0b4faf46a72ca004a7836f348c31d92bd522dddcc3d128d287e", "url": "https://repo.maven.apache.org/maven2/org/apache/lucene/lucene-analysis-common/9.12.3/lucene-analysis-common-9.12.3.jar"},
+      {"artifact": "lucene-analysis-smartcn", "filename": "lucene-analysis-smartcn-9.12.3.jar", "sha256": "06db5436be801787738b9735ebe81622e263826a39dedc66402a99a1c33fab36", "url": "https://repo.maven.apache.org/maven2/org/apache/lucene/lucene-analysis-smartcn/9.12.3/lucene-analysis-smartcn-9.12.3.jar"}
+    ]
+  },
+  "modern_index_text": "law_names then article_numbers then original chunk text, newline separated; all chunks retained",
+  "smartcn_analyzer": "Unmodified SmartChineseAnalyzer default punctuation stop set and bundled ICTCLAS dictionary; same token stream for documents and queries; no extra alnum filter or application dictionary",
+  "smartcn_query": "Unique analyzed terms with OR semantics, no QueryParser, phrase, expansion, boost or reranker; maximum 65536 terms, reject overflow without truncation",
+  "native_engine": "Lucene BM25Similarity(1.5,0.75,true); ByteBuffersDirectory; native byte-quantized document norms, nonempty-field document count and float scores; native score-desc then chunk_id UTF-8-asc sort before top-k",
+  "token_control_engine": "BM25S 0.3.9 lucene/IDF-lucene numpy float64 on exactly the SmartCN token stream; document TF retained, query tokens unique; exact token length normalization with all input documents in average length and IDF population",
+  "metrics": ["hit_at_3", "hit_at_5", "mrr", "target_coverage"],
+  "selection": "All three modern arms, including the SmartCN token control, are eligible candidates. Rank by development Hit@5, then MRR@5, then lower second-pass end-to-end query p95. Only Hit@5 AND MRR@5 at least the same-run legacy baseline meets the unchanged engineering promotion guard. No production/default promotion is performed by this experiment.",
+  "promotion_requires_legacy_non_regression": true,
+  "runtime_scope": "Direct lexical ranking only, experimental Java helper; no production service integration, exact route, chat risk rule, generation, embedding, reranker or checker",
+  "timing_scope": "Compile once before workers and record separately. One fresh process per arm, one fresh index/JVM per Java arm. Build includes analysis, JVM startup and IPC; query includes analysis and IPC. Two passes in forward/reverse case order. Native engine time is auxiliary, not end-to-end latency.",
+  "memory_scope": "Sample simultaneous RSS sum of the worker and its live descendants at 20ms; includes JVM and Python, excludes prior javac preparation. A sampled process-tree maximum is not exact OS peak or exclusive index size.",
+  "provider_calls_allowed": 0,
+  "network_allowed": false,
+  "network_boundary": "Python socket audit guard in each benchmark process; Java helper contains only local file/stdio and Lucene code. No model client, Maven invocation or dependency download during the benchmark. This is not an OS-level air gap.",
+  "worker_timeout_seconds": 900,
+  "bootstrap": {"seed": 42, "resamples": 2000, "confidence": 0.95},
+  "limits": [
+    "120 reused development cases; 108 retrieval-gold cases and 12 no-gold cases with NA ranking metrics, not inferred refusal successes",
+    "Independent human legal review and unseen holdout are absent; a third user-requested comparison adds selection bias",
+    "Native Lucene versus BM25S SmartCN differs in document norm quantization, float precision, field statistics and execution runtime; identical tokens do not imply identical scores",
+    "Historical versus modern differs in analyzer, index text and manual boosts; comparisons are not a single-factor BM25 formula claim",
+    "Fixed arm order, one cold build per arm and sampled memory do not establish production capacity; no API latency claim without per-run rebuild and database costs",
+    "No case-specific dictionaries, parameter tuning, gold rewriting or protocol changes after observing this run; preserve both earlier comparisons",
+    "Any arm error, timeout, identity drift, missing result or ranking repeat mismatch invalidates winner selection; preserve failures rather than assigning zero quality"
+  ]
+}
