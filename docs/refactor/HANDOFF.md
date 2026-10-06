@@ -1,6 +1,22 @@
 # M6 执行交接
 
-## 当前任务：中文检索组件替换与规则收缩
+## 当前任务：有限 Elasticsearch + IK 实测与交接
+
+2026-10-07 用户确认“ok那先测吧”，追加范围仅是固定本地 ES/IK 比较，从已推送且四路 CI 成功的 `31a6e63f32b4640eb77aa6a69ed9ae0171bc2ae9` 继续同一 Draft PR31。最新实验源码 `dde6fc3c568b461aa84cfa38351478b239eb20db` 已提交推送；benchmark 和最终本地门禁前后均为同一 clean HEAD。origin/master 仍是 `4d9546e06cfe8ff44660943ffd2dd353ac2e61cc`。本节是结果文档提交前快照，不虚填自身未来 SHA。
+
+[独立 IK 验收报告](../../reports/refactor/ELASTICSEARCH_IK_EXPERIMENT.md) 与 [I1-I4 清单](CHINESE_RETRIEVAL_TODO.md) 记录最新事实。run `chinese_bm25_20261007_ik_fixed_fourth_verified` 使用固定120题/108有效排名 gold/12 NA、19050 article chunks/205来源；三臂正反两遍720条全部成功，排名/分数重复漂移0，源码/输入/运行时与自有配置身份稳定，自建服务已停止且端口回收通过。legacy Hit@5 76/108、MRR .610184；char 83/108、.597065；原生 ES+IK 71/108、.550307。IK相对legacy为3改善/8回退，Hit@5差异CI95 `[-.1019,.0093]`。char仍是现代候选首选，但符合双指标自动推广者为空；默认不变。
+
+ES/IK固定9.1.4，bundled JDK24.0.2、Lucene10.2.2；官方ZIP内容与685项实际安装文件核验。只用原 bundled 词典，`ik_max_word`建库/`ik_smart`查询、唯一term OR、k1=1.5/b=.75/overlap=true，一分片零副本，服务端在top-k前解决chunk ID并列。不是 stock match、单因子分词试验或生产安全推荐；OpenSearch未跑。查询p95为612.04/30.11/59.41ms、采样含JVM进程树峰值468.02/449.29/1656.56MiB，不能当成完整API延迟或容量。
+
+最终135单元合同通过，JUnit135/0/0/0、1.72s，另有8项显式真实ES/JVM合成检查通过，默认CI不启动该服务。clean `dde6fc3` 最终M2为25/25 passed、报告exit0、267732ms，UTC17:26:07Z至17:30:37Z；全量2255 passed+157 subtests/206.58s、4条jieba上游警告、JUnit2412/0/0/0，`.tmp/ik-dde6fc3-m2-final.json`。不与重叠专项叠加分母。生产包/pyproject/lock与04fd保持一致，本次本地PG/wheel/Linux broker未重跑，旧证据保留原身份。
+
+原 run `..._ik_fixed_fourth` 被中断，exit/原因未知且未形成summary；保留interruption。`..._recovery1`排名完成，但text字段 `_terms_enum` 空返回被误当成OOV，诊断无效；原summary及sidecar都保留，不混用该轮性能。只将后置诊断改为精确term文档计数，固定参数/词典/语料/gold/协议未变，完整复跑形成当前verified结果。120条诊断completed，逐题去重token计数累加1733、OOV415，118部分OOV、0全OOV、0空查询或空检索；这不是排名回退的单一原因。c241旧M2主动取消，不写成通过或产品失败。
+
+当前源码 [CI37502817897](https://github.com/1040942669/legal-rag-agent/actions/runs/37502817897) 最新已四路completed/success；被新提交替代的d19/c241 CI cancelled。8f042fb和31a6e63旧四路CI均成功，均保留独立身份，不冒充未来文档head。最后结果文档head必须独立读取。全部raw数据/二进制/逐题原文只在本地ignored目录，新增模型调用和费用0。Python精确IPv4 TCP loopback守卫、JVM loopback配置和关闭远程词典不等于OS防火墙或airgap。
+
+结果文档静态3/3已通过，覆盖47份Markdown、2份JSON、343份候选文本、无高置信凭证形状，`.tmp/ik-result-docs-static-final.json`；纯元数据收口后commit前重验同组检查。下一步只commit/push、更新现有Draft PR31并核验实际最终head CI，然后报告并停止有限实验。用户若希望成熟库成为默认，须明确是否接受char的排序取舍，或另授权固定整链路质量研究；不继续试分词器直到本开发集赢。没有独立法律审核/未曝光holdout/真实模型质量或生产验证。不得切默认、接生产ES、复用付费额度、合并发布、移动M5/M6 Tag或开始M7。
+
+## 前轮中文检索与 SmartCN 结果快照
 
 2026-10-06 用户授权先研究中文 BM25、编写 TODO、逐项实施并推送 GitHub。当前任务以 `STATE.json.chinese_retrieval_optimization` 和 [优化清单](CHINESE_RETRIEVAL_TODO.md) 为准。下文 local-only 是前轮历史范围，不限制本次已明确授权的 commit/push/review PR；本次不新建 Release、不移动 Tag、不进入 M7、不进行真实模型调用。
 

@@ -1,6 +1,16 @@
 # 中文 BM25 组件替换与规则收缩
 
-日期：2026-10-06。状态：用户追加选择的SmartCN固定对照已完成，新增源码候选8f042fb本地累计门禁通过，远端CI尚未全部完成；默认选型仍待确认。前轮04fd四路CI是历史证据，不替代新候选。本轮不合并发布。
+日期：2026-10-07。状态：第四轮用户有限授权的原生Elasticsearch + IK对照已完成，最新源码dde6fc3本地累计门禁通过；默认选型仍待确认。本报告保留前三轮原始数字、失败和源码身份，最新独立验收见下节。本轮不合并发布。
+
+## 最新第四轮入口：原生 Elasticsearch + IK
+
+[IK完整验收](ELASTICSEARCH_IK_EXPERIMENT.md) 与 [v4固定协议](../../configs/chinese-bm25-benchmark-v4.json) 记录用户“先测”的独立追加。run `chinese_bm25_20261007_ik_fixed_fourth_verified` 绑定clean源码 `dde6fc3c568b461aa84cfa38351478b239eb20db`，三臂720条全部成功、两遍排名/分数一致、source/input/runtime和自有配置稳定且服务退出成功。108有gold/12 NA的分母及同一19050条article/205来源不变；模型调用与费用0。
+
+同轮legacy为Hit@5 76/108、MRR .610184；char 83/108、.597065；IK 71/108、.550307。IK3改善/8回退，配对Hit差异CI95 `[-.1019,.0093]`，本轮不支持推广；char仍因MRR回退不满足原自动门槛。默认保持legacy，不调词典/参数/gold，不接生产搜索服务。四轮同一开发集带有累计选择偏差，不称独立holdout或法律泛化。
+
+当前verified性能与身份不能借用先前恢复轮：二遍client p95为612.04/30.11/59.41ms，采样Python/JVM进程树峰值468.02/449.29/1656.56MiB。原中断和恢复轮无效OOV保留；text-field诊断误用只通过精确term计数修复，固定排名不动并全复跑。最终135unit与8显式真实服务checks通过；clean源码M2 25/25、267732ms，2255 passed+157 subtests/206.58s、4上游警告、JUnit2412/0/0/0。source [CI37502817897](https://github.com/1040942669/legal-rag-agent/actions/runs/37502817897) 最新已四路completed/success；后续文档head须独立读取，任何source或旧8f/31绿灯均不能冒充它。
+
+manifest SHA256 `d14ea5cb045c766d9378c126c9778309eb812b6d37739bc4aa7c2b5c30316c51`，summary SHA256 `e9e62b33e77966def40104982894e5733107214acfbfb89e7135b4b08d637968`；raw结果仅本地ignored，完整复现/官方依赖依据/资源与安全边界见最新验收。下列各轮保留各自历史结果，不将较早CI的“运行中”快照解释为现在仍未完成。
 
 ## 范围与研究结论
 

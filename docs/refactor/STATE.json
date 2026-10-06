@@ -6,9 +6,9 @@
     "full_name": "1040942669/legal-rag-agent",
     "observed_default_branch": "master",
     "observed_baseline_commit": "61f1065fc6d5678d0d57114e2e361294d04906b4",
-    "observed_on": "2026-10-06",
-    "workspace_head": "8f042fb46b83c7d2e7eb630c1197546f0d98c3cd",
-    "workspace_head_note": "Observed clean, pushed experimental SmartCN candidate before and after its local M2 gate, before this documentation-only result update. origin/master remains 4d9546e06cfe8ff44660943ffd2dd353ac2e61cc. This is a source-candidate snapshot, not a self-referential SHA for the later documentation commit. Production package code is unchanged from 04fd389; SmartCN is experiment-only. Prior dirty Smoke, lexical and W1-W8 work remains in prerequisite 914a7e3. User selected option 3 for a finite SmartCN comparison, not a default switch. Current task permits commit/push/review PR, not merge/release, model calls or M7. Historical tags, releases and receipts are unchanged.",
+    "observed_on": "2026-10-07",
+    "workspace_head": "dde6fc3c568b461aa84cfa38351478b239eb20db",
+    "workspace_head_note": "Observed the same clean, pushed experimental IK source before and after the final benchmark and local M2 gate, before this documentation-only result update. origin/master remains 4d9546e06cfe8ff44660943ffd2dd353ac2e61cc. This is a source snapshot, not a self-referential SHA for the later documentation commit. Production package, pyproject and lock are unchanged from 04fd389. SmartCN and Elasticsearch/IK are experiment-only. Prior dirty work remains in prerequisite 914a7e3. The finite IK comparison does not authorize default promotion, production service integration, merge/release, model calls or M7. Historical tags, releases and receipts remain unchanged.",
     "workspace_branch": "codex/chinese-bm25-optimization",
     "workspace_dirty": false,
     "historical_workspace_before_chinese_retrieval": {
@@ -34,8 +34,8 @@
     "external_model_calls_allowed": false,
     "new_live_model_calls": 0,
     "implementation_complete": true,
-    "comparison_status": "three_frozen_development_comparisons_completed_no_automatic_promotion",
-    "candidate_commit": "8f042fb46b83c7d2e7eb630c1197546f0d98c3cd",
+    "comparison_status": "four_frozen_development_comparisons_completed_no_automatic_promotion",
+    "candidate_commit": "dde6fc3c568b461aa84cfa38351478b239eb20db",
     "candidate_status": "experiment_committed_pushed_local_engineering_verified_default_choice_pending",
     "pushed": true,
     "pr": "https://github.com/1040942669/legal-rag-agent/pull/31",
@@ -44,6 +44,7 @@
     "first_comparison_run_id": "chinese_bm25_20261006_fixed_first",
     "second_comparison_run_id": "chinese_bm25_20261006_char_fixed_second",
     "third_comparison_run_id": "chinese_bm25_20261006_smartcn_fixed_third",
+    "fourth_comparison_run_id": "chinese_bm25_20261007_ik_fixed_fourth_verified",
     "measured_best_modern_arm": "bm25s-sklearn-char",
     "modern_hit_at_5": {"count": 83, "denominator": 108},
     "baseline_hit_at_5": {"count": 76, "denominator": 108},
@@ -111,6 +112,46 @@
         "Current phase did not rerun local PostgreSQL, wheel or Linux broker tests. Prior source-scoped evidence remains separate; final remote CI status must be read on the actual head."
       ]
     },
+    "elasticsearch_ik_comparison": {
+      "user_choice": "finite_local_native_ik_comparison",
+      "status": "completed_independently_recomputed_no_default_promotion",
+      "source_candidate_sha": "dde6fc3c568b461aa84cfa38351478b239eb20db",
+      "run_id": "chinese_bm25_20261007_ik_fixed_fourth_verified",
+      "report": "reports/refactor/ELASTICSEARCH_IK_EXPERIMENT.md",
+      "protocol": "configs/chinese-bm25-benchmark-v4.json",
+      "protocol_sha256": "841202ffe398157d8214123db7f576b02211b5127a043148ee3ea4d90a35c91e",
+      "manifest_sha256": "d14ea5cb045c766d9378c126c9778309eb812b6d37739bc4aa7c2b5c30316c51",
+      "summary_sha256": "e9e62b33e77966def40104982894e5733107214acfbfb89e7135b4b08d637968",
+      "started_at": "2026-10-06T17:20:44Z",
+      "finished_at": "2026-10-06T17:24:14Z",
+      "dataset_role": "fourth_repeated_development_comparison_not_holdout",
+      "cases": 120, "ranking_denominator": 108, "no_gold_na": 12,
+      "chunks": 19050, "sources": 205, "arms": 3, "passes_per_arm": 2,
+      "successful_rows": 720, "repeat_mismatches": 0,
+      "source_input_runtime_stable": true, "owned_service_cleanup_succeeded": true,
+      "owned_active_config_checked_stable": true,
+      "runtime": {"elasticsearch": "9.1.4", "analysis_ik": "9.1.4", "lucene": "10.2.2", "bundled_jdk": "24.0.2", "dependency_content_files_checked": 685},
+      "settings": {"shards": 1, "replicas": 0, "k1": 1.5, "b": 0.75, "discount_overlaps": true, "index_analyzer": "ik_max_word", "query_analyzer": "ik_smart", "query_kind": "analyze_unique_bool_should_term", "max_unique_query_terms": 1024},
+      "results": {
+        "legacy-v1": {"hit_at_5_count": 76, "mrr_at_5": 0.6101842592592592, "build_ms": 1616.5050999261439, "second_pass_query_p95_ms": 612.0428949710912, "sampled_process_tree_peak_rss_mib": 468.0234375},
+        "bm25s-sklearn-char": {"hit_at_5_count": 83, "mrr_at_5": 0.5970648148148148, "build_ms": 7061.23759993352, "second_pass_query_p95_ms": 30.110885051544756, "sampled_process_tree_peak_rss_mib": 449.29296875},
+        "elasticsearch-ik": {"hit_at_5_count": 71, "mrr_at_5": 0.5503074074074074, "build_ms": 23166.639999952167, "second_pass_query_p95_ms": 59.408610116224736, "sampled_process_tree_peak_rss_mib": 1656.55859375}
+      },
+      "ik_paired_vs_legacy": {"improved": 3, "regressed": 8, "hit_at_5_delta_ci95": [-0.1019, 0.0093]},
+      "selected_modern_arm": "bm25s-sklearn-char", "promotion_eligible_modern_arm": null,
+      "production_default_changed": false, "production_service_integration": false,
+      "new_model_calls": 0, "new_model_cost_cny": "0",
+      "post_query_diagnostics": {"status": "completed", "method": "body-exact-term-count-v1", "queries": 120, "sum_per_query_unique_token_counts": 1733, "oov_token_occurrences": 415, "partially_oov_queries": 118, "fully_oov_queries": 0, "zero_token_queries": 0, "zero_result_queries": 0, "scope": "after_timed_passes_not_a_causal_quality_explanation", "global_document_token_count": null, "global_document_token_count_reason": "not_collected"},
+      "contract_tests": {"unit_tests": 135, "unit_duration_seconds": 1.72, "unit_junit": ".tmp/ik-final-diagnostic-source-contracts.xml", "explicit_real_service_checks": 8, "real_service_artifact": ".tmp/ik-real-synthetic-text-oov-fixed/result.json", "default_ci_runs_real_service": false},
+      "local_m2": {"status": "passed", "mandatory_passed": 25, "mandatory_total": 25, "report_exit_code": 0, "duration_ms": 267732, "started_at": "2026-10-06T17:26:07Z", "finished_at": "2026-10-06T17:30:37Z", "pytest_tests": 2255, "pytest_subtests": 157, "pytest_duration_seconds": 206.58, "warnings": 4, "junit": {"tests": 2412, "failures": 0, "errors": 0, "skipped": 0}, "artifact": ".tmp/ik-dde6fc3-m2-final.json", "identity_basis": "Same clean source HEAD before and after; no tracked changes during benchmark or gate."},
+      "preserved_runs": {"interrupted": "chinese_bm25_20261007_ik_fixed_fourth", "interrupted_exit_code": null, "diagnostics_invalid": "chinese_bm25_20261007_ik_fixed_fourth_recovery1", "diagnostics_invalid_note": "Ranking completed, but text-field terms_enum empty response was not valid OOV evidence. Raw output and diagnostic-audit sidecar retained. Diagnostic-only repair, then full fixed rerun; no ranking or protocol tuning.", "superseded_local_gate": ".tmp/ik-c241980-m2-cancelled.json", "superseded_local_gate_status": "cancelled_not_pass_or_product_failure"},
+      "source_ci_run": "37502817897",
+      "source_ci_observed_status": "completed_four_jobs_success_exact_dde6fc3",
+      "result_document_static": {"status": "passed_3_of_3_before_recording_this_result", "artifact": ".tmp/ik-result-docs-static-final.json", "markdown_files": 47, "json_files": 2, "candidate_text_files": 343, "credential_findings": 0, "metadata_only_closeout_requires_same_checks_before_commit": true},
+      "superseded_ci_runs": {"37500088397": "cancelled", "37500596181": "cancelled"},
+      "following_documentation_head_ci": "must_be_checked_separately_no_future_success_claim",
+      "limits": ["Fixed original dictionaries and parameters, no case-specific repairs or gold changes.", "Python permits exact IPv4 TCP loopback endpoint only; JVM loopback settings and disabled remote dictionaries are not an OS firewall or airgap.", "Single cold build, fixed arm order and sampled Python/JVM RSS do not establish production capacity or complete API latency.", "ES/IK 9.1.4 is a reproducibility pin, not latest-version or production security approval; OpenSearch not run.", "No independent legal review, unseen holdout or real-model quality. Repeated fourth comparison increases selection bias.", "Local PG/wheel/Linux broker not rerun for experiment-only code; historical runtime evidence remains separate."]
+    },
     "final_candidate_validation": {
       "source_candidate_sha": "04fd389945125c81767745bbdce48137921d26fd",
       "identity_basis": "Clean HEAD observed before and after runtime gates; no tracked edits during these gates. Benchmark manifests retain their own earlier source hashes.",
@@ -172,7 +213,7 @@
       "legal_quality_accepted": false,
       "independent_holdout_admitted": false
     },
-    "note": "Current authorization supersedes prior local-only boundaries only for this task; historical nodes and release receipts retain their meaning. final_candidate_validation is the preserved 04fd389 production-runtime evidence, not the new SmartCN experiment. The user-requested third comparison is complete but neither SmartCN arm won and the two-metric promotion guard remains failed. No new shared cache, search service, model calls or generic intent/safety framework. Current default remains unchanged pending an explicit tradeoff decision."
+    "note": "Historical nodes and release receipts retain their meaning. final_candidate_validation is preserved 04fd389 production-runtime evidence, not the SmartCN or IK experiment. The finite fourth comparison and independent recomputation are complete: IK does not win, char still fails the unchanged two-metric promotion guard. Local isolated ES is experimental, not a production search service. No default switch, shared cache, model calls or generic intent/safety framework. Result-document commit and its own CI must be independently observed; final default tradeoff remains pending."
   },
   "general_evidence_improvements": {
     "status": "local_engineering_verified_complete_default_not_promoted_quality_not_accepted",
@@ -1737,5 +1778,5 @@
   "historical_next_action_before_local_lexical_retrieval": "Stop after the separately authorized citation-prompt repair, bounded live revalidation and actual result handoff. The original patent case and first four drafts live-passed; the repair stopped on fifth-case historical retrieval/response-mode failure: 5 of 9 processed, 4 drafts passed, 4 cases not run. Repair 5 calls plus prior 2 total 7, estimated 0.0070528 CNY, not verified billing. Both fixed ledgers are consumed; do not delete, move, retry or start a third paid run using unused nominal capacity. Final offline M2 gate passed 25/25 with 1191 tests and 157 subtests; the earlier doc-link gate failure remains recorded. Changes remain uncommitted on codex/live-smoke-qwen35b at base 4d9546e06cfe8ff44660943ffd2dd353ac2e61cc; no remote writes or new release. Further retrieval/semantic-evidence work needs separately defined scope and quality evidence; any new paid run requires explicit authorization. Do not expand to 30 cases, Judge, a new model or M7. Existing M5/M6 software tags, receipts and releases remain unchanged.",
   "historical_next_action_before_general_evidence_improvements": "Stop and report the completed local improvements and verification. The frozen candidate passed the cumulative M2 offline gate 25/25 with 1294 tests and 157 subtests; result-document static checks passed 3/3. The provider-free paired experiment completed; four retrieval cases improved and two regressed, so local-lexical-v2 remains explicit opt-in and legacy-v1 stays default. This is not complete live-smoke or legal semantic-quality acceptance. No third paid request, consumed-ledger reuse, remote write, new release, corpus/gold rewrite, verifier weakening or M7. Existing M5/M6 released artifacts and both paid histories remain unchanged.",
   "historical_next_action_before_chinese_retrieval": "Report and stop this completed W1-W8 local implementation and applicable engineering verification. Full pytest, cumulative M2, isolated PostgreSQL, real restart, installed wheel, repaired eight-arm development experiment and observed result-document static checks have completed; failures remain preserved and runtime identity is unchanged. Recheck the same static checks after metadata-only closeout without changing runtime code. Legal quality, trusted human review, independent holdout, live checker calibration, real Linux broker, production capacity and remote CI are not accepted. Keep legacy-v1 default and generic-v3 opt-in. Do not inject gold, fabricate review/holdout, send new paid calls, reuse consumed ledgers, read secrets/raw history, upload corpus, write remotely, move M5/M6 tags or start M7. Existing published artifacts remain unchanged.",
-  "next_action": "Verify and push this documentation-only result update, then report the new document commit and its separate CI status without recursively rewriting its own SHA into this file. Runtime candidate 04fd389 passed local M2, 93 isolated PostgreSQL tests, physical restart, source-matched installed wheel and exact-head four-job CI37354368069, including real Linux broker/worker receipts. Obtain the user's explicit default-selection tradeoff: mature character analysis improves development Hit@5 but regresses MRR and rebuild cost; it failed the unchanged automatic promotion guard. Until chosen, legacy-v1 remains default and modern analyzers are opt-in. Preserve failures, benchmark identities and historical receipts. No new model calls, ledger reuse, corpus upload, merge/release, tag movement or M7."
+  "next_action": "Finish the finite IK result-document static checks, commit/push to Draft PR31, update the PR and independently read the actual final head CI without recursive receipts. The clean dde6fc3 experiment completed 720 rows and local M2 passed25/25 with2255 tests+157 subtests. IK71/108 does not beat legacy76/108; char83/108 still regresses MRR and fails the unchanged automatic promotion guard. Report and stop this finite experiment, leaving legacy default unchanged. A mature-library default change needs the user's explicit tradeoff decision or a separately authorized fixed whole-chain quality study, not more unbounded candidate tuning. Preserve all failures, paid histories, raw local evidence and historical release receipts. No new model calls, ledger reuse, corpus upload, production ES integration, merge/release, tag movement or M7."
 }
