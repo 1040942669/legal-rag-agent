@@ -8,6 +8,10 @@
 
 开发期 RED/GREEN 各自保留，定向数字不是最终冻结候选验收。下一步停止所有 tracked 写入后执行固定演示、隔离PG及精确源码累计M2，再明确路径commit/push，更新原Draft PR并读取自身head CI。不新建Release、不移动Tag、不使用剩余付费额度、不进入M7；历史IK及软件发布段落保持各自历史快照含义。
 
+本轮独立冻结源码已是 `3c3b58822e4446a7d6f2412f3bc10eea86ea1b50`，已commit/push并读回远端ref。六组实际showcase98/0/0/0通过、身份稳定；真实PG46/0/0/0、61.22s通过，含M5 T01/T02/T03/并发fencing与M6实际JSONL。自建cluster实际stop/start后新进程核验schema0008成功，最终已停止。该clean源码累计M2于UTC18:07:39至18:11:45完成25/25、exit0、244652ms，2315 passed+157 subtests/192.12s、JUnit2472/0/0/0、1上游warning；期间无tracked写入。这些不是模型/法律质量证明，不与重叠专项叠加。
+
+源码 [CI37508896508](https://github.com/1040942669/legal-rag-agent/actions/runs/37508896508) 当前四路in_progress；本地未跑新的Linux broker。验收结果文档提交的未来head也需自身CI，不改绑源码或旧db64绿灯。个人材料仅local ignored，不发到PR。后续为结果静态复核、commit/push文档及真实CI状态读回；不合并/发版。若需个人文字稿，先由人确认真实贡献并完成口述高危审查，源码审计不能代替。
+
 ## 当前任务：有限 Elasticsearch + IK 实测与交接
 
 2026-10-07 用户确认“ok那先测吧”，追加范围仅是固定本地 ES/IK 比较，从已推送且四路 CI 成功的 `31a6e63f32b4640eb77aa6a69ed9ae0171bc2ae9` 继续同一 Draft PR31。最新实验源码 `dde6fc3c568b461aa84cfa38351478b239eb20db` 已提交推送；benchmark 和最终本地门禁前后均为同一 clean HEAD。origin/master 仍是 `4d9546e06cfe8ff44660943ffd2dd353ac2e61cc`。本节是结果文档提交前快照，不虚填自身未来 SHA。

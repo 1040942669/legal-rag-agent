@@ -14,12 +14,12 @@
 
 | ID | 子任务 | 必须能够失败的验收 | 状态 |
 | --- | --- | --- | --- |
-| E1 | 精确路由仅在真正调用 lexical 时构建 BM25 | exact found/miss/clarification 的 builder 调用为 0；同 run lexical 构建一次；冻结 corpus/settings；排名、provenance 不变；跨 run 不共享；初始化失败不缓存半成品 | 实施中，先保留 builder spy RED |
-| E2 | M2 观测纳入真实 semantic 调用角色 | semantic-only 与 generation+semantic 正确计数；cache/replay 的 source calls 不计当前；embedding/other/未知角色不冒充 model；未知 token 仍 null；observer 失败不改业务 | 实施中，已保留 3 failed / 3 passed RED |
+| E1 | 精确路由仅在真正调用 lexical 时构建 BM25 | exact found/miss/clarification 的 builder 调用为 0；同 run lexical 构建一次；冻结 corpus/settings；排名、provenance 不变；跨 run 不共享；初始化失败不缓存半成品 | 完成，真实修正fixture RED保留；105项定向及冻结M2通过 |
+| E2 | M2 观测纳入真实 semantic 调用角色 | semantic-only 与 generation+semantic 正确计数；cache/replay 的 source calls 不计当前；embedding/other/未知角色不冒充 model；未知 token 仍 null；observer 失败不改业务 | 完成，3 failed /3 passed RED及26项GREEN、冻结M2通过 |
 | E3 | 修复 vector adapter 的可选法名提示属性 | 直接访问不读取不存在的 `_entries`；不加载语料或触发 encoder/provider；prepare_question 保持 frozen boundary | 已有真实 AttributeError RED，31 项定向 GREEN；不是在线接口故障率改善 |
-| E4 | 固定零模型工程演示入口 | 明确离线合同模式；仅固定 selector；新输出目录不覆盖证据；环境不传 key；JUnit 缺失/空/失败/skip/timeout 非 passed；源身份前后核验 | 实施中；不是全量门禁替代品 |
-| E5 | 重新验证适用链路与审查 | 定向与固定演示；隔离 PostgreSQL 精确/lexical/观测/恢复合同；最终 frozen source 累计 M2；精确 GitHub head CI 另读；未跑真实 worker 不伪称已跑 | 待执行，不能借 db64 或 dde6 绿灯 |
-| E6 | 更新公开工程验收、状态及交接 | 测试轮次不累加；失败和未运行项保留；commit/push/PR 与 merge/tag/release 区分；私密材料不 stage | 待结果回填 |
+| E4 | 固定零模型工程演示入口 | 明确离线合同模式；仅固定 selector；新输出目录不覆盖证据；环境不传 key；JUnit 缺失/空/失败/skip/timeout 非 passed；源身份前后核验 | 完成，22入口单元及实际6组98项通过；不是全量门禁替代品 |
+| E5 | 重新验证适用链路与审查 | 定向与固定演示；隔离 PostgreSQL 精确/lexical/观测/恢复合同；最终 frozen source 累计 M2；精确 GitHub head CI 另读；未跑真实 worker 不伪称已跑 | 3c3b588本地PG46+实际restart、M2 25/25及独立审查完成，远端CI待结束 |
+| E6 | 更新公开工程验收、状态及交接 | 测试轮次不累加；失败和未运行项保留；commit/push/PR 与 merge/tag/release 区分；私密材料不 stage | 结果回填完成，文档静态/推送/精确head CI状态独立核对 |
 
 本清单记录本轮已选择范围，不声称所有行都在观察 RED 前预注册。已发生的开发证据保持各自身份，正式结果在 [工程验收](../../reports/refactor/ENGINEERING_READINESS_20261008.md) 中记录。
 
