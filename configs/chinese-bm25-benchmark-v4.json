@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "protocol_id": "chinese-bm25-elasticsearch-ik-fixed-v4",
+  "dataset_id": "legal-eval-v3",
+  "dataset_role": "repeated_development_not_holdout",
+  "index": "artifacts/indexes/article/chunks.jsonl",
+  "top_k": 5,
+  "passes": 2,
+  "arms": [
+    {"id": "legacy-v1", "backend": "historical", "lexical_profile": "legacy-v1", "k1": 1.5, "b": 0.75, "law_boost": 40.0, "article_boost": 80.0, "deprecated_penalty": 0.5},
+    {"id": "bm25s-sklearn-char", "backend": "bm25s", "mode": "char", "k1": 1.5, "b": 0.75, "hmm": null, "method": "lucene"},
+    {"id": "elasticsearch-ik", "backend": "elasticsearch-ik", "k1": 1.5, "b": 0.75, "index_analyzer": "ik_max_word", "query_analyzer": "ik_smart", "max_unique_query_terms": 1024}
+  ],
+  "dependencies": {
+    "version": "9.1.4",
+    "engine_url": "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-9.1.4-windows-x86_64.zip",
+    "engine_sha512_url": "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-9.1.4-windows-x86_64.zip.sha512",
+    "engine_sha512": "66f10e3e69dce8a1dc7374570d1ac7b24eaafee99f44bdfbd669c99c6afc77c63a3e0859516afd35b44f8880af19c2909d3c42fea82e2a2b39ae78ab0fe431a2",
+    "plugin_url": "https://get.infini.cloud/elasticsearch/analysis-ik/9.1.4",
+    "plugin_sha256": "0bf5c3e809212dc4646e34c9e81169007c4bc400526675d37a4fd7d6b285e2db",
+    "plugin_hash_role": "local downloaded artifact provenance, not independently published signature",
+    "jdk": "verified distribution bundled JDK; no global JAVA_HOME or application secrets"
+  },
+  "modern_index_text": "law_names then article_numbers then original chunk text, newline separated; all chunks retained",
+  "ik_dictionary": "Unmodified packaged default dictionaries; extension and remote dictionaries empty, no custom case-derived words or hot updates; installed resources and configuration content hashes frozen",
+  "ik_query": "Analyze with ik_smart, deduplicate tokens, bool should term OR minimum_should_match=1; no QueryParser, match rewrite, phrase, synonyms, fallback, fuzziness or boost; reject over 1024 unique tokens without truncation. Empty/full-OOV results are valid misses. Both HTTP requests included in query timing.",
+  "native_engine": "Elasticsearch 9.1.4 / matching IK 9.1.4, explicit BM25 k1=1.5 b=0.75 discount_overlaps=true; one primary shard zero replicas, refresh then read-only index; native score-desc then chunk_id keyword UTF-8-asc sort before top-k; reject partial/timeout/malformed results",
+  "metrics": ["hit_at_3", "hit_at_5", "mrr", "target_coverage"],
+  "selection": "Only complete stable three-arm runs permit selection. Rank modern arms by development Hit@5, then MRR@5, then lower second-pass client query p95. Selected modern arm must meet both same-run legacy Hit@5 and MRR@5 to be engineering-promotion eligible. No default or production promotion by this experiment.",
+  "promotion_requires_legacy_non_regression": true,
+  "runtime_scope": "Direct lexical ranking only; an isolated owned local experimental service, no CLI/API/M2 production integration, exact route, generation, embedding, reranker or checker",
+  "timing_scope": "Downloads and installation precede evaluation. One fresh worker per arm; ES worker owns one new cluster/index. Report service startup separately; build includes startup, bulk/refresh/freeze. Query includes analysis, IPC and search. Two forward/reverse passes; server took is auxiliary, not client latency.",
+  "memory_scope": "Worker samples its own RSS plus live descendants including its spawned ES JVM at 20ms configured wait. Parent 200ms ownership sampler ensures timeout cleanup; both have overhead. Sampled simultaneous RSS maximum is neither exact OS peak nor index size, and excludes archive extraction/install.",
+  "provider_calls_allowed": 0,
+  "network_allowed": "literal_loopback_only",
+  "network_boundary": "Python worker audit allows TCP only to manifest-owned literal 127.0.0.1 HTTP port, no proxy/redirect/DNS/UDP/remote client; other workers deny sockets. ES HTTP/transport loopback, security auto setup off, geoip downloads/ML/watcher off, default IK remote URLs empty. No downloads/models during benchmark. JVM is not OS-airgapped; do not claim a firewall guarantee.",
+  "worker_timeout_seconds": 1200,
+  "bootstrap": {"seed": 42, "resamples": 2000, "confidence": 0.95},
+  "limits": [
+    "120 reused development cases; 108 retrieval-gold cases and 12 no-gold cases with NA ranking metrics, not inferred refusal successes",
+    "No independent legal review or unseen holdout; a fourth user-requested comparison increases selection bias",
+    "ik_smart is not a subset of ik_max_word; do not assume query-term coverage, repair OOV per case, or silently fall back",
+    "Historical versus modern differs in analyzer, modern metadata text, manual boosts, field statistics and engine; not a single-factor BM25 or segmentation causal comparison",
+    "Native Lucene norms, overlap positions and float scoring differ from BM25S; raw score scales are not comparable",
+    "One cold build, fixed arm order and sampled memory do not establish production capacity, API latency or deployment security",
+    "ES 9.1.4 is a compatibility/reproducibility pin, not a latest-version or production security recommendation; OpenSearch not tested",
+    "No case-specific dictionary, parameter/gold tuning or protocol changes after results; preserve all earlier runs",
+    "Any execution/cleanup failure, timeout, input/runtime identity drift, partial result, incomplete denominator or repeat mismatch invalidates winner selection; failures stay unknown rather than quality zero"
+  ]
+}
