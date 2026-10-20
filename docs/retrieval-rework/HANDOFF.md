@@ -12,8 +12,8 @@
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
-| R0 | 评测先行：语料完整性审计、条号规范化工具、`retrieval-audit` 深度检索审计、合成条号查询集、冻结基线 | in_progress |
-| R1 | 修解析器：条号行头只认行首或句末标点后且带分隔符；章节标题/目录不再粘进正文；重跑基线对比 | not_started |
+| R0 | 评测先行：语料完整性审计、条号规范化工具、`retrieval-audit` 深度检索审计、合成条号查询集、冻结基线 | done（本地 commit，未 push） |
+| R1 | 修解析器：条号行头只认行首或句末标点后且带分隔符；章节标题/目录不再粘进正文；重跑基线对比 | done（本地 commit，未 push） |
 | R2 | 统一 QueryParser（法律别名 -> law_id、条号 -> int）+ CitationResolver 精确查表 | not_started |
 | R3 | 词面索引重写：倒排 + BM25F，删除加法 boost | not_started |
 | R4 | 服务层：按 snapshot 缓存索引、词面与向量解耦、单一检索配置来源 | not_started |
@@ -29,10 +29,16 @@
 
 ## R1 任务清单
 
-- [ ] 条号行头识别：行首（允许 Markdown 装饰前缀）或句末标点后且后接空白；行内引用不再切条。
-- [ ] 章节/目录标题行不粘进条文正文。
-- [ ] 更新 `tests/test_data.py` 中与新行为冲突的断言，并补回归测试（引用不切条、标题不粘连）。
-- [ ] 用修复后语料生成 `eval_cases/citation_lookup_v1.jsonl`；在 R0 提交与 R1 提交上分别跑 v3 与合成集审计，写入 `reports/retrieval/R0_R1_baseline.md`。
+- [x] 条号行头识别：行首（允许 Markdown 装饰前缀）或句末标点后且后接空白；行内引用不再切条（`legal_rag/data.py` `find_article_headers`）。
+- [x] 章节/目录/Markdown 序号标题行不粘进条文正文；宪法句末行内标题剥离。
+- [x] `tests/test_data.py`：`test_chapter_title_not_parsed_as_article` 的旧断言（标题成为 unmatched 记录）改为"标题被丢弃"；新增 6 个回归测试。
+- [x] 修复后真实语料：18356 条，冲突 3 组（源文件 期货和衍生品法 第97行、涉外民事关系法律适用法 第51行本身畸形），碎片 0，粘连标题 0，未终止 1076 -> 10（剩余为源数据网页残留、附表引用、畸形行）。
+- [x] 用修复后语料生成 `eval_cases/citation_lookup_v1.jsonl`（611 条：205 full / 201 short / 205 arabic，seed 20261021，per_law 1）。
+- [x] 在 R0 提交 `ade8f18` 与 R1 提交 `89b197a` 上分别跑 v3 与合成集 BM25 审计，写入 `reports/retrieval/R0_R1_baseline.md`。要点：v3 Hit@5 0.704 -> 0.713（区间内）、R0 有 18/108 条 gold 歧义；合成集阿拉伯数字 Hit@1 仅 2/205，简称失败全部是近名法律子串混淆。
+
+## 已知并行工作
+
+主 checkout（`D:/Study/Python_project/LLM-application`）停在未合并分支 `codex/chinese-bm25-optimization`（2026-10-07，203 文件），改动了 `legal_rag/retrieval.py`、`legal_rag/services/service_retrieval.py`，新增 `chinese_bm25.py`、`bm25_settings.py`、`legal_references.py` 等。它不改 `data.py`，与 R0/R1 基本不冲突（`cli.py` 可能有小冲突）；R2-R4 开工前必须先决定该分支合并、取舍或废弃。
 
 ## 运行环境约定
 
@@ -44,3 +50,11 @@
 ## 进度记录
 
 - 2026-10-21 01:50 开始 R0。
+- 2026-10-21 02:10 R0、R1 完成。分支 `1040942669/bm25-retrieval-redesign`（Orca 自动从 `1040942669/killifish` 改名）：`ade8f18` R0 工具，`89b197a` R1 解析修复，随后一个提交加入合成集、基线报告、CHANGELOG 与本文件。全量离线测试 1034 passed（deselect 上述打包测试；该测试在未改动的 `4d9546e` 上同样失败）。未 push、未开 PR、未重建 PostgreSQL snapshot 或 embedding cache。
+
+## 下一步（R2 入口）
+
+1. 先处理"已知并行工作"中的 `codex/chinese-bm25-optimization` 分支取舍，再动 `retrieval.py`。
+2. 新建 `legal_rag/query_parser.py`：唯一的法律别名表（全称、去"中华人民共和国"简称、语料内书名号标题）-> law_name，条号用 `legal_rag.article_numbers` 规范化；替换 `retrieval.py` `extract_law_hints`/`FALLBACK_LAW_HINTS`、`query.py` `COMMON_LAW_HINTS`/`ARTICLE_NUMBER_RE` 的重复实现。法律名必须精确等值匹配，最长别名优先，禁止 `hint in law` 子串判断。
+3. 新建 CitationResolver：(law_name, 条号 int) -> 精确条文，命中则置顶，未命中退回 BM25。
+4. 门槛见 `reports/retrieval/R0_R1_baseline.md` 第 5 节；用 `retrieval-audit --cases eval_cases/citation_lookup_v1.jsonl --cases eval_cases/legal_eval_cases_v3.jsonl` 验证。

@@ -4,7 +4,23 @@
 
 ## [Unreleased]
 
-无额外软件变更。M6 `v0.7.1` 的软件发布、独立回执和治理关闭均已完成；本次仅记录非递归文档收口，M7 未开始。
+M6 `v0.7.1` 的软件发布、独立回执和治理关闭均已完成，M7 未开始。以下为检索重构 R0/R1（独立于 M0-M7 发布治理，见 [交接](docs/retrieval-rework/HANDOFF.md) 与 [基线报告](reports/retrieval/R0_R1_baseline.md)），尚未发布。
+
+### Added
+
+- `legal-rag retrieval-audit`：按深度 N 直接调用检索器，输出 Hit@k、MRR@10、全部目标条文召回、分题型指标、gold 歧义状态和延迟；可同时附带语料完整性审计。
+- `legal-rag generate-citation-cases` 与 `eval_cases/citation_lookup_v1.jsonl`：从语料生成全称、简称、阿拉伯数字三种写法的条号查询（611 条）。
+- `profile-data` 报告新增语料完整性：同法同条号冲突、引用碎片、未终止条文、粘连章节标题。
+- `legal_rag.article_numbers`：中文/阿拉伯条号与整数互转，覆盖语料中全部 19021 个条号写法。
+
+### Fixed
+
+- 无书名号行头的法律不再在行内"第X条"引用处切条：条号行头只认行首或句末标点后带分隔符的位置。本地语料引用碎片 676 -> 0，同法同条号冲突 427 -> 3（源文件畸形行），被截断条文恢复完整。
+- 章节、目录和 Markdown 序号标题不再粘进上一条正文。
+
+### Changed
+
+- 解析结果变化：本地语料条文数 19050 -> 18356，38 部法律的 article_id/chunk_id 改变。旧索引、embedding cache 和已导入 PostgreSQL 的 snapshot 需重建。`test_chapter_title_not_parsed_as_article` 的旧断言（标题成为 unmatched 记录）改为标题被丢弃。
 
 ## [0.7.1] - 2026-10-02
 
