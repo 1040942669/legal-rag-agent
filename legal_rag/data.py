@@ -17,10 +17,26 @@ ARTICLE_WITH_LAW_MARKER_RE = re.compile(
     rf"《(?P<law>[^》]+)》(?P<article>{ARTICLE_NUMBER})规定[，,]"
 )
 ARTICLE_WITHOUT_LAW_MARKER_RE = re.compile(rf"(?P<article>{ARTICLE_NUMBER})\s*")
+# Structural lines such as 第一章　总则 / 第二节 / 目　　录 / 附　　则.
+STRUCTURE_HEADING_RE = re.compile(
+    rf"^[#*>\s]*(?:第[{ARTICLE_NUM_CHARS}]+(?:分编|编|章|节)(?:\s+\S.*)?|目\s*录|附\s*则|总\s*则)$"
+)
+STRUCTURE_HEADING_MAX_CHARS = 40
 
 
 def normalize_article_number(raw: str) -> str:
     return re.sub(r"\s+(?=条)", "", raw.strip())
+
+
+def is_structure_heading(line: str) -> bool:
+    """Return True for chapter/section/TOC lines that are not statute text."""
+
+    stripped = line.strip()
+    return (
+        0 < len(stripped) <= STRUCTURE_HEADING_MAX_CHARS
+        and not stripped.endswith(("。", "；", "，", "：", ";", ",", ":"))
+        and STRUCTURE_HEADING_RE.match(stripped) is not None
+    )
 
 
 def split_line_into_articles(line: str, law_from_file: str) -> tuple[str | None, list[tuple[str, str, str, str, str]]]:
@@ -232,6 +248,10 @@ def profile_dataset(dataset_dir: str | Path, readme_path: str | Path | None = No
         ],
         "format_anomalies": collect_anomalies(articles, limit=20),
     }
+    # Imported lazily: corpus_integrity depends on this module's helpers.
+    from .corpus_integrity import audit_article_integrity
+
+    profile["integrity"] = audit_article_integrity(articles)
     profile["chunk_candidates"] = suggest_chunk_candidates(profile)
     return profile
 
@@ -381,6 +401,10 @@ def render_profile_markdown(profile: dict) -> str:
     ]
     for candidate in profile.get("chunk_candidates", []):
         lines.append(f"- `{candidate['name']}` [{candidate['status']}]: {candidate['reason']}")
+    if profile.get("integrity"):
+        from .corpus_integrity import render_integrity_markdown
+
+        lines.extend(["", *render_integrity_markdown(profile["integrity"])])
     lines.extend(["", "## 条文数最多的文件"])
     for item in profile.get("top_files_by_articles", []):
         lines.append(f"- {item['file']}: {item['articles']} 条")
