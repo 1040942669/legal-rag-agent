@@ -100,7 +100,7 @@ def is_reference_fragment(article: LawArticle) -> bool:
     header = ARTICLE_HEADER_PREFIX_RE.match(article.raw_text)
     if header is None:
         return False
-    # A genuine header is separated from its body (第一条　为了...).
+    # A genuine header is separated from its body (第一条\u3000为了...).
     rest = article.raw_text[header.end() :]
     return bool(rest) and not rest[0].isspace() and rest.startswith(
         REFERENCE_CONTINUATION_PREFIXES

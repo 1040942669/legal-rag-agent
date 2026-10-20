@@ -23,7 +23,7 @@ def make_article(
         article_id=f"{number}-{line_no}-{len(raw_text)}",
         law_name=law,
         article_number=number,
-        body=body if body is not None else raw_text[len(number) :].lstrip("　 "),
+        body=body if body is not None else raw_text[len(number) :].lstrip("\u3000 "),
         raw_text=raw_text,
         source_file="中华人民共和国测试法.txt",
         line_no=line_no,
@@ -34,17 +34,17 @@ def make_article(
 class CorpusIntegrityTest(unittest.TestCase):
     def test_structure_heading_detection(self) -> None:
         for line in (
-            "第一章　总则",
-            "第二节　一般规定",
-            "第一分编　通则",
-            "目　　录",
-            "附　　则",
-            "## 第八章　附则",
+            "第一章\u3000总则",
+            "第二节\u3000一般规定",
+            "第一分编\u3000通则",
+            "目\u3000\u3000录",
+            "附\u3000\u3000则",
+            "## 第八章\u3000附则",
         ):
             with self.subTest(line=line):
                 self.assertTrue(is_structure_heading(line))
         for line in (
-            "第一条　为了测试，制定本法。",
+            "第一条\u3000为了测试，制定本法。",
             "第一章规定的事项，由国务院另行规定。",
             "依照本法第三章的规定处理。",
             "",
@@ -53,9 +53,9 @@ class CorpusIntegrityTest(unittest.TestCase):
                 self.assertFalse(is_structure_heading(line))
 
     def test_reference_fragment_detection(self) -> None:
-        genuine = make_article("第一条", "第一条　为了测试，制定本法。")
+        genuine = make_article("第一条", "第一条\u3000为了测试，制定本法。")
         no_separator_header = make_article(
-            "第一百二十八条", "第一百二十八　条侦查人员应当进行勘验。"
+            "第一百二十八条", "第一百二十八\u3000条侦查人员应当进行勘验。"
         )
         fragment = make_article("第一条", "第一条的规定定罪处罚。", body="的规定定罪处罚。")
         clause_fragment = make_article(
@@ -72,11 +72,11 @@ class CorpusIntegrityTest(unittest.TestCase):
 
     def test_audit_counts_collisions_truncation_and_glued_headings(self) -> None:
         articles = [
-            make_article("第一条", "第一条　为了测试，制定本法。", line_no=1),
-            make_article("第二条", "第二条　违反本法", line_no=2),
+            make_article("第一条", "第一条\u3000为了测试，制定本法。", line_no=1),
+            make_article("第二条", "第二条\u3000违反本法", line_no=2),
             make_article("第一条", "第一条的规定处理。", body="的规定处理。", line_no=2),
             make_article(
-                "第三条", "第三条　本法自公布之日起施行。\n第二章　附则", line_no=3
+                "第三条", "第三条\u3000本法自公布之日起施行。\n第二章\u3000附则", line_no=3
             ),
         ]
         report = audit_article_integrity(articles)
@@ -93,8 +93,8 @@ class CorpusIntegrityTest(unittest.TestCase):
 
     def test_clean_corpus_has_no_issues(self) -> None:
         articles = [
-            make_article("第一条", "第一条　为了测试，制定本法。"),
-            make_article("第二条", "第二条　违反本法第一条的规定的，依照本法处理。"),
+            make_article("第一条", "第一条\u3000为了测试，制定本法。"),
+            make_article("第二条", "第二条\u3000违反本法第一条的规定的，依照本法处理。"),
         ]
         report = audit_article_integrity(articles)
         self.assertEqual(integrity_issue_count(report), 0)

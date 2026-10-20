@@ -5,6 +5,7 @@ import json
 import re
 import statistics
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
@@ -17,9 +18,27 @@ ARTICLE_WITH_LAW_MARKER_RE = re.compile(
     rf"《(?P<law>[^》]+)》(?P<article>{ARTICLE_NUMBER})规定[，,]"
 )
 ARTICLE_WITHOUT_LAW_MARKER_RE = re.compile(rf"(?P<article>{ARTICLE_NUMBER})\s*")
-# Structural lines such as 第一章　总则 / 第二节 / 目　　录 / 附　　则.
+# Without a 《law》 marker an article header must open a line (after optional
+# Markdown decoration) or follow a sentence end with a separator.  An unanchored
+# match would also split cross-references such as 依照本法第二十条的规定.
+ARTICLE_HEADER_AT_LINE_START_RE = re.compile(
+    rf"^[#*>\s]*(?P<article>{ARTICLE_NUMBER})\s*"
+)
+ARTICLE_HEADER_AFTER_SENTENCE_RE = re.compile(
+    rf"(?<=[。；！？])\s*(?P<article>{ARTICLE_NUMBER})[ \u3000]+"
+)
+LINE_DECORATION_CHARS = " \t\u3000#*>"
+# Structural lines such as 第一章\u3000总则 / 第二节 / 目\u3000\u3000录 / 附\u3000\u3000则.
 STRUCTURE_HEADING_RE = re.compile(
-    rf"^[#*>\s]*(?:第[{ARTICLE_NUM_CHARS}]+(?:分编|编|章|节)(?:\s+\S.*)?|目\s*录|附\s*则|总\s*则)$"
+    rf"^[#*>\s]*(?:第[{ARTICLE_NUM_CHARS}]+(?:分编|编|章|节)"
+    # 第六章强制措施 has no separator; exclude references like 第一章规定的.
+    rf"(?:\s+\S.*|(?!的|规定|所|至|、|，)\S.*)?|目\s*录|[总分附]\s*则)$"
+    # Markdown ordinal headings: ## 二、回避
+    rf"|^#{{1,6}}\s*[一二三四五六七八九十百]+、\S.*$"
+)
+# 宪法 puts some chapter titles at the end of the previous article's line.
+INLINE_TRAILING_HEADING_RE = re.compile(
+    rf"(?<=[。；！？])\s*第[{ARTICLE_NUM_CHARS}]+(?:分编|编|章|节)[ \u3000]+[^。；！？，,]{{1,30}}$"
 )
 STRUCTURE_HEADING_MAX_CHARS = 40
 
@@ -48,15 +67,40 @@ def split_line_into_articles(line: str, law_from_file: str) -> tuple[str | None,
             _build_with_law_segments(line, with_law_matches),
         )
 
-    without_law_matches = list(ARTICLE_WITHOUT_LAW_MARKER_RE.finditer(line))
-    if without_law_matches:
-        leading = line[: without_law_matches[0].start()]
+    headers = find_article_headers(line)
+    if headers:
+        leading = line[: headers[0].start]
         return (
-            leading if leading.strip() else "",
-            _build_without_law_segments(line, without_law_matches, law_from_file),
+            leading if leading.strip(LINE_DECORATION_CHARS) else "",
+            _build_without_law_segments(line, headers, law_from_file),
         )
 
     return None, []
+
+
+@dataclass(frozen=True)
+class ArticleHeader:
+    start: int
+    end: int
+    article: str
+
+
+def find_article_headers(line: str) -> list[ArticleHeader]:
+    """Locate genuine article headers in a line without a 《law》 marker."""
+
+    headers: list[ArticleHeader] = []
+    first = ARTICLE_HEADER_AT_LINE_START_RE.match(line)
+    if first:
+        headers.append(
+            ArticleHeader(first.start("article"), first.end(), first.group("article"))
+        )
+    for match in ARTICLE_HEADER_AFTER_SENTENCE_RE.finditer(line):
+        if headers and match.start("article") < headers[-1].end:
+            continue
+        headers.append(
+            ArticleHeader(match.start("article"), match.end(), match.group("article"))
+        )
+    return headers
 
 
 def _build_with_law_segments(
@@ -82,18 +126,18 @@ def _build_with_law_segments(
 
 def _build_without_law_segments(
     line: str,
-    matches: list[re.Match[str]],
+    headers: list[ArticleHeader],
     law_from_file: str,
 ) -> list[tuple[str, str, str, str, str]]:
     segments: list[tuple[str, str, str, str, str]] = []
-    for index, match in enumerate(matches):
-        segment_end = matches[index + 1].start() if index + 1 < len(matches) else len(line)
-        segment_text = line[match.start() : segment_end].strip()
-        body = line[match.end() : segment_end].strip()
+    for index, header in enumerate(headers):
+        segment_end = headers[index + 1].start if index + 1 < len(headers) else len(line)
+        segment_text = line[header.start : segment_end].strip()
+        body = line[header.end : segment_end].strip()
         segments.append(
             (
                 law_from_file,
-                normalize_article_number(match.group("article")),
+                normalize_article_number(header.article),
                 body,
                 segment_text,
                 "from_filename",
@@ -118,6 +162,11 @@ def parse_law_file(path: str | Path) -> list[LawArticle]:
         line = raw_line.strip()
         if not line:
             continue
+        # Chapter/section/TOC lines are document structure, not the text of
+        # whichever article happens to precede them.
+        if is_structure_heading(line):
+            continue
+        line = INLINE_TRAILING_HEADING_RE.sub("", line)
 
         leading_text, segments = split_line_into_articles(line, law_from_file)
         if segments:

@@ -140,7 +140,7 @@ class CitationCasesTest(unittest.TestCase):
             law_name=law,
             article_number=number,
             body="正文。",
-            raw_text=f"{number}　正文。",
+            raw_text=f"{number}\u3000正文。",
             source_file=f"{law}.txt",
             line_no=index,
             parse_status="from_filename",
