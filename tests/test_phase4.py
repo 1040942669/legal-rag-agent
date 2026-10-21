@@ -16,12 +16,7 @@ from legal_rag.judge import build_judge_prompt, extract_json_object, judge_answe
 from legal_rag.models import Chunk, EvalCase, EvalRecord, SearchResult
 from legal_rag.provider_errors import ProviderCallError
 from legal_rag.query import analyze_query
-from legal_rag.retrieval import (
-    BM25Retriever,
-    build_known_law_hints,
-    deprecated_multiplier,
-    extract_law_hints,
-)
+from legal_rag.retrieval import BM25Retriever, deprecated_multiplier
 
 
 def make_chunk(
@@ -54,7 +49,14 @@ class DeprecatedLawTest(unittest.TestCase):
             "a", "text", ["中华人民共和国合同法"], ["第四条"], deprecated=True
         )
         self.assertEqual(deprecated_multiplier(chunk, [], penalty=0.5), 0.5)
-        self.assertEqual(deprecated_multiplier(chunk, ["合同法"], penalty=0.5), 1.0)
+        self.assertEqual(
+            deprecated_multiplier(chunk, ["中华人民共和国合同法"], penalty=0.5), 1.0
+        )
+        # Hints are resolved law names; a short spelling is not resolved here.
+        self.assertEqual(deprecated_multiplier(chunk, ["合同法"], penalty=0.5), 0.5)
+        self.assertEqual(
+            deprecated_multiplier(chunk, ["中华人民共和国劳动合同法"], penalty=0.5), 0.5
+        )
         fresh = make_chunk("b", "text", ["中华人民共和国民法典"], ["第三条"])
         self.assertEqual(deprecated_multiplier(fresh, [], penalty=0.5), 1.0)
 
@@ -78,24 +80,6 @@ class DeprecatedLawTest(unittest.TestCase):
         # 显式引用废止法律时不降权
         explicit = retriever.retrieve("《合同法》第八条规定了什么", top_k=2)
         self.assertEqual(explicit[0].chunk.chunk_id, "old")
-
-
-class LawHintTest(unittest.TestCase):
-    def test_build_known_law_hints_includes_short_names(self):
-        chunks = [make_chunk("a", "text", ["中华人民共和国专利法"], ["第二条"])]
-        hints = build_known_law_hints(chunks)
-        self.assertIn("中华人民共和国专利法", hints)
-        self.assertIn("专利法", hints)
-
-    def test_extract_law_hints_suppresses_substring_matches(self):
-        known = ["中华人民共和国社会保险法", "社会保险法", "保险法"]
-        hints = extract_law_hints("社会保险法对养老保险怎么规定", known_hints=known)
-        self.assertIn("社会保险法", hints)
-        self.assertNotIn("保险法", hints)
-
-    def test_extract_law_hints_falls_back_without_known_list(self):
-        hints = extract_law_hints("民法典第八条规定了什么")
-        self.assertIn("民法典", hints)
 
 
 class TokenEstimateTest(unittest.TestCase):
