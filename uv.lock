@@ -1339,7 +1339,7 @@ wheels = [
 
 [[package]]
 name = "legal-rag-assistant"
-version = "0.7.1"
+version = "1.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "llama-index" },

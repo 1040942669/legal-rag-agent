@@ -24,6 +24,7 @@ artifacts/retrieval_audit/
 artifacts/*.env
 reports/*
 !reports/RESULTS_SUMMARY.md
+!reports/CASE_STUDY.md
 !reports/refactor/
 !reports/refactor/*.md
 !reports/retrieval/

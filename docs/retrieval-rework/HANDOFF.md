@@ -12,12 +12,12 @@
 
 | 阶段 | 内容 | 状态 |
 |---|---|---|
-| R0 | 评测先行：语料完整性审计、条号规范化工具、`retrieval-audit` 深度检索审计、合成条号查询集、冻结基线 | done（本地 commit，未 push） |
-| R1 | 修解析器：条号行头只认行首或句末标点后且带分隔符；章节标题/目录不再粘进正文；重跑基线对比 | done（本地 commit，未 push） |
-| R2 | 统一 QueryParser（法律别名 -> law_id、条号 -> int）+ CitationResolver 精确查表 | done（本地 commit，未 push；未处理 PR #31） |
-| R3 | 词面索引重写：倒排 + BM25F，删除加法 boost | not_started |
-| R4 | 服务层：按 snapshot 缓存索引、词面与向量解耦、单一检索配置来源 | not_started |
-| R5 | 混合召回 + reranker 调优，adaptive 只传结构化字段 | not_started |
+| R0 | 评测先行：语料完整性审计、条号规范化工具、`retrieval-audit` 深度检索审计、合成条号查询集、冻结基线 | done（随 v1.0.0 发布） |
+| R1 | 修解析器：条号行头只认行首或句末标点后且带分隔符；章节标题/目录不再粘进正文；重跑基线对比 | done（随 v1.0.0 发布） |
+| R2 | 统一 QueryParser（法律别名 -> law_id、条号 -> int）+ CitationResolver 精确查表 | done（随 v1.0.0 发布） |
+| R3 | 词面索引重写：倒排 + BM25F，删除加法 boost | cancelled（v1.0.0 范围冻结，见 `docs/PROJECT_SCOPE.md` D4） |
+| R4 | 服务层：按 snapshot 缓存索引、词面与向量解耦、单一检索配置来源 | cancelled（同上；已知局限记录在 PROJECT_SCOPE 第 5 节） |
+| R5 | 混合召回 + reranker 调优，adaptive 只传结构化字段 | cancelled（同上；需要留出集才有意义） |
 
 ## R0 任务清单
 
@@ -60,9 +60,13 @@
 - 2026-10-21 01:50 开始 R0。
 - 2026-10-21 02:10 R0、R1 完成。分支 `1040942669/bm25-retrieval-redesign`（Orca 自动从 `1040942669/killifish` 改名）：`ade8f18` R0 工具，`89b197a` R1 解析修复，随后一个提交加入合成集、基线报告、CHANGELOG 与本文件。全量离线测试 1034 passed（deselect 上述打包测试；该测试在未改动的 `4d9546e` 上同样失败）。未 push、未开 PR、未重建 PostgreSQL snapshot 或 embedding cache。
 - 2026-10-21 14:40 开始 R2（R0/R1 未 push，仍在本地分支上）。15:10 前后完成：新增 `query_parser.py`，BM25 精确查表，报告 `reports/retrieval/R2_citation_resolver.md`。复用 R1 索引审计，没有重建任何产物，没有调用模型。
+- 2026-10-21 下午：所有者确认 v3 由大模型生成、补录文件来自 AI 网上查找，并授权直接拍板。冻结为 v1.0.0：换用公开语料固定 revision 并提交语料清单，补"第X条之Y"解析与证据检查条号比对，生成开发集 dev-v1 与合成集 v2，R3-R5 取消。
 
-## 下一步（R3 入口）
+## 结束（v1.0.0）
 
-1. 先由仓库所有者决定草稿 PR #31 的取舍；在此之前不要重写 `retrieval.py` 的词面索引。
-2. R3：倒排索引 + BM25F（标题/条号/正文分字段），删除 `law_boost`/`article_boost`/`EXACT_CITATION_BOOST` 加法打分，精确命中改为显式分层排序；验收沿用 `retrieval-audit` 两个评测集，合成集不得低于 R2，v3 不得退化，延迟目标见 R4。
-3. 若需要更真实的条号写法覆盖，先补一份带出处的人工俗称表和对应评测用例，再改解析器。
+检索重构在 R2 结束。2026-10-21 所有者授权直接拍板后，项目范围冻结为 `v1.0.0`（决定记录见 `docs/PROJECT_SCOPE.md`）：
+
+- 语料换成 Hugging Face `Kuugo/Chinese_Law` revision `a829f47d` 的 236 个原始文件，用 `configs/corpus/kuugo_chinese_law_a829f47d.manifest.json` 逐字节校验；旧的本地快照因来源不明停用。
+- 解析器补上"第X条之Y"，证据检查改为按规范化条号比对。
+- 评测改用 `eval_cases/legal_eval_dev_v1.jsonl`（v3 复核后删 7 条）和 `eval_cases/citation_lookup_v2.jsonl`，基线见 `reports/retrieval/V1_0_BASELINE.md`。
+- R3-R5 取消；草稿 PR #31 关闭不合并。本文件不再更新。

@@ -1,23 +1,25 @@
 # Legal RAG Agent | 中国法律文本快照检索增强生成系统
 
-一个面向指定中国法律文本快照的可复现 RAG 工程项目。它不是把大模型接到向量库后的演示，而是围绕法律场景中的三个核心问题展开：**如何稳定召回正确法条、如何证明一次优化真的有效、如何在证据不足时安全停止生成**。
+一个面向**固定公开语料**的中国法律条文检索与问答工程项目。它不是把大模型接到向量库后的演示，而是围绕法律场景中的三个核心问题展开：**如何稳定召回正确法条、如何证明一次优化真的有效、如何在证据不足时安全停止生成**。
 
-仓库已经实现旧 Phase 路线中的规则型工程链路，包括数据画像、分块实验、混合检索、受控查询理解、证据覆盖启发式、引用编号检查、缓存契约和自动实验矩阵。默认链路保持保守：清晰问题直接检索，复杂问题才进入有边界的 adaptive lane；reranker 默认关闭，任何检索或生成增强都必须通过固定评测集、trace、质量与成本指标证明价值。M1 已把结构检查、行为检查和未知语义状态拆开；M2 进一步把 fresh/cache/replay、逐 case artifact、恢复、聚合和外部调用账本固化为显式实验生命周期。M3 的 PostgreSQL/pgvector 版本化语料、精确检索、原子快照切换、可复现导入和受控实验性 HNSW 已作为 [v0.4.0](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.4.0) 发布并完成独立回执。M4 的持久会话、Bearer 身份隔离、幂等 run、SSE 续读和单进程 supervisor 已作为 [v0.5.0](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.5.0) 发布并完成独立回执。M5 的 PostgreSQL LangGraph checkpoint、有界预算、外部调用 journal、显式 resume 和跨进程故障恢复已由 [PR #22](https://github.com/1040942669/legal-rag-agent/pull/22) 普通合并，并作为 [v0.6.0](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.6.0) 发布；独立 [receipt PR #23](https://github.com/1040942669/legal-rag-agent/pull/23)、finalization PR #24、精确门禁及治理关闭均已核验，M5 状态为 `released`。M6 的 PostgreSQL durable job/outbox、Redis/Celery 批任务与可选脱敏观测已作为 [v0.7.0](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.7.0) 发布；软件 PR 与 release-target master 的四路 CI 均成功，独立回执 PR #27 已合并且精确 master CI 四路通过。§11.6 的实际观测接线、真实耗时/预算/重试/缓存/证据/用量与幂等状态修正已由 [PR #28](https://github.com/1040942669/legal-rag-agent/pull/28) 正常合并，并作为 [v0.7.1](https://github.com/1040942669/legal-rag-agent/releases/tag/v0.7.1) 于 2026-10-02 正式发布。其精确 PR head 和实际软件合并提交的四路 CI 均成功。完整 M6 当前为 `released`：独立 [回执 PR #29](https://github.com/1040942669/legal-rag-agent/pull/29) 与实际回执合并提交的四路 master CI 已完成，Issue #25/Milestone 7 已随后关闭；历史 Tag 未移动，M7 未开始。
+> **v1.0.0 是范围冻结版本。** 语料固定为 Hugging Face `Kuugo/Chinese_Law` 的一个 revision（236 部法律，逐文件 SHA-256 校验）；评测数字都是开发集上的数字；之后只修正确性 bug，不加功能。为什么这样定、哪些事不再做，见 [项目边界](docs/PROJECT_SCOPE.md)；检索问题是怎么一层层找出来的，见 [项目复盘](reports/CASE_STUDY.md)。
 
-> 本项目仅用于检索与工程研究，不提供个案法律意见。仓库不随附完整法律语料，历史快照的内容截止日期为 2025-01-01；因此本文不声称覆盖全部当前有效法律。数据来源及复现边界见下文。
+仓库包含：语料清单与完整性审计、四种切分策略、自研中文 BM25 与法律名/条号精确查表、dense/RRF/可选 reranker、受控查询理解与证据检查、引用编号检查、可复现的实验生命周期（M2），以及已发布的服务化层：PostgreSQL/pgvector 版本化快照（v0.4.0）、FastAPI 会话与幂等 run（v0.5.0）、LangGraph checkpoint 与中断恢复（v0.6.0）、Celery 批任务与可选脱敏观测（v0.7.0、v0.7.1）。各版本的发布与验证记录见 [CHANGELOG](CHANGELOG.md)。
+
+> 本项目仅用于检索与工程研究，不提供个案法律意见。仓库不随附法律文本，只提交语料清单；语料内容截止 2025-01-01，不含宪法、行政法规和司法解释，因此本文不声称覆盖全部当前有效法律。数据来源及复现边界见下文。
 
 ## 项目产出
 
 | 维度 | 已完成产出 |
 | --- | --- |
-| 数据与索引 | 203 部法律、19,050 个条文级 chunk 的历史实验快照；4 种 chunk 策略；废止法律标记与精确重复条文去重 |
-| 检索能力 | 自研中文 BM25、dense、RRF、LlamaIndex 对照；可选 BGE cross-encoder reranker；法律名和条号 metadata boost；完整 ranking trace |
+| 数据与索引 | 固定公开语料 236 部法律、19,276 条；逐文件 SHA-256 语料清单与 `fetch-corpus`/`verify-corpus`；语料完整性审计；4 种 chunk 策略；精确重复条文去重 |
+| 检索能力 | 自研中文 BM25、dense、RRF、LlamaIndex 对照；可选 BGE cross-encoder reranker；法律名别名精确匹配与条号查表（支持阿拉伯数字与"第X条之Y"）；完整 ranking trace |
 | 受控 Agent 能力 | 规则 Query Analyzer、严格 JSON normalizer、有限 multi-query planner、证据合并、最多一轮补检索 |
 | 生成边界 | 高风险请求预拒答、证据充分性检查、结构化回答兼容层、引用/范围/行为检查、资料不足或澄清模板、最终交付前复核 |
-| 评测体系 | 120 条分层评测集、30 条固定生成子集、bootstrap 95% CI、显式行为分母、answer/retrieval/Judge N/A、自动五维实验矩阵 |
+| 评测体系 | 开发集 113 条（由大模型生成的 v3 在冻结语料上复核得到）、合成条号集 708 条、深度检索审计（Hit@k、全部目标条文召回、gold 歧义、延迟）、bootstrap 95% CI、30 条固定生成子集、自动五维实验矩阵 |
 | 工程质量 | M2 `v0.3.0` 为 548 个离线测试、157 个子测试与 25 项累计门禁；M3 `v0.4.0` 的候选和 release target 在 Linux/Python 3.12.13 上均通过 671 个离线测试、157 个子测试、61 项 PostgreSQL integration 与 33/33 累计门禁；M4 `v0.5.0` 的最终 release target 通过 801 个离线测试、157 个子测试、79 项 PostgreSQL integration 与 41/41 累计门禁；M5 `v0.6.0` 的本地精确候选为 921 个测试、157 个子测试，PR head 与 release target 均通过 offline、M4 service、M5 fault 三个 CI jobs，M5 专项 JUnit 为 81/0/0/0、累计门禁 51/51，并验证跨进程 hard kill、真实 PostgreSQL service restart、恢复 demo 与隔离 wheel；M6 `v0.7.0` 的软件 PR head 与 release-target master 均通过四路 CI，真实 PostgreSQL/Redis/Celery worker JUnit 为 41/0/0/0、累计门禁 58/58，0.7.0 wheel 隔离 smoke 通过，未调用 live model |
 
-历史实验中，`Qwen3-Embedding-4B` dense 的 Hit@5 达到 **0.981 [0.954, 1.000]**，无外部 API 的自研 BM25 baseline 为 **0.704 [0.611, 0.787]**。这些数字来自 2026-06 的固定本地语料快照和当时模型版本，不是跨语料、跨时间的效果承诺。完整实验条件见 [结果摘要](reports/RESULTS_SUMMARY.md)。
+v1.0.0 冻结语料上，自研 BM25 在开发集（101 条有标准答案）的 Hit@5 为 **0.723 [0.634, 0.802]**：带条号的查询全部命中，生活化描述只有 0.444；合成条号集 708 条的 Hit@1 为 1.000（部分由构造决定）。历史实验中 Qwen3-Embedding-4B 向量检索的 Hit@5 曾达到 0.981，但那是旧的本地语料（部分文件来源不明、当时解析器有 bug）和大模型生成的开发集上的结果，冻结语料上没有重跑。完整条件见 [v1.0.0 基线](reports/retrieval/V1_0_BASELINE.md) 和 [历史实验结果](reports/RESULTS_SUMMARY.md)。
 
 ## 为什么值得做
 
@@ -86,7 +88,20 @@ Adaptive lane 不是自由 Agent loop。只有规则分析器识别到模糊、�
 
 ## 关键实验结果
 
-以下是 v3 固定评测集上的历史结果节选。检索指标只统计 108 条有 gold 的样例，12 条拒答样例单独处理。
+### v1.0.0 冻结基线（离线 BM25）
+
+| 题集 | 条数 | Hit@1 | Hit@5 | Hit@20 |
+| --- | ---: | ---: | ---: | ---: |
+| 开发集（有标准答案） | 101 | 0.614 | 0.723 [0.634, 0.802] | 0.802 |
+| 开发集中带条号的查询 | 24 | | 1.000 | 1.000 |
+| 开发集中的生活化描述 | 27 | | 0.444 | 0.556 |
+| 合成条号集（全称、简称、阿拉伯数字） | 708 | 1.000 | 1.000 | 1.000 |
+
+语料、题集和局限见 [v1.0.0 基线报告](reports/retrieval/V1_0_BASELINE.md)。开发集由大模型生成且被反复使用，没有留出集，这些数字不代表对新问题的泛化能力。
+
+### 历史结果（2026-06，条件不同）
+
+以下是 2026-06 的历史结果节选：旧的本地语料（部分文件来源不明）、修复前的解析器、v3 评测集（108 条有 gold，12 条拒答单独处理）。条件与 v1.0.0 不同，只作方向参考。
 
 | 配置 | Hit@5 | MRR | 结论 |
 | --- | ---: | ---: | --- |
@@ -143,17 +158,18 @@ uv sync --locked
 
 ### 准备语料
 
-基础语料来自 Hugging Face 的 [Kuugo/Chinese_Law](https://huggingface.co/datasets/Kuugo/Chinese_Law)，其数据卡标注为 Apache-2.0，内容截止到 2025-01-01。下载后目录应满足：
+v1.0.0 只使用 Hugging Face [Kuugo/Chinese_Law](https://huggingface.co/datasets/Kuugo/Chinese_Law) 的固定 revision `a829f47d`（2025-04-24）中的 236 个法律文件，内容截止 2025-01-01。仓库不提交法律文本，只提交逐文件 SHA-256 的 [语料清单](configs/corpus/kuugo_chinese_law_a829f47d.manifest.json)：
 
-```text
-Chinese-Laws/
-├── README.md
-└── Chinese-Laws/
-    ├── 中华人民共和国民法典.txt
-    └── ...
+```powershell
+# 下载并逐文件校验；国内网络可加 --endpoint https://hf-mirror.com
+uv run python -m legal_rag.cli fetch-corpus --output-dir Chinese-Laws/Chinese-Laws
+# 任何文件缺失、被改或多出都会失败
+uv run python -m legal_rag.cli verify-corpus --data-dir Chinese-Laws/Chinese-Laws
 ```
 
-仓库不提交完整法律文本、embedding cache 或生成报告。历史结果使用 203 部法律的本地增强快照，精确复跑历史数字需要相同语料；使用公开数据的当前版本时，应把新结果视为一次新的实验。
+许可证：该数据集最初的版本在 README 中声明 `license: mit`，2025-04-24 的 README 改写删掉了这行，当前 revision 没有许可证声明。法律文本本身不由本仓库分发。
+
+历史结果使用的是本地快照（2026-06 报告时为 203 部法律，2026-10 核对时为 205 个文件）。2026-10 逐文件核对发现其中 17 个文件被本地改过、12 个文件不在该数据集中，来源无法核验，已停用；详见 [v1.0.0 基线报告](reports/retrieval/V1_0_BASELINE.md) 第 4 节。
 
 ### 10 分钟本地语料链路
 
@@ -640,16 +656,19 @@ ARCHITECTURE_DECISION_LOG.md       关键架构决策和反例
 
 ## 文档导航
 
+- [项目边界与 v1.0.0 冻结决定](docs/PROJECT_SCOPE.md)：做什么、不做什么、什么情况才开新版本。
+- [项目复盘](reports/CASE_STUDY.md)：检索问题是怎么一层层找出来的，以及设计取舍问答。
+- [v1.0.0 基线报告](reports/retrieval/V1_0_BASELINE.md)：冻结语料上的检索数字与旧语料停用原因。
 - [文档索引](docs/README.md)：公开文档的职责和阅读顺序。
 - [历史实验结果](reports/RESULTS_SUMMARY.md)：完整数字、环境和解释边界。
 - [评测方案](docs/EVALUATION_PLAN.md)：case 设计、指标定义和报告原则。
 - [评测指标字典](docs/METRICS.md)：M1 schema v2、显式分母、N/A 与旧字段映射。
-- [当前改造主计划](docs/refactor/MASTER_PLAN.md)：M0-M7 的范围、依赖和验收标准。
-- [机器可读状态](docs/refactor/STATE.json) 与 [执行交接](docs/refactor/HANDOFF.md)：当前事实、下一步和阻塞项。
+- [M0-M7 改造主计划](docs/refactor/MASTER_PLAN.md)：历史文档；M0-M6 已发布，M7 已取消。
+- [机器可读状态](docs/refactor/STATE.json) 与 [执行交接](docs/refactor/HANDOFF.md)：M0-M6 的发布记录，v1.0.0 起不再更新。
 - [历史 Phase 0-5 执行记录](docs/LEGAL_RAG_EXECUTION_PLAN.md)：旧路线的状态、依赖和验收记录，仅供追溯。
 - [Phase 4B 技术调研](docs/PHASE4B_RESEARCH_AND_DECISIONS.md)：最新机制、L9 可取原则、实现范围和暂缓项。
 - [架构决策记录](ARCHITECTURE_DECISION_LOG.md)：为什么这样设计、哪些假设被实验推翻。
 
 ## 数据与责任说明
 
-外部法律数据遵循其来源页面声明的许可证，本仓库不重新分发完整语料。法律法规会更新，任何实验结果都受语料截止日期影响。系统输出只适合作为信息检索线索，不能替代执业律师意见或官方法律数据库。
+本仓库不重新分发法律文本，只提交语料清单；外部数据的许可证状态见上文"准备语料"。法律法规会更新，任何实验结果都受语料截止日期影响。系统输出只适合作为信息检索线索，不能替代执业律师意见或官方法律数据库。
