@@ -14,7 +14,7 @@
 
 - 向量检索默认模型改为 SiliconFlow 上的 `BAAI/bge-m3`（`bge_m3`，免费，单条最长 8192 token）。删除只能在本机运行的 `bge_large_zh`、`bge_large_zh_meta` 和 `chatlaw_text2vec` 配置；它们的历史数字保留在旧报告中。
 - `bge_v2_m3` 重排改用 SiliconFlow 上的 `BAAI/bge-reranker-v2-m3`（免费），不再在本机下载约 2.29 GB 的模型。
-- 生成默认模型 `qwen2.5:7b`（本地 Ollama）改为 `siliconflow:deepseek-ai/DeepSeek-V3`（收费）；Ollama 模型只在显式 `--model` 或 `--models all` 时使用。
+- 生成默认模型 `qwen2.5:7b`（本地 Ollama）改为 `siliconflow:deepseek-ai/DeepSeek-V4.1-Flash`（收费）；Ollama 模型只在显式 `--model` 或 `--models all` 时使用。LLM judge 仍是 `deepseek-ai/DeepSeek-V3`，与生成模型分开。
 - README 中的检索评测示例改用开发集 `eval_cases/legal_eval_dev_v1.jsonl`。
 
 ## [1.0.0] - 2026-10-21

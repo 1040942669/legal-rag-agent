@@ -22,7 +22,7 @@ models:
     - qwen2.5:7b
     - qwen3.5:4b
     - gemma4:e2b
-  default: siliconflow:deepseek-ai/DeepSeek-V3
+  default: siliconflow:deepseek-ai/DeepSeek-V4.1-Flash
 
 embedding:
   # bge-m3 在 SiliconFlow 上免费，单条最长 8192 token，冻结语料最长的条文也不会被截断。

@@ -28,7 +28,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "models": {
         # 本地 Ollama 模型，只有显式 --model 或 --models all 时才会使用。
         "ollama": ["qwen2.5:7b", "qwen3.5:4b", "gemma4:e2b"],
-        "default": "siliconflow:deepseek-ai/DeepSeek-V3",
+        "default": "siliconflow:deepseek-ai/DeepSeek-V4.1-Flash",
     },
     "embedding": {
         "default": "bge_m3",

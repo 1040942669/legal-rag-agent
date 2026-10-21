@@ -411,20 +411,34 @@ class SiliconFlowRerankerTest(unittest.TestCase):
 
 class SiliconFlowDefaultsTest(unittest.TestCase):
     def test_default_config_sends_every_model_call_to_siliconflow(self) -> None:
-        config = load_config()
-
-        embedding = resolve_embedding_model(config)
-        self.assertEqual(embedding.key, "bge_m3")
-        self.assertEqual(embedding.model_name, "BAAI/bge-m3")
-        for key, item in config["embedding"]["models"].items():
-            self.assertEqual(item["provider"], "siliconflow", key)
-        for key in config["reranking"]["models"]:
-            self.assertEqual(
-                resolve_reranker_config(config, key).provider, "siliconflow", key
-            )
-        self.assertTrue(config["models"]["default"].startswith("siliconflow:"))
-        self.assertEqual(config["reranking"]["default"], "none")
-        self.assertEqual(config["retrieval"]["default"], "bm25")
+        yaml_path = Path(__file__).resolve().parents[1] / "configs" / "default.yaml"
+        self.assertTrue(yaml_path.exists())
+        # load_config() alone returns the built-in defaults; the CLI also merges
+        # configs/default.yaml over them, so both sources must agree.
+        for label, config in (
+            ("built-in", load_config()),
+            ("default.yaml", load_config(yaml_path)),
+        ):
+            with self.subTest(label):
+                embedding = resolve_embedding_model(config)
+                self.assertEqual(embedding.key, "bge_m3")
+                self.assertEqual(embedding.model_name, "BAAI/bge-m3")
+                for key, item in config["embedding"]["models"].items():
+                    self.assertEqual(item["provider"], "siliconflow", key)
+                for key in config["reranking"]["models"]:
+                    self.assertEqual(
+                        resolve_reranker_config(config, key).provider,
+                        "siliconflow",
+                        key,
+                    )
+                generation = config["models"]["default"]
+                self.assertTrue(generation.startswith("siliconflow:"))
+                # The judge must not grade answers written by the same model.
+                self.assertNotEqual(
+                    config["judge"]["model"], generation.removeprefix("siliconflow:")
+                )
+                self.assertEqual(config["reranking"]["default"], "none")
+                self.assertEqual(config["retrieval"]["default"], "bm25")
 
 
 class ExperimentHarnessTest(unittest.TestCase):

@@ -214,7 +214,7 @@ uv run python -m legal_rag.cli retrieval-audit `
 
 把 `bge_m3` 换成 `qwen3_embedding_4b` 即使用 Qwen3-Embedding-4B（收费，按 token 计价，以 SiliconFlow 官网为准）。
 
-生成默认使用 SiliconFlow 上的 DeepSeek-V3（收费）。固定检索条件并启用 judge：
+生成默认使用 SiliconFlow 上的 DeepSeek-V4.1-Flash，judge 使用 DeepSeek-V3，两者都收费。固定检索条件并启用 judge：
 
 ```powershell
 uv run python -m legal_rag.cli evaluate `
