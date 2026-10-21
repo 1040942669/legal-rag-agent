@@ -83,6 +83,20 @@ class ParseLawFileTest(unittest.TestCase):
         self.assertTrue(articles[0].raw_text.endswith("供应国内市场。"))
         self.assertTrue(articles[1].body.endswith("的规定定罪处罚。"))
 
+    def test_amended_zhi_article_is_its_own_article(self) -> None:
+        text = (
+            "《中华人民共和国刑法》第一百三十三条规定，违反交通运输管理法规，因而发生重大事故的，处三年以下有期徒刑。\n"
+            "第一百三十三条之一\u3000在道路上驾驶机动车，醉酒驾驶机动车的，处拘役，并处罚金。\n"
+            "《中华人民共和国刑法》第一百三十四条规定，有前款行为，同时构成第一百三十三条之一规定的犯罪的，依照处罚较重的规定定罪处罚。"
+        )
+        articles = self.parse_text(text, "中华人民共和国刑法.txt")
+        self.assertEqual(
+            [article.article_number for article in articles],
+            ["第一百三十三条", "第一百三十三条之一", "第一百三十四条"],
+        )
+        self.assertTrue(articles[1].body.startswith("在道路上驾驶机动车"))
+        self.assertTrue(articles[2].body.endswith("依照处罚较重的规定定罪处罚。"))
+
     def test_headings_toc_and_preamble_are_not_glued_into_articles(self) -> None:
         text = (
             "中华人民共和国测试法\n"

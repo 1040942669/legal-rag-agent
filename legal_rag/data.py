@@ -13,7 +13,8 @@ from .models import LawArticle
 
 
 ARTICLE_NUM_CHARS = r"零一二三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟\d"
-ARTICLE_NUMBER = rf"第[{ARTICLE_NUM_CHARS}]+\s*条"
+# 刑法 inserts amended articles as 第X条之Y; the suffix is part of the identity.
+ARTICLE_NUMBER = rf"第[{ARTICLE_NUM_CHARS}]+\s*条(?:之[{ARTICLE_NUM_CHARS}]+)?"
 ARTICLE_WITH_LAW_MARKER_RE = re.compile(
     rf"《(?P<law>[^》]+)》(?P<article>{ARTICLE_NUMBER})规定[，,]"
 )

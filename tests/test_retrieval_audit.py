@@ -10,6 +10,7 @@ from legal_rag.citation_cases import (
     write_citation_cases,
 )
 from legal_rag.cli import main
+from legal_rag.corpus_manifest import build_corpus_manifest
 from legal_rag.evaluation import load_eval_cases
 from legal_rag.models import Chunk, EvalCase, LawArticle, SearchResult
 from legal_rag.retrieval_audit import (
@@ -189,6 +190,14 @@ class CitationCasesTest(unittest.TestCase):
         self.assertEqual(len(loaded), 5)
         self.assertEqual(loaded[0].expected_articles, ["第二百六十四条"])
 
+    def test_amended_zhi_article_keeps_its_suffix(self) -> None:
+        cases = build_citation_cases(
+            [self.make_article("中华人民共和国刑法", "第一百三十三条之一", 1)]
+        )
+        arabic = next(case for case in cases if case["id"].endswith("_arabic"))
+        self.assertEqual(arabic["question"], "刑法第133条之一规定了什么？")
+        self.assertEqual(arabic["expected_articles"], ["第一百三十三条之一"])
+
 
 class RetrievalAuditCliTest(unittest.TestCase):
     def test_generate_cases_and_audit_bm25_end_to_end(self) -> None:
@@ -256,6 +265,48 @@ class RetrievalAuditCliTest(unittest.TestCase):
         self.assertEqual(payload["integrity"]["identity_collision_groups"], 0)
         self.assertEqual(payload["summary"]["gold_status_counts"], {"unique": payload["summary"]["case_count"]})
         self.assertTrue((root / "audit" / "fixture_citation.md").exists())
+
+        source = {"provider": "huggingface", "repo_type": "dataset", "repo_id": "o/n", "revision": "b" * 40}
+        manifest_path = root / "fixture.manifest.json"
+        manifest_path.write_text(
+            json.dumps(build_corpus_manifest(data_dir, corpus_id="fixture@b", source=source)),
+            encoding="utf-8",
+        )
+        audit_args = [
+            "retrieval-audit",
+            "--index-dir",
+            str(root / "indexes" / "article"),
+            "--retriever",
+            "bm25",
+            "--cases",
+            str(cases_path),
+            "--depth",
+            "3",
+            "--data-dir",
+            str(data_dir),
+            "--output-dir",
+            str(root / "pinned"),
+            "--prefix",
+            "pinned",
+            "--corpus-manifest",
+            str(manifest_path),
+        ]
+        self.assertEqual(main(audit_args), 0)
+        pinned = json.loads((root / "pinned" / "pinned_citation.json").read_text(encoding="utf-8"))
+        self.assertEqual(
+            pinned["metadata"]["corpus"],
+            {"corpus_id": "fixture@b", "revision": "b" * 40, "ok": True, "file_count": len(list(data_dir.glob("*.txt")))},
+        )
+        other = root / "other"
+        other.mkdir()
+        (other / "中华人民共和国其他法.txt").write_text("第一条\u3000其他。\n", encoding="utf-8")
+        manifest_path.write_text(
+            json.dumps(build_corpus_manifest(other, corpus_id="other@b", source=source)),
+            encoding="utf-8",
+        )
+        # A corpus that does not match the manifest is refused, not audited.
+        self.assertEqual(main(audit_args[:-4] + ["--prefix", "refused", "--corpus-manifest", str(manifest_path)]), 2)
+        self.assertFalse((root / "pinned" / "refused_citation.json").exists())
 
 
 if __name__ == "__main__":

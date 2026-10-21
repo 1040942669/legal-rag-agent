@@ -2,10 +2,13 @@ import unittest
 
 from legal_rag.article_numbers import (
     article_number_to_int,
+    canonical_article_label,
     canonical_article_number,
     chinese_number_to_int,
+    format_article_label,
     format_article_number,
     int_to_chinese_number,
+    parse_article_label,
 )
 
 
@@ -57,6 +60,23 @@ class ArticleNumberTest(unittest.TestCase):
             with self.subTest(text=text):
                 with self.assertRaises(ValueError):
                     article_number_to_int(text)
+
+    def test_amended_zhi_labels(self) -> None:
+        self.assertEqual(parse_article_label("第一百三十三条之一"), (133, 1))
+        self.assertEqual(parse_article_label("第133条之2"), (133, 2))
+        self.assertEqual(parse_article_label("第二百六十四条"), (264, 0))
+        self.assertEqual(format_article_label(133, 1), "第一百三十三条之一")
+        self.assertEqual(format_article_label(264), "第二百六十四条")
+        self.assertEqual(canonical_article_number("第133条之一"), "第一百三十三条之一")
+        self.assertEqual(canonical_article_label("第264条"), "第二百六十四条")
+        self.assertEqual(canonical_article_label(" 序言 "), "序言")
+        for text in ("第一百三十三条之", "第一百三十三条之零", "第一百三十三条之一之二"):
+            with self.subTest(text=text):
+                with self.assertRaises(ValueError):
+                    parse_article_label(text)
+        # The integer form is only defined for plain articles.
+        with self.assertRaises(ValueError):
+            article_number_to_int("第一百三十三条之一")
 
     def test_format_rejects_out_of_range(self) -> None:
         for value in (0, -1, 10000):

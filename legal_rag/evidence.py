@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from .article_numbers import canonical_article_label
 from .models import EvidenceCheck, NormalizedQuery, RetrievalPlan, SearchResult
 from .query import QueryAnalysis, analyze_query
 
@@ -44,9 +45,12 @@ def check_evidence_sufficiency(
     for law in required_laws:
         if not any(law in covered or covered in law for covered in covered_laws):
             missing_law_support.append(f"missing_law:{law}")
+    # 第264条 in the question and 第二百六十四条 in the corpus are one article.
+    covered_labels = {canonical_article_label(article) for article in covered_articles}
     for article in required_articles:
-        if article not in covered_articles:
-            missing_law_support.append(f"missing_article:{article}")
+        label = canonical_article_label(article)
+        if label not in covered_labels:
+            missing_law_support.append(f"missing_article:{label}")
 
     if normalized_query:
         missing_facts.extend(normalized_query.missing_facts)

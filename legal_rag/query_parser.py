@@ -18,10 +18,9 @@ from typing import Iterable
 
 from .article_numbers import (
     MAX_ARTICLE_NUMBER,
-    canonical_article_number,
+    canonical_article_label,
     chinese_number_to_int,
-    format_article_number,
-    int_to_chinese_number,
+    format_article_label,
 )
 from .models import Chunk
 
@@ -137,15 +136,6 @@ def law_title_aliases(law_name: str) -> list[str]:
         for spelling in dict.fromkeys(spellings)
         if len(spelling) >= MIN_ALIAS_CHARS
     ]
-
-
-def canonical_article_label(label: str) -> str:
-    """Corpus spelling for a parseable label, else the label unchanged."""
-
-    try:
-        return canonical_article_number(label)
-    except ValueError:
-        return label.strip()
 
 
 def chunk_citation_keys(chunk: Chunk) -> frozenset[tuple[str, str]]:
@@ -268,17 +258,16 @@ def parse_query(text: str, aliases: LawAliasIndex | None = None) -> ParsedQuery:
         ]
         if not numbers:
             continue
-        suffix = ""
+        suffix = 0
         if match["suffix"]:
-            suffix_number = _article_numeral(match["suffix"])
-            if suffix_number is None:
+            suffix = _article_numeral(match["suffix"]) or 0
+            if not suffix:
                 continue
-            suffix = "之" + int_to_chinese_number(suffix_number)
         owner = _owning_law(normalized, match.start(), mentions) or sole_law
         for position, number in enumerate(numbers):
-            label = format_article_number(number)
-            if suffix and position == len(numbers) - 1:
-                label += suffix
+            # 第十七、十八条之一: the suffix belongs to the last number only.
+            last = position == len(numbers) - 1
+            label = format_article_label(number, suffix if last else 0)
             articles.append(
                 ArticleReference(label, number, match.start(), match.end(), owner)
             )

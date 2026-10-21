@@ -14,7 +14,7 @@ from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Iterable, Sequence
 
-from .article_numbers import article_number_to_int
+from .article_numbers import int_to_chinese_number, parse_article_label
 from .data import stable_id
 from .models import LawArticle
 
@@ -49,13 +49,13 @@ def select_citation_targets(
     selected: list[LawArticle] = []
     for law_name in sorted(by_law):
         candidates = sorted(
-            by_law[law_name], key=lambda item: article_number_to_int(item.article_number)
+            by_law[law_name], key=lambda item: parse_article_label(item.article_number)
         )
         # Seed per law so adding a law to the corpus does not reshuffle others.
         rng = random.Random(f"{seed}:{law_name}")
         picked = rng.sample(candidates, min(per_law, len(candidates)))
         selected.extend(
-            sorted(picked, key=lambda item: article_number_to_int(item.article_number))
+            sorted(picked, key=lambda item: parse_article_label(item.article_number))
         )
     return selected
 
@@ -67,7 +67,8 @@ def build_citation_cases(targets: Sequence[LawArticle]) -> list[dict]:
         number = article.article_number
         short = short_law_name(law)
         full_title = law if "《" in law else f"《{law}》"
-        arabic = f"第{article_number_to_int(number)}条"
+        base, suffix = parse_article_label(number)
+        arabic = f"第{base}条" + (f"之{int_to_chinese_number(suffix)}" if suffix else "")
         variants = [("citation_full", f"{full_title}{number}")]
         if short:
             variants.append(("citation_short", f"{short}{number}"))

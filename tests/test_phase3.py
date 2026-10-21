@@ -35,6 +35,26 @@ class Phase3Test(unittest.TestCase):
         self.assertIn("missing_article:第十条", check.missing_law_support)
         self.assertTrue(check.followup_queries)
 
+    def test_evidence_checker_matches_article_spellings(self) -> None:
+        for question, article in (
+            ("民法典第10条规定了什么？", "第十条"),
+            ("民法典第１０条规定了什么？", "第十条"),
+            ("刑法第133条之一规定了什么？", "第一百三十三条之一"),
+        ):
+            with self.subTest(question=question):
+                result = SearchResult(
+                    chunk=self.make_chunk("a", article), score=1.0, rank=1, retriever="bm25"
+                )
+                check = check_evidence_sufficiency(question, [result])
+                self.assertFalse(
+                    [item for item in check.missing_law_support if item.startswith("missing_article:")]
+                )
+        plain = SearchResult(
+            chunk=self.make_chunk("b", "第一百三十三条"), score=1.0, rank=1, retriever="bm25"
+        )
+        check = check_evidence_sufficiency("刑法第133条之一规定了什么？", [plain])
+        self.assertIn("missing_article:第一百三十三条之一", check.missing_law_support)
+
     def test_bounded_followup_runs_once_and_stops(self) -> None:
         chunk_9 = self.make_chunk("a", "第九条")
         chunk_10 = self.make_chunk("b", "第十条")

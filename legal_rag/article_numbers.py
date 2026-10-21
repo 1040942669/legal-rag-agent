@@ -38,6 +38,9 @@ _UNIT_VALUES = {
 }
 MAX_ARTICLE_NUMBER = 9999
 ARTICLE_NUMBER_TEXT_RE = re.compile(r"^第\s*(?P<number>[^\s条]+)\s*条$")
+ARTICLE_LABEL_TEXT_RE = re.compile(
+    r"^第\s*(?P<number>[^\s条]+)\s*条(?:\s*之\s*(?P<suffix>[^\s之]+))?$"
+)
 
 
 def chinese_number_to_int(text: str) -> int:
@@ -109,13 +112,48 @@ def article_number_to_int(article_number: str) -> int:
     return number
 
 
+def parse_article_label(article_number: str) -> tuple[int, int]:
+    """Parse ``第一百三十三条之一`` into ``(133, 1)``; plain articles get ``0``.
+
+    刑法 inserts amended articles as 第X条之Y, so (number, suffix) is the
+    identity.  ``article_number_to_int`` stays strict and rejects suffixes.
+    """
+
+    match = ARTICLE_LABEL_TEXT_RE.match(article_number.strip())
+    if match is None:
+        raise ValueError(f"not an article number: {article_number!r}")
+    values = [match.group("number")]
+    if match.group("suffix") is not None:
+        values.append(match.group("suffix"))
+    parsed = [chinese_number_to_int(value) for value in values]
+    if not all(1 <= value <= MAX_ARTICLE_NUMBER for value in parsed):
+        raise ValueError(f"article number out of range: {article_number!r}")
+    return parsed[0], parsed[1] if len(parsed) > 1 else 0
+
+
 def format_article_number(value: int) -> str:
     """Render the corpus spelling, e.g. ``264`` -> ``第二百六十四条``."""
 
     return f"第{int_to_chinese_number(value)}条"
 
 
-def canonical_article_number(article_number: str) -> str:
-    """Normalize any supported spelling to the corpus spelling."""
+def format_article_label(number: int, suffix: int = 0) -> str:
+    """Render ``(133, 1)`` as ``第一百三十三条之一``."""
 
-    return format_article_number(article_number_to_int(article_number))
+    label = format_article_number(number)
+    return f"{label}之{int_to_chinese_number(suffix)}" if suffix else label
+
+
+def canonical_article_number(article_number: str) -> str:
+    """Normalize any supported spelling, 之X included, to the corpus spelling."""
+
+    return format_article_label(*parse_article_label(article_number))
+
+
+def canonical_article_label(label: str) -> str:
+    """Corpus spelling for a parseable label, else the label unchanged."""
+
+    try:
+        return canonical_article_number(label)
+    except ValueError:
+        return label.strip()
