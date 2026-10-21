@@ -4,7 +4,7 @@
 
 ## [Unreleased]
 
-M6 `v0.7.1` 的软件发布、独立回执和治理关闭均已完成，M7 未开始。以下为检索重构 R0/R1（独立于 M0-M7 发布治理，见 [交接](docs/retrieval-rework/HANDOFF.md) 与 [基线报告](reports/retrieval/R0_R1_baseline.md)），尚未发布。
+M6 `v0.7.1` 的软件发布、独立回执和治理关闭均已完成，M7 未开始。以下为检索重构 R0-R2（独立于 M0-M7 发布治理，见 [交接](docs/retrieval-rework/HANDOFF.md)、[基线报告](reports/retrieval/R0_R1_baseline.md) 与 [R2 报告](reports/retrieval/R2_citation_resolver.md)），尚未发布。
 
 ### Added
 
@@ -12,15 +12,20 @@ M6 `v0.7.1` 的软件发布、独立回执和治理关闭均已完成，M7 未�
 - `legal-rag generate-citation-cases` 与 `eval_cases/citation_lookup_v1.jsonl`：从语料生成全称、简称、阿拉伯数字三种写法的条号查询（611 条）。
 - `profile-data` 报告新增语料完整性：同法同条号冲突、引用碎片、未终止条文、粘连章节标题。
 - `legal_rag.article_numbers`：中文/阿拉伯条号与整数互转，覆盖语料中全部 19021 个条号写法。
+- `legal_rag.query_parser`：从语料标题生成唯一的法律别名表（全称、简称、去年份、〈〉 嵌套写法），最长别名优先、精确等值匹配；条号统一转为语料写法并归属同句内最近的法律。
+- BM25 精确查表：查询中的 (法律, 条号) 与 chunk 完全一致时置顶，并按引用顺序排列；trace 新增 `exact_citation_boost` 与 `unresolved_law_titles`。
 
 ### Fixed
 
 - 无书名号行头的法律不再在行内"第X条"引用处切条：条号行头只认行首或句末标点后带分隔符的位置。本地语料引用碎片 676 -> 0，同法同条号冲突 427 -> 3（源文件畸形行），被截断条文恢复完整。
 - 章节、目录和 Markdown 序号标题不再粘进上一条正文。
+- 阿拉伯数字条号（如"刑法第264条"）可以检索：合成集 Hit@1 从 2/205 升到 205/205。
+- 简称不再加权包含它的更长法律名（保险法 -> 社会保险法、能源法 -> 节约能源法）：法律加权和废止降权豁免都改为等值判断。合成集简称 Hit@1 从 197/201 升到 201/201，v3 评测名次逐条不变。
 
 ### Changed
 
 - 解析结果变化：本地语料条文数 19050 -> 18356，38 部法律的 article_id/chunk_id 改变。旧索引、embedding cache 和已导入 PostgreSQL 的 snapshot 需重建。`test_chapter_title_not_parsed_as_article` 的旧断言（标题成为 unmatched 记录）改为标题被丢弃。
+- 删除 `legal_rag.retrieval` 中的 `extract_law_hints`、`build_known_law_hints`、`FALLBACK_LAW_HINTS`、`extract_article_terms`；`metadata_boost` 与 `deprecated_multiplier` 的 `law_hints` 参数现在要求是已解析的语料法律名。
 
 ## [0.7.1] - 2026-10-02
 

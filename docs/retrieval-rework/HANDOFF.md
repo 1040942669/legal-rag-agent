@@ -14,7 +14,7 @@
 |---|---|---|
 | R0 | 评测先行：语料完整性审计、条号规范化工具、`retrieval-audit` 深度检索审计、合成条号查询集、冻结基线 | done（本地 commit，未 push） |
 | R1 | 修解析器：条号行头只认行首或句末标点后且带分隔符；章节标题/目录不再粘进正文；重跑基线对比 | done（本地 commit，未 push） |
-| R2 | 统一 QueryParser（法律别名 -> law_id、条号 -> int）+ CitationResolver 精确查表 | not_started |
+| R2 | 统一 QueryParser（法律别名 -> law_id、条号 -> int）+ CitationResolver 精确查表 | done（本地 commit，未 push；未处理 PR #31） |
 | R3 | 词面索引重写：倒排 + BM25F，删除加法 boost | not_started |
 | R4 | 服务层：按 snapshot 缓存索引、词面与向量解耦、单一检索配置来源 | not_started |
 | R5 | 混合召回 + reranker 调优，adaptive 只传结构化字段 | not_started |
@@ -36,9 +36,17 @@
 - [x] 用修复后语料生成 `eval_cases/citation_lookup_v1.jsonl`（611 条：205 full / 201 short / 205 arabic，seed 20261021，per_law 1）。
 - [x] 在 R0 提交 `ade8f18` 与 R1 提交 `89b197a` 上分别跑 v3 与合成集 BM25 审计，写入 `reports/retrieval/R0_R1_baseline.md`。要点：v3 Hit@5 0.704 -> 0.713（区间内）、R0 有 18/108 条 gold 歧义；合成集阿拉伯数字 Hit@1 仅 2/205，简称失败全部是近名法律子串混淆。
 
+## R2 任务清单
+
+- [x] `legal_rag/query_parser.py`：语料标题生成唯一别名表（205 部法律 409 个别名，0 歧义），NFKC 后最长别名优先、互不重叠，书名号内只认完整标题；条号（中文、阿拉伯、全角、列表、之X）规范化为语料写法；条号归属同句内最近的前置法律，否则归属查询中唯一的法律。
+- [x] `BM25Retriever`：法律加权与废止降权豁免改为等值；分词前把条号改写成语料写法；(法律, 条号) 精确命中加 `EXACT_CITATION_BOOST` 并按引用顺序置顶。删除 `extract_law_hints`、`build_known_law_hints`、`FALLBACK_LAW_HINTS`、`extract_article_terms`。
+- [x] 测试：新增 `tests/test_query_parser.py`（15 个），`tests/test_phase4.py` 改用已解析法律名并删除旧 hint 测试。全量 1046 passed（同样 deselect 打包测试）。
+- [x] 真实语料审计写入 `reports/retrieval/R2_citation_resolver.md`：合成集 611/611 Hit@1（阿拉伯数字 2 -> 205、简称 197 -> 201、全称 203 -> 205），v3 108 条名次逐条不变。门槛全部通过；1.000 部分由合成集构造决定，局限见报告第 5 节。
+- [ ] 未做（见报告第 5 节）：人工俗称表（民诉法解释等）、条号范围展开、"本法"指代、RRF/reranker 置顶（R5）、`query.py` `COMMON_LAW_HINTS` 替换（会改变 chat artifact 输出）。
+
 ## 已知并行工作
 
-主 checkout（`D:/Study/Python_project/LLM-application`）停在未合并分支 `codex/chinese-bm25-optimization`（2026-10-07，203 文件），改动了 `legal_rag/retrieval.py`、`legal_rag/services/service_retrieval.py`，新增 `chinese_bm25.py`、`bm25_settings.py`、`legal_references.py` 等。它不改 `data.py`，与 R0/R1 基本不冲突（`cli.py` 可能有小冲突）；R2-R4 开工前必须先决定该分支合并、取舍或废弃。
+主 checkout（`D:/Study/Python_project/LLM-application`）停在未合并分支 `codex/chinese-bm25-optimization`，即草稿 PR #31（"Replace custom Chinese BM25 and narrow rule-based decisions"，最后提交 2026-10-07 `22e1aa3`，已包含 `master` `4d9546e`，相对它多 13 个提交、165 个文件）。它改动了 `legal_rag/retrieval.py`（`BM25Retriever.__init__`/`retrieve`、`build_retriever`、`tokenize`）、`legal_rag/services/service_retrieval.py`，新增 `chinese_bm25.py`、`bm25_settings.py`、`legal_references.py`（服务层引用解析 `legal-reference-v3`）、`services/exact_retrieval.py`（精确检索路由）等。它不改 `data.py`，与 R0/R1 基本不冲突；与 R2 目标重叠，`retrieval.py` 合并必冲突。R2 为了不阻塞默认 BM25 路径先行落地，并把改动限制在 `BM25Retriever` 内部和一个新模块；R3 开工前必须由仓库所有者决定 PR #31 合并、取舍或废弃。
 
 ## 运行环境约定
 
@@ -51,10 +59,10 @@
 
 - 2026-10-21 01:50 开始 R0。
 - 2026-10-21 02:10 R0、R1 完成。分支 `1040942669/bm25-retrieval-redesign`（Orca 自动从 `1040942669/killifish` 改名）：`ade8f18` R0 工具，`89b197a` R1 解析修复，随后一个提交加入合成集、基线报告、CHANGELOG 与本文件。全量离线测试 1034 passed（deselect 上述打包测试；该测试在未改动的 `4d9546e` 上同样失败）。未 push、未开 PR、未重建 PostgreSQL snapshot 或 embedding cache。
+- 2026-10-21 14:40 开始 R2（R0/R1 未 push，仍在本地分支上）。15:10 前后完成：新增 `query_parser.py`，BM25 精确查表，报告 `reports/retrieval/R2_citation_resolver.md`。复用 R1 索引审计，没有重建任何产物，没有调用模型。
 
-## 下一步（R2 入口）
+## 下一步（R3 入口）
 
-1. 先处理"已知并行工作"中的 `codex/chinese-bm25-optimization` 分支取舍，再动 `retrieval.py`。
-2. 新建 `legal_rag/query_parser.py`：唯一的法律别名表（全称、去"中华人民共和国"简称、语料内书名号标题）-> law_name，条号用 `legal_rag.article_numbers` 规范化；替换 `retrieval.py` `extract_law_hints`/`FALLBACK_LAW_HINTS`、`query.py` `COMMON_LAW_HINTS`/`ARTICLE_NUMBER_RE` 的重复实现。法律名必须精确等值匹配，最长别名优先，禁止 `hint in law` 子串判断。
-3. 新建 CitationResolver：(law_name, 条号 int) -> 精确条文，命中则置顶，未命中退回 BM25。
-4. 门槛见 `reports/retrieval/R0_R1_baseline.md` 第 5 节；用 `retrieval-audit --cases eval_cases/citation_lookup_v1.jsonl --cases eval_cases/legal_eval_cases_v3.jsonl` 验证。
+1. 先由仓库所有者决定草稿 PR #31 的取舍；在此之前不要重写 `retrieval.py` 的词面索引。
+2. R3：倒排索引 + BM25F（标题/条号/正文分字段），删除 `law_boost`/`article_boost`/`EXACT_CITATION_BOOST` 加法打分，精确命中改为显式分层排序；验收沿用 `retrieval-audit` 两个评测集，合成集不得低于 R2，v3 不得退化，延迟目标见 R4。
+3. 若需要更真实的条号写法覆盖，先补一份带出处的人工俗称表和对应评测用例，再改解析器。
