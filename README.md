@@ -13,13 +13,13 @@
 | 维度 | 已完成产出 |
 | --- | --- |
 | 数据与索引 | 固定公开语料 236 部法律、19,276 条；逐文件 SHA-256 语料清单与 `fetch-corpus`/`verify-corpus`；语料完整性审计；4 种 chunk 策略；精确重复条文去重 |
-| 检索能力 | 自研中文 BM25、dense、RRF、LlamaIndex 对照；可选 BGE cross-encoder reranker；法律名别名精确匹配与条号查表（支持阿拉伯数字与"第X条之Y"）；完整 ranking trace |
+| 检索能力 | 自研中文 BM25、dense（bge-m3、Qwen3-Embedding，经 SiliconFlow API）、RRF、LlamaIndex 对照；可选 bge-reranker 重排；法律名别名精确匹配与条号查表（支持阿拉伯数字与"第X条之Y"）；完整 ranking trace |
 | 受控 Agent 能力 | 规则 Query Analyzer、严格 JSON normalizer、有限 multi-query planner、证据合并、最多一轮补检索 |
 | 生成边界 | 高风险请求预拒答、证据充分性检查、结构化回答兼容层、引用/范围/行为检查、资料不足或澄清模板、最终交付前复核 |
 | 评测体系 | 开发集 113 条（由大模型生成的 v3 在冻结语料上复核得到）、合成条号集 708 条、深度检索审计（Hit@k、全部目标条文召回、gold 歧义、延迟）、bootstrap 95% CI、30 条固定生成子集、自动五维实验矩阵 |
 | 工程质量 | M2 `v0.3.0` 为 548 个离线测试、157 个子测试与 25 项累计门禁；M3 `v0.4.0` 的候选和 release target 在 Linux/Python 3.12.13 上均通过 671 个离线测试、157 个子测试、61 项 PostgreSQL integration 与 33/33 累计门禁；M4 `v0.5.0` 的最终 release target 通过 801 个离线测试、157 个子测试、79 项 PostgreSQL integration 与 41/41 累计门禁；M5 `v0.6.0` 的本地精确候选为 921 个测试、157 个子测试，PR head 与 release target 均通过 offline、M4 service、M5 fault 三个 CI jobs，M5 专项 JUnit 为 81/0/0/0、累计门禁 51/51，并验证跨进程 hard kill、真实 PostgreSQL service restart、恢复 demo 与隔离 wheel；M6 `v0.7.0` 的软件 PR head 与 release-target master 均通过四路 CI，真实 PostgreSQL/Redis/Celery worker JUnit 为 41/0/0/0、累计门禁 58/58，0.7.0 wheel 隔离 smoke 通过，未调用 live model |
 
-v1.0.0 冻结语料上，自研 BM25 在开发集（101 条有标准答案）的 Hit@5 为 **0.723 [0.634, 0.802]**：带条号的查询全部命中，生活化描述只有 0.444；合成条号集 708 条的 Hit@1 为 1.000（部分由构造决定）。历史实验中 Qwen3-Embedding-4B 向量检索的 Hit@5 曾达到 0.981，但那是旧的本地语料（部分文件来源不明、当时解析器有 bug）和大模型生成的开发集上的结果，冻结语料上没有重跑。完整条件见 [v1.0.0 基线](reports/retrieval/V1_0_BASELINE.md) 和 [历史实验结果](reports/RESULTS_SUMMARY.md)。
+v1.0.0 冻结语料上，自研 BM25 在开发集（101 条有标准答案）的 Hit@5 为 **0.723 [0.634, 0.802]**：带条号的查询全部命中，生活化描述只有 0.444；合成条号集 708 条的 Hit@1 为 1.000（部分由构造决定）。v1.1.0 在同一份语料上补测了向量检索、多路召回与重排：bge-m3 向量检索 Hit@5 为 0.921，Qwen3-Embedding-4B 为 0.980（历史上旧语料的 0.981 在冻结语料上重现）；但 BM25 与向量用 RRF 融合后反而比向量单路低 7.9 个点，向量在条号查询上也只有 17% 到 27% 排第一，所以结论是按查询类型路由而不是融合，默认检索器仍是 BM25。完整条件见 [v1.0.0 基线](reports/retrieval/V1_0_BASELINE.md)、[v1.1.0 设计消融](reports/retrieval/V1_1_SILICONFLOW.md) 和 [历史实验结果](reports/RESULTS_SUMMARY.md)。
 
 ## 为什么值得做
 
@@ -98,6 +98,19 @@ Adaptive lane 不是自由 Agent loop。只有规则分析器识别到模糊、�
 | 合成条号集（全称、简称、阿拉伯数字） | 708 | 1.000 | 1.000 | 1.000 |
 
 语料、题集和局限见 [v1.0.0 基线报告](reports/retrieval/V1_0_BASELINE.md)。开发集由大模型生成且被反复使用，没有留出集，这些数字不代表对新问题的泛化能力。
+
+### v1.1.0 设计消融（同一份语料与题集，模型经 SiliconFlow API）
+
+| 方法 | 开发集 Hit@5 | 生活化描述 Hit@5 | 条号集 Hit@1 |
+| --- | ---: | ---: | ---: |
+| BM25（默认） | 0.723 | 0.444 | 1.000 |
+| bge-m3 向量 | 0.921 | 0.815 | 0.267 |
+| Qwen3-Embedding-4B 向量 | 0.980 | 0.926 | 0.174 |
+| BM25 + bge-m3 多路召回（RRF） | 0.842 | 0.667 | 0.668 |
+| BM25 + 重排（bge-reranker-v2-m3） | 0.772 | 0.519 | 0.939 |
+| Qwen3-Embedding-4B 向量 + 重排 | 0.921 | 0.852 | 未跑 |
+
+每种组合只测一次、参数都是默认值，比较用配对 bootstrap。向量检索的提升几乎全部来自生活化描述；多路召回比向量单路低 7.9 个点（区间 -13.9 到 -2.0）；重排没有显著收益，在最强的 Qwen3 向量上反而降了 5.9 个点（区间 -10.9 到 -2.0），还会把条号精确命中排下去；把法律名和条号拼进向量文本，bge-m3 的条号查询排第一从 0.267 升到 0.452，仍远低于精确查表。按查询类型路由（解析出条号走精确查表，其余走向量）的事后模拟两头都是最好，但规则是看了开发集结果才提出的，所以没有改默认。完整表格、重排与向量文本工程的组合、局限和复现命令见 [v1.1.0 设计消融](reports/retrieval/V1_1_SILICONFLOW.md)。
 
 ### 历史结果（2026-06，条件不同）
 
