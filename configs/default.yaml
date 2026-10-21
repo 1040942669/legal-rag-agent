@@ -44,6 +44,20 @@ embedding:
       request_timeout: 120
       query_prefix: ""
       document_prefix: ""
+    bge_m3_meta:
+      provider: siliconflow
+      model_name: BAAI/bge-m3
+      role: metadata_embedding_ablation
+      normalize: true
+      trust_remote_code: false
+      api_base_url: https://api.siliconflow.cn/v1
+      api_key_env: SILICONFLOW_API_KEY
+      dimensions:
+      max_retries: 0
+      request_timeout: 120
+      query_prefix: ""
+      document_prefix: ""
+      embed_with_metadata: true
     qwen3_embedding_4b_meta:
       provider: siliconflow
       model_name: Qwen/Qwen3-Embedding-4B
