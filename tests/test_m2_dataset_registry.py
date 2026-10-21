@@ -115,6 +115,7 @@ def _copy_registry_fixture(tmp_path: Path) -> tuple[Path, dict]:
     for name in (
         "legal_eval_cases_v3.jsonl",
         "legal_eval_cases_v3_gen_subset.jsonl",
+        "legal_eval_dev_v1.jsonl",
         "synthetic_offline_v1.jsonl",
     ):
         (eval_root / name).write_bytes(
@@ -154,6 +155,15 @@ def test_registry_verifies_legacy_full_subset_and_synthetic_offline_fixture() ->
     ]
     full_by_id = {case.case_id: case for case in full.cases}
     assert all(full_by_id[case.case_id] == case for case in generation.cases)
+
+    # The frozen-corpus dev set only drops v3 cases; it never edits one.
+    dev = registry.dataset("legal-eval-dev-v1")
+    assert len(dev.cases) == 113
+    assert dev.entry.gold_case_count == 101
+    assert dev.entry.derived_from == {"dataset_id": "legal-eval-v3", "selection_case_ids": None}
+    assert all(full_by_id[case.case_id] == case for case in dev.cases)
+    assert "v3_lookup_company_liability" not in {case.case_id for case in dev.cases}
+    assert registry.resolve_mode("retrieval").dataset.entry.dataset_id == "legal-eval-dev-v1"
 
     manifest_dataset = offline.manifest_payload()
     assert manifest_dataset["case_file_hash"] == offline.entry.file_sha256

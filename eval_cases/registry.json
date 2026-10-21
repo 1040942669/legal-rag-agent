@@ -124,6 +124,71 @@
       }
     },
     {
+      "dataset_id": "legal-eval-dev-v1",
+      "path": "eval_cases/legal_eval_dev_v1.jsonl",
+      "role": "legacy_regression",
+      "source_format": "jsonl",
+      "file_hash_normalization": "utf8_lf_v1",
+      "file_sha256": "50e0d65c22ccc0d1f0f9ba5a50435e41b3d66d46f28c316e59c956b57907213d",
+      "case_schema_version": 1,
+      "case_count": 113,
+      "case_artifact_set_sha256": "efb2a165ae12fcb09f2a56ea49467012a481f031790819a4eb7f7dcf3fda6fce",
+      "manifest_case_set_sha256": "6abcc48abb3bbb597117951070b0e025275abda5d0fe698ba0e09bca454fca92",
+      "type_counts": {
+        "adaptive_contradictory": 3,
+        "adaptive_many_law_hints": 3,
+        "adaptive_multi_intent": 4,
+        "adaptive_vague": 3,
+        "article_lookup": 24,
+        "cross_law": 12,
+        "hard_negative": 12,
+        "multi_article": 13,
+        "refusal": 12,
+        "semantic_scenario": 27
+      },
+      "gold_case_count": 101,
+      "expected_behavior_counts": {
+        "evidence_answer": 101,
+        "out_of_scope": 12
+      },
+      "allowed_modes": [
+        "retrieval",
+        "full-regression"
+      ],
+      "freeze": {
+        "frozen_at": "2026-10-21T15:40:00+08:00",
+        "immutable": true
+      },
+      "provenance": {
+        "source_commit": "4ed96ec921593ef81de61ce545513e3f1211b5db",
+        "source_documents": [
+          "eval_cases/legal_eval_cases_v3.jsonl",
+          "configs/corpus/kuugo_chinese_law_a829f47d.manifest.json",
+          "docs/PROJECT_SCOPE.md"
+        ],
+        "annotation_method": "LLM-generated legal-eval-v3 cases, unchanged; re-validated against corpus kuugo-chinese-law@a829f47. Dropped 6 cases whose law is absent from the corpus (5 工伤保险条例, 1 物业管理条例) and 1 whose question premise follows the 2018 公司法 (v3_lookup_company_liability).",
+        "annotator_status": "not_recorded"
+      },
+      "exposure": {
+        "status": "repeated_development",
+        "is_holdout": false
+      },
+      "duplicate_policy": {
+        "algorithm": "nfkc_alnum_char_trigram_jaccard",
+        "threshold": 0.9,
+        "expected_pairs": 0
+      },
+      "gold_policy": {
+        "structural_status": "verified_by_registry_loader",
+        "index_presence_status": "verified_only_against_untracked_local_snapshot",
+        "legal_authority_status": "not_authoritatively_reviewed"
+      },
+      "derived_from": {
+        "dataset_id": "legal-eval-v3",
+        "selection_case_ids": null
+      }
+    },
+    {
       "dataset_id": "synthetic-offline-v1",
       "path": "eval_cases/synthetic_offline_v1.jsonl",
       "role": "synthetic_fixture",
@@ -183,7 +248,7 @@
       "external_calls": "forbidden"
     },
     "retrieval": {
-      "default_dataset_id": "legal-eval-v3",
+      "default_dataset_id": "legal-eval-dev-v1",
       "generation": "forbidden",
       "judge": "forbidden",
       "external_calls": "explicit_opt_in"
@@ -195,7 +260,7 @@
       "external_calls": "explicit_opt_in"
     },
     "full-regression": {
-      "default_dataset_id": "legal-eval-v3",
+      "default_dataset_id": "legal-eval-dev-v1",
       "generation": "required",
       "judge": "optional",
       "external_calls": "explicit_opt_in"
