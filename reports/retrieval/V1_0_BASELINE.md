@@ -96,7 +96,7 @@
 
 ## 5. 局限
 
-- 只有 BM25。dense 和 RRF 需要在冻结语料上重建 embedding cache（本机 CPU 估计 2 小时以上），Qwen3 需要付费 API，均未重跑；历史数字见 [历史实验结果](../RESULTS_SUMMARY.md)，条件不同，不能和本报告直接比较。
+- 只有 BM25。dense 和 RRF 需要在冻结语料上重建 embedding cache（本机 CPU 估计 2 小时以上），Qwen3 需要付费 API，均未重跑；历史数字见 [历史实验结果](../RESULTS_SUMMARY.md)，条件不同，不能和本报告直接比较。v1.1.0 用 SiliconFlow API 在同一份语料和题集上补测了向量检索、多路召回与重排，见 [v1.1.0 设计消融](V1_1_SILICONFLOW.md)。
 - 开发集由大模型生成、被反复使用、未经法律专业审核。
 - 延迟取决于机器负载，跨运行可差 10% 以上，只适合同一次运行内比较。
 

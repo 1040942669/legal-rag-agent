@@ -2,6 +2,28 @@
 
 本文件记录候选与已发布版本的用户可见变更。历史实验数字仍以对应报告中的语料、模型和时间条件为准。
 
+## [1.1.0] - 2026-10-22
+
+模型调用一律走 SiliconFlow API，本机不再运行本地模型（[项目边界](docs/PROJECT_SCOPE.md) D8），并在 v1.0.0 的同一份语料和题集上补测了向量检索、多路召回与重排。默认检索器仍是 BM25，重排默认仍关闭。v1.1.0 是当前对外引用的冻结版本，之后的改动按项目边界第 6 节开新版本。
+
+开发集 101 条有标准答案的题上，bge-m3 向量检索 Hit@5 0.921、Qwen3-Embedding-4B 0.980，分别比 BM25（0.723）高 19.8 和 25.7 个点；BM25 与向量用 RRF 融合后，两种模型都比向量单路低 7.9 个点；合成条号集上向量检索只有 17% 到 27% 排第一，BM25 精确查表为 100%；重排没有显著收益，在 Qwen3 向量之上反而降了 5.9 个点。完整表格见 [v1.1.0 设计消融](reports/retrieval/V1_1_SILICONFLOW.md)。这些仍是开发集数字。
+
+### Added
+
+- 重排支持 SiliconFlow：`reranking.models.*.provider: siliconflow` 通过 `/rerank` 接口一次给全部候选打分，按 `index` 映射回输入顺序；回应缺少、重复、越界或非有限的分数时按 `invalid_response` 失败；同样受 `ALLOW_LIVE_MODEL_CALLS` 控制。
+- `bge_m3_meta` 配置：bge-m3 加上 `embed_with_metadata`，与已有的 `qwen3_embedding_4b_meta` 一起用于"向量文本拼接法律名和条号"的消融。
+- 报告 [v1.1.0 设计消融](reports/retrieval/V1_1_SILICONFLOW.md)：单路、多路召回、重排与向量文本工程的组合，配对 bootstrap 区间，以及按查询类型路由的事后模拟。
+
+### Changed
+
+- 向量检索默认模型改为 SiliconFlow 上的 `BAAI/bge-m3`（`bge_m3`，免费，单条最长 8192 token）。删除只能在本机运行的 `bge_large_zh`、`bge_large_zh_meta` 和 `chatlaw_text2vec` 配置；它们的历史数字保留在旧报告中。
+- `bge_v2_m3` 重排改用 SiliconFlow 上的 `BAAI/bge-reranker-v2-m3`（免费），不再在本机下载约 2.29 GB 的模型。
+- 生成默认模型 `qwen2.5:7b`（本地 Ollama）改为 `siliconflow:deepseek-ai/DeepSeek-V4.1-Flash`（收费）；Ollama 模型只在显式 `--model` 或 `--models all` 时使用。
+- LLM judge 从 `deepseek-ai/DeepSeek-V3` 改为 `zai-org/GLM-5.3-Flash`：与生成模型不是同一厂商，避免历史报告里记录过的自评偏差；原来的 V3 也比生成模型旧一代。
+- README 中的检索评测示例改用开发集 `eval_cases/legal_eval_dev_v1.jsonl`。
+- 项目边界追加 D8，第 5 节"向量检索未重跑"改为"只在开发集上测了一次"，新增"API 模型无法固定版本"；复盘第 6 节加入 v1.1.0 消融，问答"Qwen3 的 0.981 可信吗"按重测结果更新。
+- 版本号 1.0.0 -> 1.1.0。
+
 ## [1.0.0] - 2026-10-21
 
 范围冻结版本：语料固定为一个可以逐字节核验的公开版本，检索重构止于 R2，M7 不做界面，之后只修正确性 bug。决定与理由见 [项目边界](docs/PROJECT_SCOPE.md)，问题的发现过程见 [项目复盘](reports/CASE_STUDY.md)，数字见 [v1.0.0 基线报告](reports/retrieval/V1_0_BASELINE.md)。R0-R2 的过程记录见 [检索重构交接](docs/retrieval-rework/HANDOFF.md)。

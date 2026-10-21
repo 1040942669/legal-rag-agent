@@ -930,7 +930,7 @@ def handle_evaluate(args: argparse.Namespace) -> int:
         judge_config = config.get("judge", {})
         judge_client = SiliconFlowClient(
             model=args.judge_model
-            or judge_config.get("model", "deepseek-ai/DeepSeek-V3"),
+            or judge_config.get("model", "zai-org/GLM-5.3-Flash"),
             base_url=judge_config.get("api_base_url", "https://api.siliconflow.cn/v1"),
             api_key_env=judge_config.get("api_key_env", "SILICONFLOW_API_KEY"),
             request_timeout=judge_config.get("request_timeout", 120),

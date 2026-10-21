@@ -345,7 +345,7 @@ def resolve_embedding_model(
     config: dict, embedding_key: str | None = None
 ) -> EmbeddingModelConfig:
     embedding_config = config.get("embedding", {})
-    key = embedding_key or embedding_config.get("default") or "bge_large_zh"
+    key = embedding_key or embedding_config.get("default") or "bge_m3"
     model_map = embedding_config.get("models", {})
     if key not in model_map:
         available = ", ".join(sorted(model_map)) or "<none>"
