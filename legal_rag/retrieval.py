@@ -20,6 +20,7 @@ from .embedding_contracts import (
 )
 from .models import Chunk, SearchResult
 from .provider_errors import ProviderCallError, raise_sanitized_provider_error
+from .query_parser import LawAliasIndex, chunk_citation_keys, parse_query
 from .retrieval_contracts import (
     RetrievalBoundary,
     RetrievalBoundaryViolation,
@@ -185,7 +186,8 @@ class BM25Retriever:
         self.law_boost = law_boost
         self.article_boost = article_boost
         self.deprecated_penalty = deprecated_penalty
-        self.known_law_hints = build_known_law_hints(chunks)
+        self.law_aliases = LawAliasIndex.from_chunks(chunks)
+        self.citation_keys = [chunk_citation_keys(chunk) for chunk in chunks]
         self.doc_tokens = [tokenize(chunk.text) for chunk in chunks]
         self.doc_lengths = [len(tokens) for tokens in self.doc_tokens]
         self.avgdl = sum(self.doc_lengths) / max(len(self.doc_lengths), 1)
@@ -197,10 +199,12 @@ class BM25Retriever:
 
     def retrieve(self, query: str, top_k: int = 5) -> list[SearchResult]:
         resolved_top_k = validate_retrieval_top_k(top_k)
-        query_terms = tokenize(query)
-        law_hints = extract_law_hints(query, known_hints=self.known_law_hints)
-        article_hints = extract_article_terms(query)
-        scores: list[tuple[int, float, dict]] = []
+        parsed = parse_query(query, self.law_aliases)
+        query_terms = tokenize(parsed.rewritten_text())
+        law_hints = parsed.law_names
+        article_hints = parsed.article_labels
+        citation_order = {key: order for order, key in enumerate(parsed.citations)}
+        scores: list[tuple[int, float, dict, tuple[bool, int]]] = []
         for index, freqs in enumerate(self.term_freqs):
             bm25_score = 0.0
             doc_len = self.doc_lengths[index] or 1
@@ -225,7 +229,15 @@ class BM25Retriever:
             multiplier = deprecated_multiplier(
                 self.chunks[index], law_hints, penalty=self.deprecated_penalty
             )
+            cited = [
+                citation_order[key]
+                for key in self.citation_keys[index]
+                if key in citation_order
+            ]
+            exact = bool(cited)
             score = (bm25_score + boost) * multiplier
+            if exact:
+                score += EXACT_CITATION_BOOST
             if score > 0:
                 trace = {
                     "bm25_score": bm25_score,
@@ -239,9 +251,15 @@ class BM25Retriever:
                 }
                 if multiplier != 1.0:
                     trace["deprecated_penalty"] = multiplier
-                scores.append((index, score, trace))
+                if exact:
+                    trace["exact_citation_boost"] = EXACT_CITATION_BOOST
+                if parsed.unresolved_titles:
+                    trace["unresolved_law_titles"] = list(parsed.unresolved_titles)
+                scores.append((index, score, trace, (exact, -min(cited, default=0))))
 
-        scores.sort(key=lambda item: item[1], reverse=True)
+        # Exact (law, article) matches stay first, in the order the query cites
+        # them, even if lexical scores grow.
+        scores.sort(key=lambda item: (item[3], item[1]), reverse=True)
         return [
             SearchResult(
                 chunk=self.chunks[index],
@@ -250,7 +268,7 @@ class BM25Retriever:
                 retriever=self.name,
                 trace=trace,
             )
-            for rank, (index, score, trace) in enumerate(
+            for rank, (index, score, trace, _pin) in enumerate(
                 scores[:resolved_top_k], start=1
             )
         ]
@@ -316,7 +334,7 @@ class CachedDenseRetriever:
             expected_dimension=cache_dimension,
         )
         self.deprecated_penalty = deprecated_penalty
-        self.known_law_hints = build_known_law_hints(chunks)
+        self.law_aliases = LawAliasIndex.from_chunks(chunks)
         self.deprecated_indexes = [
             index
             for index, chunk in enumerate(chunks)
@@ -344,7 +362,7 @@ class CachedDenseRetriever:
             query_embedding = []
             raise_sanitized_provider_error(error)
         if self.deprecated_penalty != 1.0 and self.deprecated_indexes:
-            law_hints = extract_law_hints(query, known_hints=self.known_law_hints)
+            law_hints = parse_query(query, self.law_aliases).law_names
             scores = scores.copy()
             for index in self.deprecated_indexes:
                 multiplier = deprecated_multiplier(
@@ -638,66 +656,19 @@ def tokenize(text: str) -> list[str]:
     return chinese_chars + chinese_bigrams + ascii_terms + law_titles + article_terms
 
 
-def extract_article_terms(text: str) -> list[str]:
-    return re.findall(r"第[^条]{1,30}条", text)
-
-
-FALLBACK_LAW_HINTS = [
-    "民法典",
-    "宪法",
-    "刑法",
-    "民事诉讼法",
-    "刑事诉讼法",
-    "行政诉讼法",
-    "消费者权益保护法",
-    "数据安全法",
-    "网络安全法",
-    "劳动法",
-    "劳动合同法",
-]
-
-
-def build_known_law_hints(chunks: list[Chunk]) -> list[str]:
-    """Collect full and short law names from the corpus so query hints cover
-    every law in the dataset instead of a hardcoded subset."""
-    hints: set[str] = set()
-    for chunk in chunks:
-        for law in chunk.law_names:
-            name = law.strip()
-            if len(name) < 2:
-                continue
-            hints.add(name)
-            short = name.removeprefix("中华人民共和国").strip()
-            if len(short) >= 2:
-                hints.add(short)
-    # Longest first so substring suppression keeps the most specific match.
-    return sorted(hints, key=len, reverse=True)
-
-
-def extract_law_hints(text: str, known_hints: list[str] | None = None) -> list[str]:
-    explicit_titles = re.findall(r"《([^》]+)》", text)
-    candidates = known_hints if known_hints else FALLBACK_LAW_HINTS
-    matched: list[str] = []
-    for hint in candidates:
-        if hint in text:
-            # Skip hints fully contained in an already matched longer hint
-            # (e.g. drop 保险法 when 社会保险法 matched).
-            if any(hint != kept and hint in kept for kept in matched):
-                continue
-            matched.append(hint)
-    hints = explicit_titles[:]
-    hints.extend(matched)
-    return list(dict.fromkeys(hints))
+# Added after lexical and metadata scores: an exact (law, article) match
+# outranks any text similarity.
+EXACT_CITATION_BOOST = 1000.0
 
 
 def deprecated_multiplier(
     chunk: Chunk, law_hints: list[str], *, penalty: float
 ) -> float:
     """Score multiplier for deprecated laws. No penalty when the query
-    explicitly references the deprecated law."""
+    explicitly references the deprecated law (exact resolved law name)."""
     if penalty >= 1.0 or not chunk.metadata.get("deprecated"):
         return 1.0
-    if law_hints and any(hint in law for hint in law_hints for law in chunk.law_names):
+    if any(law in law_hints for law in chunk.law_names):
         return 1.0
     return penalty
 
@@ -710,8 +681,10 @@ def metadata_boost(
     law_boost: float = 40.0,
     article_boost: float = 80.0,
 ) -> float:
+    """Additive boost; ``law_hints`` are resolved corpus law names and
+    ``article_hints`` corpus article labels, both compared by equality."""
     boost = 0.0
-    if law_hints and any(hint in law for hint in law_hints for law in chunk.law_names):
+    if any(law in law_hints for law in chunk.law_names):
         boost += law_boost
     if article_hints and any(
         article == hint for hint in article_hints for article in chunk.article_numbers

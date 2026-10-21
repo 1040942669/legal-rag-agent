@@ -2,9 +2,41 @@
 
 本文件记录候选与已发布版本的用户可见变更。历史实验数字仍以对应报告中的语料、模型和时间条件为准。
 
-## [Unreleased]
+## [1.0.0] - 2026-10-21
 
-无额外软件变更。M6 `v0.7.1` 的软件发布、独立回执和治理关闭均已完成；本次仅记录非递归文档收口，M7 未开始。
+范围冻结版本：语料固定为一个可以逐字节核验的公开版本，检索重构止于 R2，M7 不做界面，之后只修正确性 bug。决定与理由见 [项目边界](docs/PROJECT_SCOPE.md)，问题的发现过程见 [项目复盘](reports/CASE_STUDY.md)，数字见 [v1.0.0 基线报告](reports/retrieval/V1_0_BASELINE.md)。R0-R2 的过程记录见 [检索重构交接](docs/retrieval-rework/HANDOFF.md)。
+
+冻结语料上的离线 BM25 基线：开发集 101 条有标准答案的用例 Hit@5 0.723 [0.634, 0.802]（带条号的查询 24/24 命中，生活化描述 0.444）；合成条号集 708 条 Hit@1 1.000。这些是开发集数字，没有留出集。
+
+### Added
+
+- 语料清单 `configs/corpus/kuugo_chinese_law_a829f47d.manifest.json`：Hugging Face `Kuugo/Chinese_Law` revision `a829f47d` 中 236 个法律文件的大小与 SHA-256。`legal-rag fetch-corpus` 下载并逐文件校验，不会悄悄覆盖内容不同的本地文件；`legal-rag verify-corpus` 列出缺失、被改和多出的文件；`retrieval-audit --corpus-manifest` 在语料不一致时拒绝运行。
+- 开发集 `eval_cases/legal_eval_dev_v1.jsonl`（注册为 `legal-eval-dev-v1`，派生自 v3）：在冻结语料上逐条复核，删去 7 条，其余一字不改，共 113 条，其中 101 条有标准答案；`retrieval` 与 `full-regression` 模式默认改用它。
+- 合成条号集 `eval_cases/citation_lookup_v2.jsonl`：由冻结语料生成，708 条。
+- `legal-rag retrieval-audit`：按深度 N 直接调用检索器，输出 Hit@k、MRR@10、全部目标条文召回、分题型指标、gold 歧义状态和延迟；可同时附带语料完整性审计。
+- `legal-rag generate-citation-cases`：从语料生成全称、简称、阿拉伯数字三种写法的条号查询。旧本地语料上的 `eval_cases/citation_lookup_v1.jsonl`（611 条）保留为历史。
+- `profile-data` 报告新增语料完整性：同法同条号冲突、引用碎片、未终止条文、粘连章节标题。
+- `legal_rag.article_numbers`：中文/阿拉伯条号与整数互转，支持"第X条之Y"。
+- `legal_rag.query_parser`：从语料标题生成唯一的法律别名表（全称、简称、去年份、〈〉 嵌套写法），最长别名优先、精确等值匹配；条号统一转为语料写法，并归属同句内最近的法律。
+- BM25 精确查表：查询中的（法律，条号）与 chunk 完全一致时置顶，并按引用顺序排列；trace 新增 `exact_citation_boost` 与 `unresolved_law_titles`。
+- 文档：[项目边界](docs/PROJECT_SCOPE.md)、[项目复盘](reports/CASE_STUDY.md)、[v1.0.0 基线报告](reports/retrieval/V1_0_BASELINE.md)。
+
+### Fixed
+
+- 无书名号行头的法律不再在行内"第X条"引用处切条：条号行头只认行首，或句末标点之后且带分隔符的位置。旧本地语料上引用碎片 676 -> 0，同法同条号冲突 427 -> 3（源文件畸形行），被截断的条文恢复完整。
+- 章节、目录和 Markdown 序号标题不再粘进上一条正文。
+- "第X条之Y"（冻结语料中刑法有 53 条，如第一百三十三条之一）不再被解析成第X条而撞号；查询解析、条号查表、证据检查和合成题生成都把"之Y"当作条号的一部分。
+- 阿拉伯数字条号（如"刑法第264条"）可以检索：旧本地语料的合成集 Hit@1 从 2/205 升到 205/205。
+- 简称不再加权包含它的更长法律名（保险法 -> 社会保险法、能源法 -> 节约能源法）：法律加权和废止降权豁免都改为等值判断。
+- 证据检查按规范化条号比对：问题写"第264条"、检索到"第二百六十四条"时，不再判为缺少条文依据。
+
+### Changed
+
+- 语料：停用旧本地快照。逐文件核对发现其中 17 个文件被本地改过、12 个文件不在公开数据集中，抽查到刑法是 2011 年刑法修正案（八）之前的旧文本、公司法是 2023 年修订前的旧版。冻结版本只使用公开 revision 的原始文件。
+- 更正 README 中"数据卡标注 Apache-2.0"的说法：该数据集最初的版本声明 `license: mit`，当前 revision 没有许可证声明。
+- 解析结果变化：旧本地语料条文数 19050 -> 18356，38 部法律的 article_id/chunk_id 改变；冻结语料为 19276 条。旧索引、embedding cache 和已导入 PostgreSQL 的 snapshot 需用冻结语料重建。`test_chapter_title_not_parsed_as_article` 的旧断言（标题成为 unmatched 记录）改为标题被丢弃。
+- 删除 `legal_rag.retrieval` 中的 `extract_law_hints`、`build_known_law_hints`、`FALLBACK_LAW_HINTS`、`extract_article_terms`；`metadata_boost` 与 `deprecated_multiplier` 的 `law_hints` 参数现在要求是已解析的语料法律名。
+- 版本号 0.7.1 -> 1.0.0。M7 标为 `deferred`（不做界面，只做文档收尾）；检索重构 R3-R5 取消；草稿 PR #31 不合并。M0-M6 的 STATE、交接与回执文档作为历史保留，不再逐次更新。
 
 ## [0.7.1] - 2026-10-02
 

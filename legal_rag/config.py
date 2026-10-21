@@ -9,8 +9,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "data": {
         "dataset_dir": "Chinese-Laws/Chinese-Laws",
         "readme_path": "Chinese-Laws/README.md",
-        # 已被民法典(2021-01-01 施行)废止但仍保留在数据集中的法律。
-        # 保留原文用于对照，检索时默认降权，见 retrieval.deprecated_penalty。
+        # v1.0.0 冻结语料：Hugging Face Kuugo/Chinese_Law 固定 revision 的逐文件哈希。
+        "corpus_manifest": "configs/corpus/kuugo_chinese_law_a829f47d.manifest.json",
+        # 已被民法典(2021-01-01 施行)废止的法律。冻结语料不包含它们；旧的本地
+        # 快照若仍含这些文件，检索时默认降权，见 retrieval.deprecated_penalty。
         "deprecated_laws": [
             "中华人民共和国民法通则",
             "中华人民共和国合同法",

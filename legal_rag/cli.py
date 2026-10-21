@@ -235,6 +235,76 @@ def build_parser() -> argparse.ArgumentParser:
     )
     eval_parser.set_defaults(handler=handle_evaluate)
 
+    audit = subparsers.add_parser(
+        "retrieval-audit",
+        help="Audit retriever candidates at depth N (Hit@k, article recall, gold ambiguity).",
+    )
+    audit.add_argument("--index-dir", default=None)
+    audit.add_argument("--chunk-strategy", default=None)
+    audit.add_argument("--retriever", default=None)
+    audit.add_argument("--embedding", default=None)
+    audit.add_argument("--embedding-cache-dir", default=None)
+    audit.add_argument("--reranker", default=None)
+    audit.add_argument("--rerank-top-n", type=int, default=None)
+    audit.add_argument(
+        "--cases",
+        action="append",
+        default=None,
+        help="Eval case JSONL; repeat to audit several sets in one run.",
+    )
+    audit.add_argument("--depth", type=int, default=20)
+    audit.add_argument("--output-dir", default="artifacts/retrieval_audit")
+    audit.add_argument("--prefix", default=None)
+    audit.add_argument(
+        "--data-dir",
+        default=None,
+        help="Also audit corpus integrity of this dataset (defaults to config).",
+    )
+    audit.add_argument("--skip-integrity", action="store_true")
+    audit.add_argument(
+        "--corpus-manifest",
+        default=None,
+        help="Refuse to audit unless --data-dir matches this pinned corpus manifest.",
+    )
+    audit.set_defaults(handler=handle_retrieval_audit)
+
+    verify_corpus_parser = subparsers.add_parser(
+        "verify-corpus",
+        help="Check a local corpus against the pinned manifest byte for byte.",
+    )
+    verify_corpus_parser.add_argument("--data-dir", default=None)
+    verify_corpus_parser.add_argument("--manifest", default=None)
+    verify_corpus_parser.set_defaults(handler=handle_verify_corpus)
+
+    fetch_corpus_parser = subparsers.add_parser(
+        "fetch-corpus",
+        help="Download the pinned corpus revision and verify every file.",
+    )
+    fetch_corpus_parser.add_argument("--output-dir", required=True)
+    fetch_corpus_parser.add_argument("--manifest", default=None)
+    fetch_corpus_parser.add_argument(
+        "--endpoint",
+        default=None,
+        help="Hugging Face endpoint such as https://hf-mirror.com "
+        "(defaults to HF_ENDPOINT, then https://huggingface.co).",
+    )
+    fetch_corpus_parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Replace local files whose content differs from the manifest.",
+    )
+    fetch_corpus_parser.set_defaults(handler=handle_fetch_corpus, load_dotenv=False)
+
+    citation = subparsers.add_parser(
+        "generate-citation-cases",
+        help="Generate full/short/Arabic-numeral citation lookup cases from the corpus.",
+    )
+    citation.add_argument("--data-dir", default=None)
+    citation.add_argument("--output", required=True)
+    citation.add_argument("--per-law", type=int, default=1)
+    citation.add_argument("--seed", type=int, default=20261021)
+    citation.set_defaults(handler=handle_generate_citation_cases)
+
     matrix = subparsers.add_parser(
         "experiment-matrix",
         help="Run a reproducible retrieval experiment matrix and write CSV/JSON/Markdown summaries.",
@@ -1108,6 +1178,185 @@ def resolve_models(args: argparse.Namespace, config: dict) -> list[str]:
     if args.models:
         return [item.strip() for item in args.models.split(",") if item.strip()]
     return [args.model or config["models"]["default"]]
+
+
+def handle_retrieval_audit(args: argparse.Namespace) -> int:
+    from .corpus_integrity import audit_article_integrity
+    from .data import load_articles
+    from .retrieval_audit import audit_retrieval, write_audit_outputs
+
+    if args.depth < 1:
+        raise ValueError("--depth must be a positive integer.")
+    config = load_config(args.config)
+    strategy = args.chunk_strategy or config["chunking"]["default_strategy"]
+    index_dir = resolve_index_dir(args.index_dir, config, strategy)
+    chunks_path = resolve_chunks_path(index_dir)
+    chunks = load_chunks(chunks_path)
+    retriever_kind = args.retriever or config["retrieval"]["default"]
+    case_paths = [
+        resolve_path(path)
+        for path in (args.cases or ["eval_cases/legal_eval_cases_v3.jsonl"])
+    ]
+    corpus = None
+    if args.corpus_manifest:
+        from .corpus_manifest import load_corpus_manifest, verify_corpus
+
+        data_dir = resolve_path(args.data_dir or config["data"]["dataset_dir"])
+        corpus = verify_corpus(
+            data_dir, load_corpus_manifest(resolve_path(args.corpus_manifest))
+        ).to_dict()
+        if not corpus["ok"]:
+            raise ValueError(
+                f"{data_dir} does not match corpus {corpus['corpus_id']}: "
+                f"{len(corpus['missing'])} missing, {len(corpus['modified'])} modified, "
+                f"{len(corpus['extra'])} extra files"
+            )
+    integrity = None
+    if not args.skip_integrity:
+        data_dir = resolve_path(args.data_dir or config["data"]["dataset_dir"])
+        integrity = audit_article_integrity(load_articles(data_dir))
+
+    build_started = time.perf_counter()
+    retriever = create_retriever(
+        retriever_kind,
+        chunks,
+        config,
+        top_k=args.depth,
+        chunk_strategy=strategy,
+        embedding_key=args.embedding,
+        embedding_cache_dir_arg=args.embedding_cache_dir,
+        reranker_key=args.reranker,
+        rerank_top_n=args.rerank_top_n,
+    )
+    build_seconds = time.perf_counter() - build_started
+    run_id = new_run_id("retrieval_audit")
+    output_dir = resolve_path(args.output_dir)
+    for case_path in case_paths:
+        cases = load_eval_cases(case_path)
+        rows, summary = audit_retrieval(
+            cases, retriever, depth=args.depth, chunks=chunks
+        )
+        metadata: dict[str, Any] = {
+            "run_id": run_id,
+            "retriever": retriever_kind,
+            "retriever_name": getattr(retriever, "name", retriever_kind),
+            "chunk_strategy": strategy,
+            "chunks_path": str(chunks_path),
+            "chunk_count": len(chunks),
+            "chunks_sha256": _file_sha256(chunks_path),
+            "cases_path": str(case_path),
+            "cases_sha256": _file_sha256(case_path),
+            "depth": args.depth,
+            "retriever_build_seconds": round(build_seconds, 3),
+            "embedding": args.embedding or "",
+            "reranker": args.reranker or "none",
+        }
+        if corpus is not None:
+            metadata["corpus"] = {
+                key: corpus[key] for key in ("corpus_id", "revision", "ok", "file_count")
+            }
+        if integrity is not None:
+            metadata["integrity_summary"] = {
+                key: integrity[key]
+                for key in (
+                    "article_count",
+                    "identity_collision_groups",
+                    "reference_fragment_count",
+                    "unterminated_article_count",
+                    "glued_heading_article_count",
+                )
+            }
+        json_path, md_path = write_audit_outputs(
+            rows,
+            summary,
+            metadata,
+            output_dir=output_dir,
+            prefix=f"{args.prefix or run_id}_{case_path.stem}",
+            integrity=integrity,
+        )
+        print(f"Wrote retrieval audit JSON: {json_path}")
+        print(f"Wrote retrieval audit report: {md_path}")
+        print(
+            json.dumps(
+                {
+                    "cases": case_path.name,
+                    "hit_at": summary["hit_at"],
+                    "article_recall_at": summary["article_recall_at"],
+                    "gold_status_counts": summary["gold_status_counts"],
+                },
+                ensure_ascii=False,
+            )
+        )
+    return 0
+
+
+def handle_generate_citation_cases(args: argparse.Namespace) -> int:
+    from collections import Counter
+
+    from .citation_cases import (
+        build_citation_cases,
+        select_citation_targets,
+        write_citation_cases,
+    )
+    from .data import load_articles
+
+    config = load_config(args.config)
+    data_dir = resolve_path(args.data_dir or config["data"]["dataset_dir"])
+    targets = select_citation_targets(
+        load_articles(data_dir), per_law=args.per_law, seed=args.seed
+    )
+    cases = build_citation_cases(targets)
+    path = write_citation_cases(cases, resolve_path(args.output))
+    counts = Counter(case["type"] for case in cases)
+    print(f"Wrote {len(cases)} citation cases from {len(targets)} articles: {path}")
+    print(json.dumps(dict(sorted(counts.items())), ensure_ascii=False))
+    return 0
+
+
+def _corpus_manifest_path(args: argparse.Namespace, config: dict) -> Path:
+    from .corpus_manifest import DEFAULT_MANIFEST_PATH
+
+    return resolve_path(
+        args.manifest or config["data"].get("corpus_manifest") or DEFAULT_MANIFEST_PATH
+    )
+
+
+def handle_verify_corpus(args: argparse.Namespace) -> int:
+    from .corpus_manifest import load_corpus_manifest, verify_corpus
+
+    config = load_config(args.config)
+    data_dir = resolve_path(args.data_dir or config["data"]["dataset_dir"])
+    manifest = load_corpus_manifest(_corpus_manifest_path(args, config))
+    result = verify_corpus(data_dir, manifest)
+    print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
+    if result.ok:
+        print(f"{data_dir} matches {manifest.corpus_id} ({result.file_count} files).")
+        return 0
+    print(f"{data_dir} is NOT {manifest.corpus_id}.")
+    return 1
+
+
+def handle_fetch_corpus(args: argparse.Namespace) -> int:
+    from .corpus_manifest import fetch_corpus, load_corpus_manifest
+
+    config = load_config(args.config)
+    manifest = load_corpus_manifest(_corpus_manifest_path(args, config))
+    output_dir = resolve_path(args.output_dir)
+    result = fetch_corpus(
+        manifest, output_dir, endpoint=args.endpoint, overwrite=args.overwrite
+    )
+    print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
+    if result.ok:
+        print(f"Fetched and verified {manifest.corpus_id} into {output_dir}.")
+        return 0
+    print(f"{output_dir} still differs from {manifest.corpus_id}; see the lists above.")
+    return 1
+
+
+def _file_sha256(path: Path) -> str:
+    import hashlib
+
+    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
 def resolve_index_dir(index_dir: str | None, config: dict, strategy: str) -> Path:

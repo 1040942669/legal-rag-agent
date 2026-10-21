@@ -1141,8 +1141,9 @@
       "id": "M7",
       "name": "展示与收尾",
       "planned_version": "v0.8.0",
-      "required": true,
-      "status": "not_started",
+      "required": false,
+      "status": "deferred",
+      "decision": "Cancelled on 2026-10-21 by the owner-delegated scope freeze: no UI; documentation close-out shipped in v1.0.0. See docs/PROJECT_SCOPE.md.",
       "branch": null,
       "issue_url": null,
       "milestone_url": null,
@@ -1162,5 +1163,5 @@
       "blockers": []
     }
   ],
-  "next_action": "Freeze this one non-recursive governance finalization on codex/m6-v071-finalization from verified receipt master 7ec13709d90fad1a01b85b9558a3bb8924a0846d. Read its future exact candidate SHA only after commit; run applicable local gates and all four exact-head CI jobs, normally merge its own PR after current review/protection checks, then verify its own exact merge-target master four-job CI and stop. Those future finalization SHA/PR/CI/merge fields remain null or not_run in this snapshot. M6 software, independent receipt PR #29 and post-receipt governance closure are already verified; M6 is released. M7 remains required in the overall roadmap but excluded from this execution and not_started. Do not create a recursive follow-up receipt, another M5 receipt or new Release, move published tags, edit tracked files during gates, or start M7."
+  "next_action": "None. The M0-M7 governance plan is closed: M0-M6 are released, M7 is deferred, and the project scope is frozen at v1.0.0 by docs/PROJECT_SCOPE.md. Later changes follow branch, PR, green CI and merge only; this file is kept as history and is not updated per change."
 }

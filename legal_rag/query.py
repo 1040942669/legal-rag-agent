@@ -4,7 +4,10 @@ import re
 from dataclasses import asdict, dataclass
 
 
-ARTICLE_NUMBER_RE = re.compile(r"第[零一二三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟\d]+条")
+ARTICLE_NUMBER_RE = re.compile(
+    r"第[零一二三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟\d]+条"
+    r"(?:之[零一二三四五六七八九十百千万壹贰叁肆伍陆柒捌玖拾佰仟\d]+)?"
+)
 EXPLICIT_LAW_RE = re.compile(r"《([^》]+)》")
 
 COMMON_LAW_HINTS = [
