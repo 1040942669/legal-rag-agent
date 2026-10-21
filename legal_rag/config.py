@@ -122,7 +122,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "judge": {
         "provider": "siliconflow",
-        "model": "deepseek-ai/DeepSeek-V3",
+        # 与生成模型（DeepSeek）不同厂商，避免模型给自己的回答打分。
+        "model": "zai-org/GLM-5.3-Flash",
         "api_base_url": "https://api.siliconflow.cn/v1",
         "api_key_env": "SILICONFLOW_API_KEY",
         "request_timeout": 120,

@@ -433,10 +433,11 @@ class SiliconFlowDefaultsTest(unittest.TestCase):
                     )
                 generation = config["models"]["default"]
                 self.assertTrue(generation.startswith("siliconflow:"))
-                # The judge must not grade answers written by the same model.
-                self.assertNotEqual(
-                    config["judge"]["model"], generation.removeprefix("siliconflow:")
-                )
+                # The judge must come from another vendor than the generator so
+                # no model family grades its own answers.
+                judge_vendor = config["judge"]["model"].split("/")[0]
+                generation_vendor = generation.removeprefix("siliconflow:").split("/")[0]
+                self.assertNotEqual(judge_vendor, generation_vendor)
                 self.assertEqual(config["reranking"]["default"], "none")
                 self.assertEqual(config["retrieval"]["default"], "bm25")
 
