@@ -2,6 +2,21 @@
 
 本文件记录候选与已发布版本的用户可见变更。历史实验数字仍以对应报告中的语料、模型和时间条件为准。
 
+## [Unreleased]
+
+模型调用一律走 SiliconFlow API，本机不再运行本地模型（[项目边界](docs/PROJECT_SCOPE.md) D8）。默认检索器仍是 BM25，重排默认仍关闭。
+
+### Added
+
+- 重排支持 SiliconFlow：`reranking.models.*.provider: siliconflow` 通过 `/rerank` 接口一次给全部候选打分，按 `index` 映射回输入顺序；回应缺少、重复、越界或非有限的分数时按 `invalid_response` 失败；同样受 `ALLOW_LIVE_MODEL_CALLS` 控制。
+
+### Changed
+
+- 向量检索默认模型改为 SiliconFlow 上的 `BAAI/bge-m3`（`bge_m3`，免费，单条最长 8192 token）。删除只能在本机运行的 `bge_large_zh`、`bge_large_zh_meta` 和 `chatlaw_text2vec` 配置；它们的历史数字保留在旧报告中。
+- `bge_v2_m3` 重排改用 SiliconFlow 上的 `BAAI/bge-reranker-v2-m3`（免费），不再在本机下载约 2.29 GB 的模型。
+- 生成默认模型 `qwen2.5:7b`（本地 Ollama）改为 `siliconflow:deepseek-ai/DeepSeek-V3`（收费）；Ollama 模型只在显式 `--model` 或 `--models all` 时使用。
+- README 中的检索评测示例改用开发集 `eval_cases/legal_eval_dev_v1.jsonl`。
+
 ## [1.0.0] - 2026-10-21
 
 范围冻结版本：语料固定为一个可以逐字节核验的公开版本，检索重构止于 R2，M7 不做界面，之后只修正确性 bug。决定与理由见 [项目边界](docs/PROJECT_SCOPE.md)，问题的发现过程见 [项目复盘](reports/CASE_STUDY.md)，数字见 [v1.0.0 基线报告](reports/retrieval/V1_0_BASELINE.md)。R0-R2 的过程记录见 [检索重构交接](docs/retrieval-rework/HANDOFF.md)。

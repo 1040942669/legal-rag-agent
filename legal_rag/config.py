@@ -24,35 +24,31 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "index_dir": "artifacts/indexes",
         "report_dir": "reports",
     },
+    # 模型调用一律走 SiliconFlow API，本机不运行本地模型（docs/PROJECT_SCOPE.md D8）。
     "models": {
+        # 本地 Ollama 模型，只有显式 --model 或 --models all 时才会使用。
         "ollama": ["qwen2.5:7b", "qwen3.5:4b", "gemma4:e2b"],
-        "default": "qwen2.5:7b",
+        "default": "siliconflow:deepseek-ai/DeepSeek-V3",
     },
     "embedding": {
-        "default": "bge_large_zh",
+        "default": "bge_m3",
         "cache_dir": "artifacts/embeddings",
         "batch_size": 16,
         "device": "auto",
-        "model_name": "BAAI/bge-large-zh-v1.5",
         "models": {
-            "bge_large_zh": {
-                "provider": "sentence_transformers",
-                "model_name": "BAAI/bge-large-zh-v1.5",
+            "bge_m3": {
+                "provider": "siliconflow",
+                "model_name": "BAAI/bge-m3",
                 "role": "chinese_general_baseline",
                 "normalize": True,
                 "trust_remote_code": False,
+                "api_base_url": "https://api.siliconflow.cn/v1",
+                "api_key_env": "SILICONFLOW_API_KEY",
+                "dimensions": None,
+                "max_retries": 0,
+                "request_timeout": 120,
                 "query_prefix": "",
                 "document_prefix": "",
-            },
-            "bge_large_zh_meta": {
-                "provider": "sentence_transformers",
-                "model_name": "BAAI/bge-large-zh-v1.5",
-                "role": "metadata_embedding_ablation",
-                "normalize": True,
-                "trust_remote_code": False,
-                "query_prefix": "为这个句子生成表示以用于检索相关文章：",
-                "document_prefix": "",
-                "embed_with_metadata": True,
             },
             "qwen3_embedding_4b_meta": {
                 "provider": "siliconflow",
@@ -68,15 +64,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
                 "query_prefix": "Instruct: Given a legal question, retrieve relevant Chinese law provisions.\nQuery: ",
                 "document_prefix": "",
                 "embed_with_metadata": True,
-            },
-            "chatlaw_text2vec": {
-                "provider": "sentence_transformers",
-                "model_name": "chestnutlzj/ChatLaw-Text2Vec",
-                "role": "legal_domain_model",
-                "normalize": True,
-                "trust_remote_code": False,
-                "query_prefix": "",
-                "document_prefix": "",
             },
             "qwen3_embedding_4b": {
                 "provider": "siliconflow",
@@ -112,11 +99,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "candidate_top_n": 20,
         "models": {
             "bge_v2_m3": {
-                "provider": "sentence_transformers_cross_encoder",
+                "provider": "siliconflow",
                 "model_name": "BAAI/bge-reranker-v2-m3",
-                "batch_size": 8,
-                "max_length": 512,
-                "device": "auto",
+                "api_base_url": "https://api.siliconflow.cn/v1",
+                "api_key_env": "SILICONFLOW_API_KEY",
+                "request_timeout": 120,
                 "include_metadata": True,
             },
         },

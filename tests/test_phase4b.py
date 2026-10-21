@@ -1,19 +1,25 @@
 from __future__ import annotations
 
 import json
+import os
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from uuid import uuid4
 
+import httpx
 import numpy as np
+from openai import OpenAI
 
 from legal_rag.cli import build_parser
+from legal_rag.config import load_config
 from legal_rag.embeddings import (
     EMBEDDING_CACHE_SCHEMA_VERSION,
     EmbeddingModelConfig,
     chunk_corpus_fingerprint,
     embedding_contract_fingerprint,
     inspect_embedding_cache,
+    resolve_embedding_model,
 )
 from legal_rag.evaluation import evaluate
 from legal_rag.experiments import (
@@ -24,7 +30,15 @@ from legal_rag.experiments import (
 )
 from legal_rag.llm import CompletionUsage, extract_token_counts, usage_delta
 from legal_rag.models import Chunk, EvalCase, EvalRecord, SearchResult
-from legal_rag.rerank import CrossEncoderReranker, RerankerConfig, RerankingRetriever
+from legal_rag.provider_errors import ProviderCallError
+from legal_rag.rerank import (
+    CrossEncoderReranker,
+    RerankerConfig,
+    RerankingRetriever,
+    SiliconFlowReranker,
+    build_reranker,
+    resolve_reranker_config,
+)
 
 
 def make_chunk(chunk_id: str, text: str) -> Chunk:
@@ -244,6 +258,173 @@ class RerankerTest(unittest.TestCase):
 
         self.assertEqual(retriever.stats.calls, 1)
         self.assertEqual(retriever.stats.failed_calls, 1)
+
+
+class SiliconFlowRerankerTest(unittest.TestCase):
+    def setUp(self) -> None:
+        live_calls = patch.dict(os.environ, {"ALLOW_LIVE_MODEL_CALLS": "true"})
+        live_calls.start()
+        self.addCleanup(live_calls.stop)
+        self.config = RerankerConfig(
+            key="bge_v2_m3",
+            provider="siliconflow",
+            model_name="BAAI/bge-reranker-v2-m3",
+        )
+        self.results = [
+            SearchResult(
+                chunk=make_chunk(chunk_id, text),
+                score=1.0 / rank,
+                rank=rank,
+                retriever="static",
+            )
+            for rank, (chunk_id, text) in enumerate(
+                [("一", "甲"), ("二", "乙"), ("三", "丙")], start=1
+            )
+        ]
+
+    def test_scores_all_candidates_in_one_request_in_input_order(self) -> None:
+        calls: list[dict] = []
+
+        class FakeClient:
+            def post(self, path, *, body, cast_to):
+                calls.append({"path": path, "body": body, "cast_to": cast_to})
+                # The API returns results sorted by relevance, not input order.
+                return {
+                    "results": [
+                        {"index": 2, "relevance_score": 0.9},
+                        {"index": 0, "relevance_score": 0.5},
+                        {"index": 1, "relevance_score": 0.1},
+                    ]
+                }
+
+        reranker = SiliconFlowReranker(self.config, client=FakeClient())
+
+        self.assertEqual(reranker.score("问题", self.results), [0.5, 0.1, 0.9])
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["path"], "/rerank")
+        self.assertIs(calls[0]["cast_to"], object)
+        body = calls[0]["body"]
+        self.assertEqual(body["model"], "BAAI/bge-reranker-v2-m3")
+        self.assertEqual(body["query"], "问题")
+        self.assertEqual(body["documents"][0], "中华人民共和国测试法 第一条\n甲")
+        self.assertEqual(body["top_n"], 3)
+        self.assertFalse(body["return_documents"])
+
+    def test_rejects_responses_that_do_not_score_each_candidate_once(self) -> None:
+        payloads = {
+            "missing": {"results": [{"index": 0, "relevance_score": 0.5}]},
+            "repeated": {"results": [{"index": 0, "relevance_score": 0.5}] * 3},
+            "out_of_range": {
+                "results": [{"index": i + 1, "relevance_score": 0.5} for i in range(3)]
+            },
+            "not_finite": {
+                "results": [
+                    {"index": i, "relevance_score": float("nan")} for i in range(3)
+                ]
+            },
+            "boolean": {
+                "results": [{"index": i, "relevance_score": True} for i in range(3)]
+            },
+            "wrong_shape": {"data": []},
+        }
+        for label, payload in payloads.items():
+            with self.subTest(label):
+
+                class FakeClient:
+                    def post(self, path, *, body, cast_to, payload=payload):
+                        return payload
+
+                reranker = SiliconFlowReranker(self.config, client=FakeClient())
+                with self.assertRaises(ProviderCallError) as caught:
+                    reranker.score("问题", self.results)
+                self.assertEqual(caught.exception.error_code, "invalid_response")
+
+    def test_provider_failure_is_classified_without_the_query_text(self) -> None:
+        class TimingOutClient:
+            def post(self, path, *, body, cast_to):
+                raise TimeoutError("问题 timed out")
+
+        reranker = SiliconFlowReranker(self.config, client=TimingOutClient())
+        with self.assertRaises(ProviderCallError) as caught:
+            reranker.score("问题", self.results)
+
+        self.assertEqual(caught.exception.error_code, "timeout")
+        self.assertTrue(caught.exception.retryable)
+        self.assertNotIn("问题", str(caught.exception))
+
+    def test_requires_explicit_live_call_opt_in(self) -> None:
+        with patch.dict(os.environ, {"ALLOW_LIVE_MODEL_CALLS": "false"}):
+            with self.assertRaisesRegex(RuntimeError, "ALLOW_LIVE_MODEL_CALLS"):
+                build_reranker(self.config)
+
+    def test_missing_api_key_fails_before_any_request(self) -> None:
+        with patch.dict(
+            os.environ,
+            {"LEGAL_RAG_DISABLE_DOTENV": "true", "SILICONFLOW_API_KEY": ""},
+        ):
+            with self.assertRaises(ProviderCallError) as caught:
+                SiliconFlowReranker(self.config)
+
+        self.assertEqual(caught.exception.error_code, "configuration")
+        self.assertEqual(caught.exception.cause_type, "MissingApiKey")
+
+    def test_openai_sdk_client_posts_to_the_rerank_endpoint(self) -> None:
+        captured: dict = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured["url"] = str(request.url)
+            captured["authorization"] = request.headers.get("authorization")
+            captured["body"] = json.loads(request.content)
+            if captured["body"]["query"] == "限流":
+                return httpx.Response(429, json={"message": "rate limited"})
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {"index": 1, "relevance_score": 0.8},
+                        {"index": 0, "relevance_score": 0.2},
+                        {"index": 2, "relevance_score": 0.1},
+                    ],
+                    "tokens": {"input_tokens": 30, "output_tokens": 0},
+                },
+            )
+
+        client = OpenAI(
+            api_key="test-key",
+            base_url="https://api.siliconflow.cn/v1",
+            max_retries=0,
+            http_client=httpx.Client(transport=httpx.MockTransport(handler)),
+        )
+        self.addCleanup(client.close)
+        reranker = SiliconFlowReranker(self.config, client=client)
+
+        self.assertEqual(reranker.score("问题", self.results), [0.2, 0.8, 0.1])
+        self.assertEqual(captured["url"], "https://api.siliconflow.cn/v1/rerank")
+        self.assertEqual(captured["authorization"], "Bearer test-key")
+        self.assertEqual(captured["body"]["model"], "BAAI/bge-reranker-v2-m3")
+
+        with self.assertRaises(ProviderCallError) as caught:
+            reranker.score("限流", self.results)
+        self.assertEqual(caught.exception.error_code, "rate_limited")
+        self.assertEqual(caught.exception.status_code, 429)
+
+
+class SiliconFlowDefaultsTest(unittest.TestCase):
+    def test_default_config_sends_every_model_call_to_siliconflow(self) -> None:
+        config = load_config()
+
+        embedding = resolve_embedding_model(config)
+        self.assertEqual(embedding.key, "bge_m3")
+        self.assertEqual(embedding.model_name, "BAAI/bge-m3")
+        for key, item in config["embedding"]["models"].items():
+            self.assertEqual(item["provider"], "siliconflow", key)
+        for key in config["reranking"]["models"]:
+            self.assertEqual(
+                resolve_reranker_config(config, key).provider, "siliconflow", key
+            )
+        self.assertTrue(config["models"]["default"].startswith("siliconflow:"))
+        self.assertEqual(config["reranking"]["default"], "none")
+        self.assertEqual(config["retrieval"]["default"], "bm25")
 
 
 class ExperimentHarnessTest(unittest.TestCase):

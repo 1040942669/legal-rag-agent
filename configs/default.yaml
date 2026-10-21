@@ -15,37 +15,35 @@ artifacts:
   index_dir: artifacts/indexes
   report_dir: reports
 
+# 模型调用一律走 SiliconFlow API，本机不运行本地模型（docs/PROJECT_SCOPE.md D8）。
 models:
+  # 本地 Ollama 模型，只有显式 --model 或 --models all 时才会使用。
   ollama:
     - qwen2.5:7b
     - qwen3.5:4b
     - gemma4:e2b
-  default: qwen2.5:7b
+  default: siliconflow:deepseek-ai/DeepSeek-V3
 
 embedding:
-  default: bge_large_zh
+  # bge-m3 在 SiliconFlow 上免费，单条最长 8192 token，冻结语料最长的条文也不会被截断。
+  default: bge_m3
   cache_dir: artifacts/embeddings
   batch_size: 16
   device: auto
-  model_name: BAAI/bge-large-zh-v1.5
   models:
-    bge_large_zh:
-      provider: sentence_transformers
-      model_name: BAAI/bge-large-zh-v1.5
+    bge_m3:
+      provider: siliconflow
+      model_name: BAAI/bge-m3
       role: chinese_general_baseline
       normalize: true
       trust_remote_code: false
+      api_base_url: https://api.siliconflow.cn/v1
+      api_key_env: SILICONFLOW_API_KEY
+      dimensions:
+      max_retries: 0
+      request_timeout: 120
       query_prefix: ""
       document_prefix: ""
-    bge_large_zh_meta:
-      provider: sentence_transformers
-      model_name: BAAI/bge-large-zh-v1.5
-      role: metadata_embedding_ablation
-      normalize: true
-      trust_remote_code: false
-      query_prefix: "为这个句子生成表示以用于检索相关文章："
-      document_prefix: ""
-      embed_with_metadata: true
     qwen3_embedding_4b_meta:
       provider: siliconflow
       model_name: Qwen/Qwen3-Embedding-4B
@@ -60,14 +58,6 @@ embedding:
       query_prefix: "Instruct: Given a legal question, retrieve relevant Chinese law provisions.\nQuery: "
       document_prefix: ""
       embed_with_metadata: true
-    chatlaw_text2vec:
-      provider: sentence_transformers
-      model_name: chestnutlzj/ChatLaw-Text2Vec
-      role: legal_domain_model
-      normalize: true
-      trust_remote_code: false
-      query_prefix: ""
-      document_prefix: ""
     qwen3_embedding_4b:
       provider: siliconflow
       model_name: Qwen/Qwen3-Embedding-4B
@@ -96,16 +86,16 @@ retrieval:
   deprecated_penalty: 0.5
 
 reranking:
-  # 重排默认关闭；启用时先扩大召回候选，再用 cross-encoder 排序。
+  # 重排默认关闭；启用时先扩大召回候选，再交给 SiliconFlow 上的 bge-reranker-v2-m3（免费）打分。
   default: none
   candidate_top_n: 20
   models:
     bge_v2_m3:
-      provider: sentence_transformers_cross_encoder
+      provider: siliconflow
       model_name: BAAI/bge-reranker-v2-m3
-      batch_size: 8
-      max_length: 512
-      device: auto
+      api_base_url: https://api.siliconflow.cn/v1
+      api_key_env: SILICONFLOW_API_KEY
+      request_timeout: 120
       include_metadata: true
 
 adaptive:

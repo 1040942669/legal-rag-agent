@@ -1,11 +1,19 @@
 from __future__ import annotations
 
 import math
+import os
 import time
 from dataclasses import dataclass, replace
 from typing import Any, Protocol
 
+from .env import load_dotenv, require_live_model_calls_allowed
 from .models import SearchResult
+from .provider_errors import (
+    ProviderCallError,
+    provider_call_error,
+    raise_sanitized_provider_error,
+    validate_timeout_seconds,
+)
 from .retrieval import (
     Retriever,
     assert_results_match_boundary,
@@ -28,6 +36,10 @@ class RerankerConfig:
     max_length: int = 512
     device: str = "auto"
     include_metadata: bool = True
+    # Used only by API providers; the local cross-encoder ignores them.
+    api_base_url: str = ""
+    api_key_env: str = ""
+    request_timeout: float = 120
 
 
 @dataclass
@@ -127,6 +139,144 @@ class CrossEncoderReranker:
             kwargs["device"] = self.config.device
         self._model = self._model_factory(self.config.model_name, **kwargs)
         return self._model
+
+
+class SiliconFlowReranker:
+    """SiliconFlow `/rerank` adapter that scores every candidate in one request.
+
+    The endpoint is not part of the OpenAI API, so it goes through the SDK's
+    generic `post`, which keeps the same key, base URL, timeout and error
+    classification as the SiliconFlow embedding client. Results come back
+    sorted by relevance and are mapped back to input order by `index`.
+    """
+
+    def __init__(self, config: RerankerConfig, *, client: Any | None = None) -> None:
+        require_live_model_calls_allowed("SiliconFlow rerank")
+        self.config = config
+        self.name = config.key
+        timeout = validate_timeout_seconds(
+            config.request_timeout,
+            provider="siliconflow",
+            operation="rerank",
+        )
+        if client is not None:
+            self.client = client
+            return
+        try:
+            from openai import OpenAI  # type: ignore
+        except ModuleNotFoundError as exc:
+            error = ProviderCallError(
+                "configuration",
+                provider="siliconflow",
+                operation="rerank",
+                cause_type=type(exc).__name__,
+            )
+        else:
+            error = None
+        if error is not None:
+            raise_sanitized_provider_error(error)
+
+        load_dotenv()
+        api_key = os.environ.get(config.api_key_env or "SILICONFLOW_API_KEY")
+        if not api_key:
+            raise ProviderCallError(
+                "configuration",
+                provider="siliconflow",
+                operation="rerank",
+                cause_type="MissingApiKey",
+            )
+        try:
+            self.client = OpenAI(
+                api_key=api_key,
+                base_url=config.api_base_url or "https://api.siliconflow.cn/v1",
+                timeout=timeout,
+                max_retries=0,
+            )
+        except Exception as exc:
+            error = ProviderCallError(
+                "configuration",
+                provider="siliconflow",
+                operation="rerank",
+                cause_type=type(exc).__name__,
+            )
+        else:
+            error = None
+        if error is not None:
+            api_key = "<redacted>"
+            raise_sanitized_provider_error(error)
+
+    def score(self, query: str, results: list[SearchResult]) -> list[float]:
+        if not results:
+            return []
+        require_live_model_calls_allowed("SiliconFlow rerank")
+        documents = [
+            reranker_document_text(result)
+            if self.config.include_metadata
+            else result.chunk.text
+            for result in results
+        ]
+        try:
+            return self._rerank(query, documents)
+        except ProviderCallError as exc:
+            error = exc
+        query = "<redacted>"
+        documents = []
+        raise_sanitized_provider_error(error)
+
+    def _rerank(self, query: str, documents: list[str]) -> list[float]:
+        body = {
+            "model": self.config.model_name,
+            "query": query,
+            "documents": documents,
+            "top_n": len(documents),
+            "return_documents": False,
+        }
+        try:
+            payload = self.client.post("/rerank", body=body, cast_to=object)
+        except ProviderCallError:
+            raise
+        except Exception as exc:
+            error = provider_call_error(
+                exc,
+                provider="siliconflow",
+                operation="rerank",
+            )
+        else:
+            error = None
+        if error is not None:
+            raise error from None
+        try:
+            return _decode_rerank_scores(payload, expected_count=len(documents))
+        except Exception as exc:
+            error = ProviderCallError(
+                "invalid_response",
+                provider="siliconflow",
+                operation="rerank",
+                cause_type=type(exc).__name__,
+            )
+        raise error from None
+
+
+def _decode_rerank_scores(payload: Any, *, expected_count: int) -> list[float]:
+    """Return one finite score per document, in the order the documents were sent."""
+
+    items = payload.get("results") if isinstance(payload, dict) else None
+    if not isinstance(items, list) or len(items) != expected_count:
+        raise ValueError("rerank response must score every document exactly once")
+    scores: list[float | None] = [None] * expected_count
+    for item in items:
+        index = item.get("index") if isinstance(item, dict) else None
+        if type(index) is not int or not 0 <= index < expected_count:
+            raise ValueError("rerank response index is out of range")
+        if scores[index] is not None:
+            raise ValueError("rerank response repeats a document index")
+        value = item.get("relevance_score")
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise TypeError("rerank response score is not a number")
+        if not math.isfinite(value):
+            raise ValueError("rerank response score is not finite")
+        scores[index] = float(value)
+    return [float(score) for score in scores if score is not None]
 
 
 class RerankingRetriever:
@@ -257,12 +407,17 @@ def resolve_reranker_config(
         max_length=int(item.get("max_length", 512)),
         device=item.get("device", "auto"),
         include_metadata=bool(item.get("include_metadata", True)),
+        api_base_url=item.get("api_base_url", ""),
+        api_key_env=item.get("api_key_env", ""),
+        request_timeout=item.get("request_timeout", 120),
     )
 
 
 def build_reranker(config: RerankerConfig) -> Reranker:
     if config.provider == "sentence_transformers_cross_encoder":
         return CrossEncoderReranker(config)
+    if config.provider == "siliconflow":
+        return SiliconFlowReranker(config)
     raise ValueError(f"Unsupported reranker provider: {config.provider}")
 
 

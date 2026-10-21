@@ -147,8 +147,7 @@ Phase 4B 自动矩阵在同一 v3 集合上复跑了 BM25 direct/adaptive。质�
 
 - Python 3.10+
 - [uv](https://docs.astral.sh/uv/)
-- 可选：Ollama，用于本地生成
-- 可选：SiliconFlow API Key，用于 Qwen3 embedding、API 模型和 LLM-as-judge
+- 可选：SiliconFlow API Key。向量检索、重排、生成和 LLM-as-judge 都走 SiliconFlow，本机不运行本地模型（见 [项目边界](docs/PROJECT_SCOPE.md) D8）
 
 ```powershell
 git clone https://github.com/1040942669/legal-rag-agent.git
@@ -181,8 +180,8 @@ uv run python -m legal_rag.cli build-index --chunk-strategy article
 uv run python -m legal_rag.cli evaluate `
   --chunk-strategy article `
   --retriever bm25 `
-  --cases eval_cases/legal_eval_cases_v3.jsonl `
-  --prefix v3_article_bm25
+  --cases eval_cases/legal_eval_dev_v1.jsonl `
+  --prefix dev_v1_article_bm25
 ```
 
 启动只检索、不生成的交互模式：
@@ -191,34 +190,31 @@ uv run python -m legal_rag.cli evaluate `
 uv run python -m legal_rag.cli chat --chunk-strategy article --retriever bm25 --no-generate
 ```
 
-### Dense 与生成实验
+### Dense、重排与生成（SiliconFlow）
 
-复制环境变量模板并填写需要的 Key：
+这些命令都会调用 SiliconFlow API。复制环境变量模板并填写 `SILICONFLOW_API_KEY`；模型调用默认关闭，只在当前终端临时打开：
 
 ```powershell
 Copy-Item .env.example .env
+$env:ALLOW_LIVE_MODEL_CALLS = "true"
 ```
 
-```text
-SILICONFLOW_API_KEY=your_key
-```
-
-构建 Qwen3 embedding 并运行 dense 评测：
+构建 bge-m3 向量缓存（SiliconFlow 上免费），再审计 dense 检索：
 
 ```powershell
 uv run python -m legal_rag.cli build-embeddings `
   --chunk-strategy article `
-  --embedding qwen3_embedding_4b `
-  --batch-size 8
+  --embedding bge_m3
 
-uv run python -m legal_rag.cli evaluate `
-  --chunk-strategy article `
+uv run python -m legal_rag.cli retrieval-audit `
   --retriever dense `
-  --embedding qwen3_embedding_4b `
-  --cases eval_cases/legal_eval_cases_v3.jsonl
+  --embedding bge_m3 `
+  --cases eval_cases/legal_eval_dev_v1.jsonl
 ```
 
-固定检索条件，对比多个生成 backend 并启用 judge：
+把 `bge_m3` 换成 `qwen3_embedding_4b` 即使用 Qwen3-Embedding-4B（收费，按 token 计价，以 SiliconFlow 官网为准）。
+
+生成默认使用 SiliconFlow 上的 DeepSeek-V3（收费）。固定检索条件并启用 judge：
 
 ```powershell
 uv run python -m legal_rag.cli evaluate `
@@ -226,9 +222,8 @@ uv run python -m legal_rag.cli evaluate `
   --retriever bm25 `
   --cases eval_cases/legal_eval_cases_v3_gen_subset.jsonl `
   --generate `
-  --models qwen2.5:7b,siliconflow:deepseek-ai/DeepSeek-V3 `
   --judge `
-  --prefix v3gen_models_bm25
+  --prefix v3gen_bm25
 ```
 
 ### Cache、矩阵与 Reranker
@@ -238,7 +233,7 @@ uv run python -m legal_rag.cli evaluate `
 ```powershell
 uv run python -m legal_rag.cli cache-health `
   --chunk-strategy article `
-  --embedding bge_large_zh
+  --embedding bge_m3
 ```
 
 一条命令复跑 direct/adaptive 矩阵：
@@ -249,10 +244,10 @@ uv run python -m legal_rag.cli experiment-matrix `
   --retrievers bm25 `
   --adaptive-modes direct,adaptive `
   --rerankers none `
-  --cases eval_cases/legal_eval_cases_v3.jsonl
+  --cases eval_cases/legal_eval_dev_v1.jsonl
 ```
 
-可选 BGE reranker 默认不加载；显式启用时才下载模型并将 top-20 重排为 top-5：
+可选 BGE reranker 默认关闭；显式启用时把 top-20 候选交给 SiliconFlow 上的 bge-reranker-v2-m3（免费）重排为 top-5，本机不下载模型：
 
 ```powershell
 uv run python -m legal_rag.cli evaluate `
@@ -260,10 +255,10 @@ uv run python -m legal_rag.cli evaluate `
   --retriever bm25 `
   --reranker bge_v2_m3 `
   --rerank-top-n 20 `
-  --cases eval_cases/legal_eval_cases_v3.jsonl
+  --cases eval_cases/legal_eval_dev_v1.jsonl
 ```
 
-首次运行 `bge_v2_m3` 需要下载/加载约 2.29 GB 模型。它目前是实验能力，不是默认链路；只有完整 A/B 同时提升质量且 P95 可接受时才会晋升为默认。
+它是实验能力，不是默认链路。按项目边界 D8，向量检索和重排只在冻结语料上各测一次，不据此调参，也不改默认检索器。
 
 ### M2 实验生命周期（v0.3.0）
 
