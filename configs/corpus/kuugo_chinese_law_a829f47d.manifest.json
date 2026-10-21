@@ -1,0 +1,1200 @@
+{
+  "schema_version": 1,
+  "corpus_id": "kuugo-chinese-law@a829f47",
+  "source": {
+    "provider": "huggingface",
+    "repo_type": "dataset",
+    "repo_id": "Kuugo/Chinese_Law",
+    "revision": "a829f47d34938fd177c5ba92d7fcdc45433dc60a",
+    "revision_date": "2025-04-24T07:07:29Z",
+    "law_files_commit": "3168b5f76ef063cba6bd2f86acbd536d9eeb27ab",
+    "law_files_commit_date": "2025-02-28T10:24:50Z",
+    "url": "https://huggingface.co/datasets/Kuugo/Chinese_Law/tree/a829f47d34938fd177c5ba92d7fcdc45433dc60a",
+    "stated_content_cutoff": "2025-01-01",
+    "license_note": "README front matter declared 'license: mit' at f16c452 and 3168b5f; the README rewrites 87e6155 and a829f47 removed it, so this revision carries no license metadata. The repository stores only this manifest, never the law text."
+  },
+  "file_count": 236,
+  "total_bytes": 7637249,
+  "files": [
+    {
+      "path": "中华人民共和国专利法.txt",
+      "size": 35493,
+      "sha256": "47d90ccd8442bf2fa5ad7e447f3ea81c0aa9ec3e9e3c9b7e03a2a602196a311e"
+    },
+    {
+      "path": "中华人民共和国个人信息保护法.txt",
+      "size": 30669,
+      "sha256": "5a68d2cad6c3ee012b01aa7002f95a76df4415975c6b0266f74112ed0e0afb78"
+    },
+    {
+      "path": "中华人民共和国个人所得税法.txt",
+      "size": 12842,
+      "sha256": "901eb505d30d97d2d1de3cbac2cbae5738fa712f5357ea619350f1666681c8ae"
+    },
+    {
+      "path": "中华人民共和国个人独资企业法.txt",
+      "size": 13483,
+      "sha256": "9426409e555bc4766baee89381129e59f4e1011864e43c14e0707fe66572bb74"
+    },
+    {
+      "path": "中华人民共和国中医药法.txt",
+      "size": 23668,
+      "sha256": "c52bcaf7692c07281cd6d15e9ab3ad43a148e5e97152df77d0dee3cedeafa270"
+    },
+    {
+      "path": "中华人民共和国中国人民银行法.txt",
+      "size": 13375,
+      "sha256": "e3341f2fa4e15a4a41db151a9742741fa5b91ffcc8c1f7bb942160302cb8cddf"
+    },
+    {
+      "path": "中华人民共和国中小企业促进法.txt",
+      "size": 20916,
+      "sha256": "bcf2cf355e0e0e9f40fcd4e41bbce247b4eda3a9370103886a124e54003dcb46"
+    },
+    {
+      "path": "中华人民共和国义务教育法.txt",
+      "size": 21315,
+      "sha256": "385e123ec69ab405ee1f8486a01aefd1a1c6b300fef35bdad585d45833cc7859"
+    },
+    {
+      "path": "中华人民共和国乡村振兴促进法.txt",
+      "size": 34853,
+      "sha256": "6ec091089e09c412bc5b64f0ae631a744c6cc6ad6a95490d00ec85de02b25b24"
+    },
+    {
+      "path": "中华人民共和国乡镇企业法.txt",
+      "size": 15156,
+      "sha256": "bf408a70a2e084b5e9ba4f4232bc83c6b0acefba8eacf36f79888a1e7ba2ac29"
+    },
+    {
+      "path": "中华人民共和国产品质量法.txt",
+      "size": 27035,
+      "sha256": "d112bf2299795d52eae7e8fabd6b6f45c5629180c6cc10c6a0b82da7e49eab22"
+    },
+    {
+      "path": "中华人民共和国人口与计划生育法.txt",
+      "size": 15451,
+      "sha256": "f8235c5c91d799e6f88f70e373f8a6fde147aa06d4792595d4538c00f00caa37"
+    },
+    {
+      "path": "中华人民共和国人民武装警察法.txt",
+      "size": 18197,
+      "sha256": "c041e2ea0a97fb5bbf9e3d08706978c7338c0cdc9247f27e185537ed01c6f507"
+    },
+    {
+      "path": "中华人民共和国人民警察法.txt",
+      "size": 17287,
+      "sha256": "f50deb9aed23ccc065893b5f55fb6f2c8bddfc9e8a4fd55e2e837dd58a4af345"
+    },
+    {
+      "path": "中华人民共和国人民调解法.txt",
+      "size": 8311,
+      "sha256": "6a3ddceb345de679d56f2c11fe463a47e4c660df81d4a08acbb5bf5baac7f5ea"
+    },
+    {
+      "path": "中华人民共和国人民防空法.txt",
+      "size": 14672,
+      "sha256": "aa90d8b3f94b76d22e7836541e36dd00febcc472121f95e21ccc99abd5a899ad"
+    },
+    {
+      "path": "中华人民共和国仲裁法.txt",
+      "size": 21950,
+      "sha256": "af8e943fa54d33b03f1379b01f7074f2c647d6fc741270ba14ced22289c72d30"
+    },
+    {
+      "path": "中华人民共和国价格法.txt",
+      "size": 15763,
+      "sha256": "722f47d57792bd90899da31592cbc8cb2ebd427539341a63a836fa97ab1d8535"
+    },
+    {
+      "path": "中华人民共和国企业国有资产法.txt",
+      "size": 24296,
+      "sha256": "f3cefacd606b1e88c58ff772470cd86f818bdabb03a0bb2dad5dfbd746748892"
+    },
+    {
+      "path": "中华人民共和国企业所得税法.txt",
+      "size": 19170,
+      "sha256": "822b9f2c5a93a4fa9fcd72de7153e4287de6d41a5131db07a9a788137904b527"
+    },
+    {
+      "path": "中华人民共和国企业破产法.txt",
+      "size": 49815,
+      "sha256": "9cca8bf5cab703864da621ac0213285b2ff4bdf00821a32b8c5b9ae67f1c5533"
+    },
+    {
+      "path": "中华人民共和国会计法.txt",
+      "size": 20704,
+      "sha256": "2fcb9b9c5cfafb7c1e8372854ba3b727bf118ea0baa47d30fff5ec475e60532b"
+    },
+    {
+      "path": "中华人民共和国传染病防治法.txt",
+      "size": 43329,
+      "sha256": "76a1e130be27e764602c4b9dddcb06bff256c2486ccd238d73cae78b125d081c"
+    },
+    {
+      "path": "中华人民共和国体育法.txt",
+      "size": 36484,
+      "sha256": "33427b5f3396df70fc8a0c61796c902a04aded73a8799b3d415addb95dfcda03"
+    },
+    {
+      "path": "中华人民共和国促进科技成果转化法.txt",
+      "size": 22255,
+      "sha256": "a245044222cdc274f52e9c2d01895ac518f283ae94e853b757e64f73a658cab0"
+    },
+    {
+      "path": "中华人民共和国保守国家秘密法.txt",
+      "size": 26495,
+      "sha256": "1977916188d0552635a403382edbaf1c5b47efe9f9f961fd3ad6cb05d330748c"
+    },
+    {
+      "path": "中华人民共和国保险法.txt",
+      "size": 70630,
+      "sha256": "9e5c1e4970cebb72fd52166610045de8600e9cddf81a9c06ed416bdae0af0847"
+    },
+    {
+      "path": "中华人民共和国信托法.txt",
+      "size": 21812,
+      "sha256": "7bc7d945b15063ae3d76dca4c8e290a3b1adc1a20f7ce4635b56fc3f52717c0e"
+    },
+    {
+      "path": "中华人民共和国全民所有制工业企业法.txt",
+      "size": 20547,
+      "sha256": "d9f5e550d6f3d25de00a7b94ce18f55ccc102b2535a79e403c2d393cfca759fc"
+    },
+    {
+      "path": "中华人民共和国公共图书馆法.txt",
+      "size": 17895,
+      "sha256": "f711c9c4ff15ce4c4d010bd00e8c50d06a0fb7c70ac9aa21beb407dc386dc38c"
+    },
+    {
+      "path": "中华人民共和国公共文化服务保障法.txt",
+      "size": 22298,
+      "sha256": "11116725ca664dce9649b51f9aa56ffd2e51ecfe6638ec8814f535bf0893f034"
+    },
+    {
+      "path": "中华人民共和国公务员法.txt",
+      "size": 39710,
+      "sha256": "e7e7d47d11fb2bad95ff976af64f8563692fc6e91e8f6e7e3c8050227cf61f55"
+    },
+    {
+      "path": "中华人民共和国公司法.txt",
+      "size": 104291,
+      "sha256": "7496daed33d47861bec039742cfac90b6dd576e158bcb6b8b885779f4a361439"
+    },
+    {
+      "path": "中华人民共和国公益事业捐赠法.txt",
+      "size": 10202,
+      "sha256": "bb6d926094e2db2ac5cfdc71ee30b16f9d90cc1f209d65bfb6156de053e76a0e"
+    },
+    {
+      "path": "中华人民共和国公证法.txt",
+      "size": 17144,
+      "sha256": "fb9251e4392f1f966b3bb2d331f11a0057088f81d5731dadb80b1283e0a30b7b"
+    },
+    {
+      "path": "中华人民共和国公路法.txt",
+      "size": 30019,
+      "sha256": "9a51a698f210299d13cfef04419ec1615268fdc00966bdf2f6ef0da4cc0c9b83"
+    },
+    {
+      "path": "中华人民共和国关税法.txt",
+      "size": 33782,
+      "sha256": "9f0cbfde37cf700f83608df74840141b5cd0a3f2787f2fd86bd297e48c1c4b15"
+    },
+    {
+      "path": "中华人民共和国兵役法.txt",
+      "size": 22779,
+      "sha256": "1a7191c127667121689f20fce0f006f0603cb59df23370a73f551d02b39b5e1c"
+    },
+    {
+      "path": "中华人民共和国军事设施保护法.txt",
+      "size": 32035,
+      "sha256": "295e0c5c58acc9669416977fd102eadc0347894e141ab20489b9ee5bc590d0ba"
+    },
+    {
+      "path": "中华人民共和国军人保险法.txt",
+      "size": 14584,
+      "sha256": "69bff1a1727bde22154e1d1485c0334faf477e791abbc107ecc3be0a5a1cac6e"
+    },
+    {
+      "path": "中华人民共和国军人地位和权益保障法.txt",
+      "size": 25507,
+      "sha256": "86ed3b14d775f3805d699afed94b555fa7e613eb52bda4b3213805ffcc32176e"
+    },
+    {
+      "path": "中华人民共和国农业技术推广法.txt",
+      "size": 15520,
+      "sha256": "de3f2ea4ab1ea96d87cb8af413bb79b5f64f49b9fd69ccd2a7456f82f897711a"
+    },
+    {
+      "path": "中华人民共和国农业机械化促进法.txt",
+      "size": 13952,
+      "sha256": "6e88ccca62547f20b84d6b66f87f9436b494caa38e6d1ceb291fb883fdef13ce"
+    },
+    {
+      "path": "中华人民共和国农业法.txt",
+      "size": 42331,
+      "sha256": "7b448b0a7e8519aac691bb894f3fffaaa04078e3ade5ba40a242353f9e3c2cef"
+    },
+    {
+      "path": "中华人民共和国农产品质量安全法.txt",
+      "size": 41590,
+      "sha256": "d58a7979539f392745d3dc87c9f9669db66229345550959911e9a66ce9520011"
+    },
+    {
+      "path": "中华人民共和国农村土地承包法.txt",
+      "size": 23223,
+      "sha256": "beef09e522922748ab79b1a095c0e2581582eee7a2c57517d207e15feec11473"
+    },
+    {
+      "path": "中华人民共和国农村土地承包经营纠纷调解仲裁法.txt",
+      "size": 20408,
+      "sha256": "c0cd86da94d356a113f17f4a6763baebfe1b318459d41d326b4955815db90d2e"
+    },
+    {
+      "path": "中华人民共和国农民专业合作社法.txt",
+      "size": 27596,
+      "sha256": "4c8d44df69f407b6e9024b451b01badfc1274ad6a246ae240bf93c321a24161c"
+    },
+    {
+      "path": "中华人民共和国出口管制法.txt",
+      "size": 20200,
+      "sha256": "1249cdbb739f507073c55927f342effef18b42856499656f8a702f1f2bfc6096"
+    },
+    {
+      "path": "中华人民共和国出境入境管理法.txt",
+      "size": 40997,
+      "sha256": "e5539779b3199b64fc1b15005d86bfdc935c58ce08739becbdc25cf9dd006351"
+    },
+    {
+      "path": "中华人民共和国刑事诉讼法.txt",
+      "size": 128000,
+      "sha256": "7a6d488118baab3e9b60b12e0f32cbd24ad2bd685498a7104336709e1a55a249"
+    },
+    {
+      "path": "中华人民共和国刑法.txt",
+      "size": 231801,
+      "sha256": "6cdcfe41b94f4eefc663cebc11a1520401b470537206e0c0520cc12f2e400b2c"
+    },
+    {
+      "path": "中华人民共和国动物防疫法.txt",
+      "size": 52632,
+      "sha256": "b1f6a665ae24f07cce13979e9781600fcb1ec0ab95f8cb80fbd608c6453e3d7a"
+    },
+    {
+      "path": "中华人民共和国劳动争议调解仲裁法.txt",
+      "size": 21103,
+      "sha256": "8b2462a4b98308ee1f319456ee1dda679d2c64bba7532514a9c4811c77fcf4ca"
+    },
+    {
+      "path": "中华人民共和国劳动合同法.txt",
+      "size": 42794,
+      "sha256": "4c9723e3f3f32b8e6d5356f9e638cb08344e491b9c5ff344719e2470be86dfc0"
+    },
+    {
+      "path": "中华人民共和国劳动法.txt",
+      "size": 28721,
+      "sha256": "5779d86a9e4028db869cf6281b9d4f65916c66142949fb2c4bb8dff9ee2cc197"
+    },
+    {
+      "path": "中华人民共和国医师法.txt",
+      "size": 30822,
+      "sha256": "5c0332d341e9d2783b2ef21ccd3e4a7d03db2ced7793cfb5560b6b1c7f71d927"
+    },
+    {
+      "path": "中华人民共和国印花税法.txt",
+      "size": 6719,
+      "sha256": "ca835442e67c1b7f7e0cefcf846a3fc6832a5f6a697498a2a73110e7a4bdcb6e"
+    },
+    {
+      "path": "中华人民共和国反不正当竞争法.txt",
+      "size": 14541,
+      "sha256": "94c57b5bf8e15d3bc5218b3f53f02bed6a606abdb85c41ca8b9eb278fe3314ed"
+    },
+    {
+      "path": "中华人民共和国反垄断法.txt",
+      "size": 27126,
+      "sha256": "19ae5e977d7633b9a2fd4d5221323e208a80f86eb6d41cd37f333761240cea4f"
+    },
+    {
+      "path": "中华人民共和国反家庭暴力法.txt",
+      "size": 11192,
+      "sha256": "a3e7421509888e757b10b82ec39b831d28f0860596fae60234d160c9872a30b5"
+    },
+    {
+      "path": "中华人民共和国反恐怖主义法.txt",
+      "size": 49079,
+      "sha256": "5aa393ee2b178c42663e22947930632784c5ad21599bb2132f801678c751bedd"
+    },
+    {
+      "path": "中华人民共和国反有组织犯罪法.txt",
+      "size": 31535,
+      "sha256": "c48608cceb1b51be0cfde50a036d44050acf98b2680cbdd4e8738a26fcaca290"
+    },
+    {
+      "path": "中华人民共和国反洗钱法.txt",
+      "size": 35480,
+      "sha256": "52d2bbe9b721f0476ba4185147f44f8fa2c54dc912d816871f7980f2a45aac9a"
+    },
+    {
+      "path": "中华人民共和国反电信网络诈骗法.txt",
+      "size": 27678,
+      "sha256": "e91520a406be7fdbc2fd4f9574db25207f5d6c594db254ec71fb79d54499b64c"
+    },
+    {
+      "path": "中华人民共和国反间谍法.txt",
+      "size": 27680,
+      "sha256": "79bb2964978d64a7de3d92d27a165852fad88d73fc795f0ac9cad78e6672458a"
+    },
+    {
+      "path": "中华人民共和国反食品浪费法.txt",
+      "size": 14936,
+      "sha256": "2b0ebd754e045f5607a0066c2d44f06219fc4d693b7b24073134a599b722ce15"
+    },
+    {
+      "path": "中华人民共和国可再生能源法.txt",
+      "size": 15118,
+      "sha256": "25adab24c145f30f1dfa77166c0d0fd8b888791a09db88c5a2f05a471366efb8"
+    },
+    {
+      "path": "中华人民共和国合伙企业法.txt",
+      "size": 34245,
+      "sha256": "cb513f712493cf71884cc10ec188cc62896b41b92109a10958a9616955f7613b"
+    },
+    {
+      "path": "中华人民共和国商业银行法.txt",
+      "size": 28622,
+      "sha256": "cf8ffe6b0d9ebd405ebd7232b05545091dd406041a4a901cfb0a4c7572decefa"
+    },
+    {
+      "path": "中华人民共和国商标法.txt",
+      "size": 36781,
+      "sha256": "38d6f22a67e5f948cbd6498dfea3da12c5a5454e4c7f00c4499f978a15aad285"
+    },
+    {
+      "path": "中华人民共和国噪声污染防治法.txt",
+      "size": 39094,
+      "sha256": "4d41cc180a7ccba91bddad85527168232a9f499f704d860446d230ac87d94665"
+    },
+    {
+      "path": "中华人民共和国固体废物污染环境防治法.txt",
+      "size": 62908,
+      "sha256": "50b6e04766e1108a40cac41e4649bd7756379751f150ca231b9f441776d15c91"
+    },
+    {
+      "path": "中华人民共和国国境卫生检疫法.txt",
+      "size": 23155,
+      "sha256": "0bb8470b4bbeb8a7e63033870165305bc44ebacea774ea6a57677ae1ca67210f"
+    },
+    {
+      "path": "中华人民共和国国家情报法.txt",
+      "size": 9396,
+      "sha256": "899e41f5f2aebf0e530feac7f00d5249648e0119888c45bdbd56a908422e832d"
+    },
+    {
+      "path": "中华人民共和国国家通用语言文字法.txt",
+      "size": 7509,
+      "sha256": "f44eb1025f024031f4ee6958b5128de72db80542e5263102c1ba73cb9a34ed1f"
+    },
+    {
+      "path": "中华人民共和国国防交通法.txt",
+      "size": 23827,
+      "sha256": "71170e24d318e1315ad7d81b27d322043a9336200cf72cd2883bd79552e61fc4"
+    },
+    {
+      "path": "中华人民共和国国防动员法.txt",
+      "size": 21753,
+      "sha256": "fd590cb650f9f0f2c205b98801a2f62f1d9ad840964b23e5a79edf607c702e29"
+    },
+    {
+      "path": "中华人民共和国国防教育法.txt",
+      "size": 15575,
+      "sha256": "6451cb0e6d631811a5c16d47e073f3af0012e32fe15fd6ead9e1a3e842cc45ac"
+    },
+    {
+      "path": "中华人民共和国国际刑事司法协助法.txt",
+      "size": 32643,
+      "sha256": "5067dc7758d6a1e057aeb4c0508041ffba6c4f718cd2bd2e1250b45a1b824838"
+    },
+    {
+      "path": "中华人民共和国土地管理法.txt",
+      "size": 42706,
+      "sha256": "81f80eec68813150f078d566275a1138536e3bc74a78b7fc75e8d59f8267ed33"
+    },
+    {
+      "path": "中华人民共和国土壤污染防治法.txt",
+      "size": 47050,
+      "sha256": "0f019274d7d0bc2a08aa77ffd66cde9b2631bab0bd8ede84a55527e33674331b"
+    },
+    {
+      "path": "中华人民共和国城乡规划法.txt",
+      "size": 31170,
+      "sha256": "176cae9b28a4c68c6cbc6030072a8edc0760bb989f2d771d7e2d35c3b35ee590"
+    },
+    {
+      "path": "中华人民共和国城市房地产管理法.txt",
+      "size": 23916,
+      "sha256": "c55c7dc2e03f3ce4c4d2c72509f78d9d394f153a45faec861aa6ffa3632bd2e3"
+    },
+    {
+      "path": "中华人民共和国城市维护建设税法.txt",
+      "size": 3026,
+      "sha256": "4b65efa68ef07cc133b597e82a841bade988c5177a64501de72d94c5688a7b4b"
+    },
+    {
+      "path": "中华人民共和国基本医疗卫生与健康促进法.txt",
+      "size": 46253,
+      "sha256": "08db7b66ed4d3fcde49960ea7e4d4a139af92fe42c0c73673b27905ccde70006"
+    },
+    {
+      "path": "中华人民共和国境外非政府组织境内活动管理法.txt",
+      "size": 22814,
+      "sha256": "9549a07f93920f779e2f5fc494877ff0849ed92f27e0542c5c30bdc4138e40fa"
+    },
+    {
+      "path": "中华人民共和国增值税法.txt",
+      "size": 14949,
+      "sha256": "fb5fb5efc55d8b0a1343f07a9cbf56818dd63b95801c98bc4bf8324a0e1cf6bd"
+    },
+    {
+      "path": "中华人民共和国外商投资法.txt",
+      "size": 14119,
+      "sha256": "e0098f09f994c64d81c69613801403420be868e2dde9255deb3b2040f00708ed"
+    },
+    {
+      "path": "中华人民共和国大气污染防治法.txt",
+      "size": 60004,
+      "sha256": "64da47925ae14943e4b927046ea910b36e1b4cbdc8f4d715a06d8e7685c52645"
+    },
+    {
+      "path": "中华人民共和国契税法.txt",
+      "size": 5997,
+      "sha256": "2d969a4b68c3f9d800461a175cee56204a5e339387b53c97a954166ff5479363"
+    },
+    {
+      "path": "中华人民共和国妇女权益保障法.txt",
+      "size": 30803,
+      "sha256": "1d50d0f422099fc665eda1f6f3286b10bb2f49d3c5fc5bb3389ee6bf1aa30467"
+    },
+    {
+      "path": "中华人民共和国学位法.txt",
+      "size": 17644,
+      "sha256": "e5cc20f2c56cf750998996f87acb0977c4f8cced8715203f314ec9a7499c5fcc"
+    },
+    {
+      "path": "中华人民共和国安全生产法.txt",
+      "size": 64479,
+      "sha256": "6bf5ba85ae2e348ea9cbcc7cacc11101c69c827dfc61547c6a0da7be9787df5a"
+    },
+    {
+      "path": "中华人民共和国审计法.txt",
+      "size": 21240,
+      "sha256": "8198b2c9a7a8efe73c49cb4ec31bce69dc91a1c8566ea97f07b9cae43d5b8247"
+    },
+    {
+      "path": "中华人民共和国家庭教育促进法.txt",
+      "size": 20397,
+      "sha256": "319a509a1e31b083a8423b8bd05aca7ee3f306be42ef1b9121408395b6ba7356"
+    },
+    {
+      "path": "中华人民共和国密码法.txt",
+      "size": 16619,
+      "sha256": "80531459a3f1911b19b446917c6a42e3d11bd943e18072fc7dc514587ecd2a3a"
+    },
+    {
+      "path": "中华人民共和国对外贸易法.txt",
+      "size": 24664,
+      "sha256": "b092d5d2af20f341aef14946d559fed3fc2585f396038b401041e1b9c581df96"
+    },
+    {
+      "path": "中华人民共和国就业促进法.txt",
+      "size": 20944,
+      "sha256": "ab3ffb713e45757d9d60dcb09133d57f6f4ac127e5cc23208fcb39c4786dead7"
+    },
+    {
+      "path": "中华人民共和国居民身份证法.txt",
+      "size": 10499,
+      "sha256": "17081fdba3f95cb9ddfb302efdb91fb57d7f8f54217556c1f63f64a54b0e9cce"
+    },
+    {
+      "path": "中华人民共和国工会法.txt",
+      "size": 21421,
+      "sha256": "64790b989a74c240edff7aeddcbbc440e1da5b36af7acc8db3b076915c2da35b"
+    },
+    {
+      "path": "中华人民共和国广告法.txt",
+      "size": 34790,
+      "sha256": "7ac265e4651239f87bcf2fb65154132419eeb018a4fef0d167fa8bb5d907176e"
+    },
+    {
+      "path": "中华人民共和国建筑法.txt",
+      "size": 28383,
+      "sha256": "9ad17ef6f3329dd91a715038714264ac523531a09d45e6f94bb50352912e7a35"
+    },
+    {
+      "path": "中华人民共和国引渡法.txt",
+      "size": 22041,
+      "sha256": "6ec0a55e5dc16b16963ea7c2152d44b073ddcee2910fa92a9ab8b1aa6177ecb3"
+    },
+    {
+      "path": "中华人民共和国律师法.txt",
+      "size": 23569,
+      "sha256": "20d44516d9dd4f4fe4b76ab1edbe238518c44fc3167016ad8d719718a9058505"
+    },
+    {
+      "path": "中华人民共和国循环经济促进法.txt",
+      "size": 26613,
+      "sha256": "3a117a9b4d4a5042e5d22a458acecaf26a43756385e3162ca4171958c933da83"
+    },
+    {
+      "path": "中华人民共和国慈善法.txt",
+      "size": 45703,
+      "sha256": "9e2f70c0b6806177a65f6a5ec372f91c83a62c91d74d4c0dc77d20f65d62b059"
+    },
+    {
+      "path": "中华人民共和国护照法.txt",
+      "size": 9437,
+      "sha256": "fac3773e87410a6499d6f1288d5f872270ce5d511ebf89eefc7a5b6cd8250764"
+    },
+    {
+      "path": "中华人民共和国拍卖法.txt",
+      "size": 16172,
+      "sha256": "e4a9dfa4316a1edc0b326e493067ee2ea67f16231f047a5d779cf54c562e2bd4"
+    },
+    {
+      "path": "中华人民共和国招标投标法.txt",
+      "size": 25466,
+      "sha256": "17796b20859dbdb558dfc11c302f2fa43a7036707ffc56522541268c7837b733"
+    },
+    {
+      "path": "中华人民共和国放射性污染防治法.txt",
+      "size": 22422,
+      "sha256": "9c9c267f5712c764edeb7e89df4db973d0ffc4f2c8967379448995eb2fddddca"
+    },
+    {
+      "path": "中华人民共和国政府采购法.txt",
+      "size": 31108,
+      "sha256": "6cdea7c22bb9e7c9d27db9e284943aa3a9a5c30783db30ad9feacba274bdae8f"
+    },
+    {
+      "path": "中华人民共和国教师法.txt",
+      "size": 14052,
+      "sha256": "580fc9f6eb8d418861053c771bfcc60f93b63f862c157fc5915149683173ff5c"
+    },
+    {
+      "path": "中华人民共和国教育法.txt",
+      "size": 28925,
+      "sha256": "1b4729ab479c1898cef7d55d6fbf7acff44c3705f8fa06fa559af9bd61a81b13"
+    },
+    {
+      "path": "中华人民共和国数据安全法.txt",
+      "size": 18822,
+      "sha256": "038a31c9ac2323d3d690b943a56ef0ddba7d0037367271e5c7b3b1b12098ed99"
+    },
+    {
+      "path": "中华人民共和国文物保护法.txt",
+      "size": 51686,
+      "sha256": "d19a94bd245bc92c18c0f179c9e62ed219df4762eb28c077b39362f59788ee4c"
+    },
+    {
+      "path": "中华人民共和国旅游法.txt",
+      "size": 41350,
+      "sha256": "a264d0f8ec7c8046004098b32445cc3eeb882d65cbbf375f12456b370ffbc843"
+    },
+    {
+      "path": "中华人民共和国无障碍环境建设法.txt",
+      "size": 25081,
+      "sha256": "e6257c33e1f6255655aea77abbfd51d72fc5cdcd8f04fe578b36f7af29b12194"
+    },
+    {
+      "path": "中华人民共和国期货和衍生品法.txt",
+      "size": 75815,
+      "sha256": "a8dbb08cdfae101955b7e15f98bf8332f43b253ffbd05777bf8399338794da31"
+    },
+    {
+      "path": "中华人民共和国未成年人保护法.txt",
+      "size": 56668,
+      "sha256": "47968130bf63f0ed0d87d870cff9fef0991882bb21e826c8ba683cb73d14ded1"
+    },
+    {
+      "path": "中华人民共和国枪支管理法.txt",
+      "size": 18954,
+      "sha256": "6d44f7269884153b0c9863f3719aa06f0bb203a45d155e089ae50169cf57d20c"
+    },
+    {
+      "path": "中华人民共和国标准化法.txt",
+      "size": 16582,
+      "sha256": "5fd0d7957e030b25629ed34e173fdd860f80efcfe9b33acf85a3305af7ba6337"
+    },
+    {
+      "path": "中华人民共和国核安全法.txt",
+      "size": 42342,
+      "sha256": "f785ff624d0222d402e53408438e055cf0857c1d0c4619c47a2d4e680acffb06"
+    },
+    {
+      "path": "中华人民共和国档案法.txt",
+      "size": 19430,
+      "sha256": "39dcec198dc1c67912b34aa9af2d674e9b70bd520de8071e0b4ffc9486f0362e"
+    },
+    {
+      "path": "中华人民共和国森林法.txt",
+      "size": 33472,
+      "sha256": "86506beec1afe5713a8482cd38487cc6389b34bb0b309c7eb996f5d30f21a4d5"
+    },
+    {
+      "path": "中华人民共和国残疾人保障法.txt",
+      "size": 25737,
+      "sha256": "082622ad196e942bbfc14241a7bfc6ae82e60fa549adc5c9c67867fb205c911e"
+    },
+    {
+      "path": "中华人民共和国母婴保健法.txt",
+      "size": 11207,
+      "sha256": "db9c1e60eb2bb84a2919a20895e4b09c552bac6019b0a85d83d464d6614f2d54"
+    },
+    {
+      "path": "中华人民共和国民事诉讼法.txt",
+      "size": 114220,
+      "sha256": "2f8fb12bb576bb79ba3bcb6b90614b6b2d7c2146749db8a6b2e02b94a981d5e8"
+    },
+    {
+      "path": "中华人民共和国民办教育促进法.txt",
+      "size": 20848,
+      "sha256": "73f39aecabdfb977c3b5caa62a954754a2086c21433feba0ad3e9056627b1468"
+    },
+    {
+      "path": "中华人民共和国民法典.txt",
+      "size": 373030,
+      "sha256": "17fd62bd0a9e7684d99a332517d0c2735718f6b1e2de593c1590b534426492ed"
+    },
+    {
+      "path": "中华人民共和国民用航空法.txt",
+      "size": 80037,
+      "sha256": "7c7c059fb02d29f68f278ea140dc5c70a840630917329250709ddc9547179ab7"
+    },
+    {
+      "path": "中华人民共和国气象法.txt",
+      "size": 18509,
+      "sha256": "483efc570708b7721382012a5874955cfa7816bae2c7b070c900068bee71812f"
+    },
+    {
+      "path": "中华人民共和国水土保持法.txt",
+      "size": 24073,
+      "sha256": "bd02cb974aa1c5c302b0f16623cd2cc1f34b6dafa5fede258af48cc00000ff4a"
+    },
+    {
+      "path": "中华人民共和国水污染防治法.txt",
+      "size": 49284,
+      "sha256": "5b0dc4398676539a98c1c4d227a5e6640cd436096abd0f657e26f10dcdfaa4f3"
+    },
+    {
+      "path": "中华人民共和国水法.txt",
+      "size": 34327,
+      "sha256": "de815e0201cb78b7b6bbf969ad8ec091103fbab8fbe00ac075e12f74b8276b5c"
+    },
+    {
+      "path": "中华人民共和国治安管理处罚法.txt",
+      "size": 47523,
+      "sha256": "8ebbbd5f0aaa9a82aebf31e3cd24e847ef10d7725f6bbca45fc01e6a60e00ba7"
+    },
+    {
+      "path": "中华人民共和国法律援助法.txt",
+      "size": 23510,
+      "sha256": "0e2b9e8dbd6bd5bee93881d8c430da329318f43bf0e8f41c45745ef41eed2a30"
+    },
+    {
+      "path": "中华人民共和国注册会计师法.txt",
+      "size": 15468,
+      "sha256": "0a159139821b3f05307558a66959973f33f107d9821c11d83ef045b20a03cb63"
+    },
+    {
+      "path": "中华人民共和国测绘法.txt",
+      "size": 28901,
+      "sha256": "7b33ebad69efd99a6f62229313b1f34a16e65853b14ad840da75e486881e6ee7"
+    },
+    {
+      "path": "中华人民共和国海上交通安全法.txt",
+      "size": 61163,
+      "sha256": "c1a936166f2b72ebb1abcf2373927c5d79b854081de6ad1a0b0a7dc875daa865"
+    },
+    {
+      "path": "中华人民共和国海事诉讼特别程序法.txt",
+      "size": 42594,
+      "sha256": "17e99d9f254734e38eaceab957b671eb905e48c05074e4715dfe754aed4a6754"
+    },
+    {
+      "path": "中华人民共和国海关法.txt",
+      "size": 40247,
+      "sha256": "650e44473c966a6d24aea4bf27e21c2a05d4393e9e1165c66bce10382e47e6c3"
+    },
+    {
+      "path": "中华人民共和国海南自由贸易港法.txt",
+      "size": 22528,
+      "sha256": "f24429f2f5de9c8d293d547e9d659fe085172f9aeb47ea4f0819ef1ca551905c"
+    },
+    {
+      "path": "中华人民共和国海商法.txt",
+      "size": 109974,
+      "sha256": "8ff4d9f5dbd4120169a30f218187d54357386367c4ba48fee24daab3c83c0c3b"
+    },
+    {
+      "path": "中华人民共和国海域使用管理法.txt",
+      "size": 18556,
+      "sha256": "6b97fb67c161a2097de05ba2227439ed43b534e8f5418344ee57a150ce183d2b"
+    },
+    {
+      "path": "中华人民共和国海岛保护法.txt",
+      "size": 21366,
+      "sha256": "37a678e3ead79c45de1f36632bbc43755e0eccdf4225bb4ba2a51453dacf9182"
+    },
+    {
+      "path": "中华人民共和国海洋环境保护法.txt",
+      "size": 65988,
+      "sha256": "18fdd784091041b553e84edd6565ebd9aca15f6e82486e34edeec0649f503e1e"
+    },
+    {
+      "path": "中华人民共和国海警法.txt",
+      "size": 33196,
+      "sha256": "4b54137990393f492bab019c25a0a725fe289ee6c9eeb90ee97ebbcdb169745e"
+    },
+    {
+      "path": "中华人民共和国消费者权益保护法.txt",
+      "size": 22930,
+      "sha256": "1f48c1ee6ae5138dc62d6fdbea1fe2d5446f6e85ade781dc8ca3b2336de93128"
+    },
+    {
+      "path": "中华人民共和国消防救援衔条例.txt",
+      "size": 10778,
+      "sha256": "5c37e6cb3bf34a16907e972092002bb7c11e70516a73793cec177037baf18287"
+    },
+    {
+      "path": "中华人民共和国消防法.txt",
+      "size": 35096,
+      "sha256": "ab91743d801471041fdde679aba98e080579c60e878bfbe53e947785b6b85e5b"
+    },
+    {
+      "path": "中华人民共和国涉外民事关系法律适用法.txt",
+      "size": 12267,
+      "sha256": "3010d28f66d68b7f34eeb88125070c2d150665a42adebc498204d3cb80da6b5e"
+    },
+    {
+      "path": "中华人民共和国深海海底区域资源勘探开发法.txt",
+      "size": 11456,
+      "sha256": "202397821d0774df55a60a236c72d219dc67572e30e8cad6eb92253f4454b3ad"
+    },
+    {
+      "path": "中华人民共和国清洁生产促进法.txt",
+      "size": 16320,
+      "sha256": "89dd1c833b423a8d27455f08526dc3f49cf9a9f96757f987d3533935ababa05d"
+    },
+    {
+      "path": "中华人民共和国渔业法.txt",
+      "size": 18482,
+      "sha256": "9ce0854e9043cba4fd1e6b48e4e3c0dc15a1b545a669759935a53e354d5aba2a"
+    },
+    {
+      "path": "中华人民共和国港口法.txt",
+      "size": 23115,
+      "sha256": "7678d91efa1583c2cd0ab62d12d33923b7f4bd331d422288d2822d7c175537ee"
+    },
+    {
+      "path": "中华人民共和国湿地保护法.txt",
+      "size": 28784,
+      "sha256": "e928a96705431217088a2261dc235e3adf78f43b2c22d6b159aa356499368d2b"
+    },
+    {
+      "path": "中华人民共和国烟叶税法.txt",
+      "size": 1561,
+      "sha256": "4a870c768a0eb58eeb9404f674a04d38d70be99dde2671448841e4328429810f"
+    },
+    {
+      "path": "中华人民共和国烟草专卖法.txt",
+      "size": 14392,
+      "sha256": "a88b241cc23b946022516d687042489242d92fcde133ce20fcfccca26616197b"
+    },
+    {
+      "path": "中华人民共和国煤炭法.txt",
+      "size": 17458,
+      "sha256": "26e2d13682cd56fd552a64dab8cf6e07990067c7a24cb3cf706dc5d4dc79ad9a"
+    },
+    {
+      "path": "中华人民共和国特种设备安全法.txt",
+      "size": 40682,
+      "sha256": "391c02f4cca95bdd968069476c7d589861306951a0fc3106b150d08dc77ac72c"
+    },
+    {
+      "path": "中华人民共和国献血法.txt",
+      "size": 7253,
+      "sha256": "c3d782ffa459950d1291513036f271d304f90e5ea0795f4db435cc7f8c118509"
+    },
+    {
+      "path": "中华人民共和国环境保护法.txt",
+      "size": 24141,
+      "sha256": "e39009d685d3f8b26d020215d894878f697a60ee0ca9410fe02d0b5c1fdf4719"
+    },
+    {
+      "path": "中华人民共和国环境保护税法.txt",
+      "size": 11285,
+      "sha256": "c98dff23073aba7ef29cdb6fae3c8d83429a342253a3e2cc7d2e32eba5b98604"
+    },
+    {
+      "path": "中华人民共和国环境影响评价法.txt",
+      "size": 19092,
+      "sha256": "a120bada87cbd2e163cb956a6e2944cac351eb04f215b7d13fdf915579058358"
+    },
+    {
+      "path": "中华人民共和国现役军官法.txt",
+      "size": 19375,
+      "sha256": "e4ed0d6e89b8df2a35faaecf1086add97c78b1b8090d8c52ffe0eebe28660b11"
+    },
+    {
+      "path": "中华人民共和国生物安全法.txt",
+      "size": 40663,
+      "sha256": "4472ba5f279e330f4802f5f95bae21fc04deaf3583fc752b3e0f346c2ce16a7e"
+    },
+    {
+      "path": "中华人民共和国电力法.txt",
+      "size": 22285,
+      "sha256": "1f1581660085f006ffb3a1db548f7b6e27c6076ca3448f9744192f62f7753b5e"
+    },
+    {
+      "path": "中华人民共和国电子商务法.txt",
+      "size": 33995,
+      "sha256": "2cf39f5ee6fc41ea68d68ee01548f085191068987e6c80b36940c3cf6175724a"
+    },
+    {
+      "path": "中华人民共和国电子签名法.txt",
+      "size": 13270,
+      "sha256": "7e2a24fe8f20883360d42f9af34d6522c2bb432295ad2a55b1f5c6b337da07bb"
+    },
+    {
+      "path": "中华人民共和国电影产业促进法.txt",
+      "size": 27067,
+      "sha256": "dcadf86bc6749670a34aa84f45a28a0de8383b1eb8e2f071c51c683ae8d98d76"
+    },
+    {
+      "path": "中华人民共和国畜牧法.txt",
+      "size": 38073,
+      "sha256": "ad9acd3b2bdd77d2117fa8743447ee959b455183d6c5ef56112584176aaae012"
+    },
+    {
+      "path": "中华人民共和国疫苗管理法.txt",
+      "size": 57751,
+      "sha256": "e1ea873df2bdcaf3c8d810e88449ebe3ae67d9169c5a0d3b751c32d3c1a14a22"
+    },
+    {
+      "path": "中华人民共和国监狱法.txt",
+      "size": 20140,
+      "sha256": "156971020dde61f46343814d41491fab4f40dc549bcc222bc4834d9282a3e8a9"
+    },
+    {
+      "path": "中华人民共和国石油天然气管道保护法.txt",
+      "size": 23177,
+      "sha256": "b4a97bdb4254059623e7bb5e94ac5dee10b2a9693e82f93338850103b4071e3d"
+    },
+    {
+      "path": "中华人民共和国矿产资源法.txt",
+      "size": 37190,
+      "sha256": "bda7f151c438620e4a8138efe1b624ad10fd84b86660fdef77da7aaee52932c6"
+    },
+    {
+      "path": "中华人民共和国矿山安全法.txt",
+      "size": 14613,
+      "sha256": "8ecb1960d4d69ad2c02d0864d45202f7ee119cf2eaf99770c86ee1660aa14e1d"
+    },
+    {
+      "path": "中华人民共和国社会保险法.txt",
+      "size": 34870,
+      "sha256": "70c14be3a1c665f9ba97f28025516c19adb0d2b65356231ed75abde6df3a7b94"
+    },
+    {
+      "path": "中华人民共和国社区矫正法.txt",
+      "size": 23890,
+      "sha256": "634d131fc0973381006b46f892a3f4c768f829bf10b964c051ca21bc8e6c2639"
+    },
+    {
+      "path": "中华人民共和国票据法.txt",
+      "size": 34208,
+      "sha256": "849eb761e9b4a4fb22bd1a638cdf175be57235585e64c2c6f0784482903d519e"
+    },
+    {
+      "path": "中华人民共和国禁毒法.txt",
+      "size": 21790,
+      "sha256": "437216844dcef6a2143279083f220366e71af2b6021a620cb9f1a8459336b570"
+    },
+    {
+      "path": "中华人民共和国种子法.txt",
+      "size": 46252,
+      "sha256": "408e92efe89ca3e492f0be3efbdf25b583f9d246bf661090be7e641815adde00"
+    },
+    {
+      "path": "中华人民共和国科学技术普及法.txt",
+      "size": 19565,
+      "sha256": "f67edde835a1d6adbee389a0897ed920cfc0015475b80cc3895633c26e49e279"
+    },
+    {
+      "path": "中华人民共和国科学技术进步法.txt",
+      "size": 53062,
+      "sha256": "8f9d7ba6d55854e835ce26a245d2370e72a3c8e5d443663593703e76ab59cddd"
+    },
+    {
+      "path": "中华人民共和国税收征收管理法.txt",
+      "size": 37977,
+      "sha256": "84816a6be188b269fbde712a42a11c4233ccfc20109f0e0c7b2fd45aa4b71914"
+    },
+    {
+      "path": "中华人民共和国突发事件应对法.txt",
+      "size": 51694,
+      "sha256": "a17b32e936598e0243791e030bcf905af28967726dbd205a15806318279598fb"
+    },
+    {
+      "path": "中华人民共和国粮食安全保障法.txt",
+      "size": 31988,
+      "sha256": "ebf5a20b2cbb4a9181ed46e676501d8248b7e7e1d61d5d1a766913e11ef0c364"
+    },
+    {
+      "path": "中华人民共和国精神卫生法.txt",
+      "size": 35556,
+      "sha256": "9e8ee91ef74d01cfdcc02e6f46fb5a169629c58ba493b0510a5769f231b94f3b"
+    },
+    {
+      "path": "中华人民共和国红十字会法.txt",
+      "size": 11326,
+      "sha256": "fec1e8555c9c9b407982fd089c27b9c04fe6dd99112f066313751e93e12968a0"
+    },
+    {
+      "path": "中华人民共和国统计法.txt",
+      "size": 21800,
+      "sha256": "b89a8382726cf632c1108c161b341267a320f8a4b8c00a60f59ac3c2aea096f4"
+    },
+    {
+      "path": "中华人民共和国网络安全法.txt",
+      "size": 33561,
+      "sha256": "6d53f8c9004f5ec477a5cb10af3a8f7e83b7f191d231d5e41277f701bf84fc8c"
+    },
+    {
+      "path": "中华人民共和国老年人权益保障法.txt",
+      "size": 27330,
+      "sha256": "2b2669d20fbb25246bdaac05c0fb71e2d243a0f06404dc3086e241e8604b9339"
+    },
+    {
+      "path": "中华人民共和国耕地占用税法.txt",
+      "size": 6553,
+      "sha256": "23fc9d5d77f7a03d7a01c0cc458f96a8f482c30430ffd8f3588a03081ab01277"
+    },
+    {
+      "path": "中华人民共和国职业教育法.txt",
+      "size": 33749,
+      "sha256": "244bcb5df8f4e44e9b7aff667b482a4b8df2db96f30a07da2be362e4b8609a27"
+    },
+    {
+      "path": "中华人民共和国职业病防治法.txt",
+      "size": 45355,
+      "sha256": "c82aa315fc234d468e5d871a8e39c8fa415b06bbd6e5a5acf19f8d94609b6afd"
+    },
+    {
+      "path": "中华人民共和国能源法.txt",
+      "size": 30101,
+      "sha256": "6989fe13d7abdc7c6a87418198a43086f35123ad0b88155a3be921619c47591a"
+    },
+    {
+      "path": "中华人民共和国航道法.txt",
+      "size": 20753,
+      "sha256": "e1e2847dceee5a9cb13cf8aa2ee8c447782b96622d0d4360922cd17702a098e9"
+    },
+    {
+      "path": "中华人民共和国船舶吨税法.txt",
+      "size": 8248,
+      "sha256": "3b29537b7c10b2aee99a24bf9d638ba6b2210a7bf0af12623919b5b1ece0472d"
+    },
+    {
+      "path": "中华人民共和国节约能源法.txt",
+      "size": 30067,
+      "sha256": "2b8d747cb727d433474aff601bf01455eeb3447119976aeb8768e0322cfe1d9e"
+    },
+    {
+      "path": "中华人民共和国草原法.txt",
+      "size": 28204,
+      "sha256": "72ee7a87f54dee9bb4cb1f8751cdb8602979a04c2dc88678b04fe96a2d434360"
+    },
+    {
+      "path": "中华人民共和国药品管理法.txt",
+      "size": 68853,
+      "sha256": "8a587360a282f64eed468ced636a7645b6b931900c1020b6514d1e204581b6e8"
+    },
+    {
+      "path": "中华人民共和国著作权法.txt",
+      "size": 33911,
+      "sha256": "75cbfd9e87b2e22b1b81e47557b2c9f75ee934bf7a13c2b92ab0b89e7dca887f"
+    },
+    {
+      "path": "中华人民共和国行政处罚法.txt",
+      "size": 33531,
+      "sha256": "3d2cf6e01a32350a1958e9c7e762c6b434d9e0d7e1f2861a23a5e359e2de65ad"
+    },
+    {
+      "path": "中华人民共和国行政复议法.txt",
+      "size": 41773,
+      "sha256": "f9f7fd755a1cc43cf5e761932f7148f6c096f1c313d2df07dee9b33553c19460"
+    },
+    {
+      "path": "中华人民共和国行政强制法.txt",
+      "size": 29585,
+      "sha256": "3ded5e4614b6021021550e979e5fc018f029067d8377f11cdbbd6f5387e7c6b6"
+    },
+    {
+      "path": "中华人民共和国行政许可法.txt",
+      "size": 36020,
+      "sha256": "1637cd4447b5210f648ee29379b2dfcb98f111d4f0f2ffd15f57690fce9e8511"
+    },
+    {
+      "path": "中华人民共和国行政诉讼法.txt",
+      "size": 38884,
+      "sha256": "4be324c460da1bff7c84650e27ce20960d76f3dc6e884240689a448d9891ff4a"
+    },
+    {
+      "path": "中华人民共和国计量法.txt",
+      "size": 8373,
+      "sha256": "fb630505b717d29b15438f55401f7f8ea3e7a7f038e510921ccbf6afa953cd74"
+    },
+    {
+      "path": "中华人民共和国证券投资基金法.txt",
+      "size": 70536,
+      "sha256": "434a29dacb95e5b0bdbe31f98a341cbb0e2a0eeec22934a29a77d15f1eee7e61"
+    },
+    {
+      "path": "中华人民共和国证券法.txt",
+      "size": 109125,
+      "sha256": "d4dd78bb620d2285f5b58febb028d6c63ba7db5ad33bb435c4a020cc2f2072ed"
+    },
+    {
+      "path": "中华人民共和国资产评估法.txt",
+      "size": 20542,
+      "sha256": "4b2aeed8ea884d624035745ea53a82860f9027561d18ea622dcf1cca653a6a7e"
+    },
+    {
+      "path": "中华人民共和国资源税法.txt",
+      "size": 8000,
+      "sha256": "0f6a482e1b59446a015b8e53ea76fe7c2711b6f9023f230d99e81b49e457f844"
+    },
+    {
+      "path": "中华人民共和国车船税法.txt",
+      "size": 3620,
+      "sha256": "c50c8a656e263be4aa20d01f0242e6be3719e9bff866354b52cba474fd63da91"
+    },
+    {
+      "path": "中华人民共和国车辆购置税法.txt",
+      "size": 5444,
+      "sha256": "f59a454f58a8651b4e2b70ac747ea3d47c4fe13b8847485eb6eefc8106481a42"
+    },
+    {
+      "path": "中华人民共和国进出口商品检验法.txt",
+      "size": 11572,
+      "sha256": "a10e9053a6c3b7d7a800938eb90ce5ec15fbd4f8e0557accd96114cbfcb925c2"
+    },
+    {
+      "path": "中华人民共和国进出境动植物检疫法.txt",
+      "size": 18014,
+      "sha256": "db55652c0410b1f5d359109ddea2101a3c92e80f2748aa9521f57605c3935625"
+    },
+    {
+      "path": "中华人民共和国退役军人保障法.txt",
+      "size": 29769,
+      "sha256": "0519e650e4cfa7b554d26a5ab3abcf32a4723a84d1476725e08b050c2afed28c"
+    },
+    {
+      "path": "中华人民共和国道路交通安全法.txt",
+      "size": 53025,
+      "sha256": "b6c547a48b9fb3e4c799b75aa2f7f86d67fde1f47ea863b408d159b56c280a3e"
+    },
+    {
+      "path": "中华人民共和国邮政法.txt",
+      "size": 34472,
+      "sha256": "0eeb421d9b2bc00243e13b4eb49c14d769147652410cb516ec7f974face536ba"
+    },
+    {
+      "path": "中华人民共和国野生动物保护法.txt",
+      "size": 41118,
+      "sha256": "c93ef5a9973eedd952ce20fd40c0e9178ad9064cfc66d68ca2e663e4e60f46a2"
+    },
+    {
+      "path": "中华人民共和国铁路法.txt",
+      "size": 23260,
+      "sha256": "c7631782e7f532401eded60ff9428026db061e473972a14ed723fe0c1212d5db"
+    },
+    {
+      "path": "中华人民共和国银行业监督管理法.txt",
+      "size": 20781,
+      "sha256": "53db35810e081286da586cce02b91f43bc6e102057386dc0ebe43a85ebf06b24"
+    },
+    {
+      "path": "中华人民共和国长江保护法.txt",
+      "size": 47605,
+      "sha256": "0a1ca9f90bebd6a3d074116c9e9601a0edc0ca89af9decd93cb7e94f11f7c24d"
+    },
+    {
+      "path": "中华人民共和国防沙治沙法.txt",
+      "size": 21413,
+      "sha256": "0c5e5084d1357b1084483f2bef1b001c3db246f693962e86fc17e47f638f2c20"
+    },
+    {
+      "path": "中华人民共和国防洪法.txt",
+      "size": 31997,
+      "sha256": "3c62f0544691ca1e732908f574a5d0c3b019668798cf3cd1263ac5f9650eab8f"
+    },
+    {
+      "path": "中华人民共和国防震减灾法.txt",
+      "size": 41486,
+      "sha256": "20736de92b4329fcf26ae66a847487658388a128e211c72af11efa55834ab7e9"
+    },
+    {
+      "path": "中华人民共和国青藏高原生态保护法.txt",
+      "size": 32512,
+      "sha256": "a52647881ac6428ab2bb7c5a4070f77f5f3ef294fe7cf37123db92d56020cc69"
+    },
+    {
+      "path": "中华人民共和国非物质文化遗产法.txt",
+      "size": 16426,
+      "sha256": "57626d17782470504d93d76f9b34d7648b3bdb2839d09dec78a6dfa3cce7f106"
+    },
+    {
+      "path": "中华人民共和国预备役人员法.txt",
+      "size": 24602,
+      "sha256": "a7ab2b154fe34924973bd6c78a3fc28f879e34a18543247add6a5e413fd8ab70"
+    },
+    {
+      "path": "中华人民共和国预算法.txt",
+      "size": 46978,
+      "sha256": "de32eb1eeb22eda3d466e8665636a0d0d59c639fbea113ccb202ccfd05d13fe8"
+    },
+    {
+      "path": "中华人民共和国预防未成年人犯罪法.txt",
+      "size": 26258,
+      "sha256": "f27ef12ff07e9a2c3ac45eca3c44e71caf08c283f4853f503b8976cf76eaa350"
+    },
+    {
+      "path": "中华人民共和国食品安全法.txt",
+      "size": 94504,
+      "sha256": "22adfe6509349fa2a541f6a46fdc164f02797eefa880a9d1a360683f38d70e8f"
+    },
+    {
+      "path": "中华人民共和国驻外外交人员法.txt",
+      "size": 15943,
+      "sha256": "b4732305b1cf6d8e5540009649970d247c722cddfe44068950f849c801a8d30e"
+    },
+    {
+      "path": "中华人民共和国高等教育法.txt",
+      "size": 23653,
+      "sha256": "19de42364c555531e5276d19f7ab17aeb22e21f6a5d142486d200332787e46c1"
+    },
+    {
+      "path": "中华人民共和国黄河保护法.txt",
+      "size": 69315,
+      "sha256": "99723278bca56ba46593b3fb8e93ae3302eb0e6322cac10cf561f75bded88245"
+    },
+    {
+      "path": "中华人民共和国黑土地保护法.txt",
+      "size": 17375,
+      "sha256": "b4a789675cefe54281a20acff02fb4e1fa4e67df124f9f821b68c7d55c945594"
+    }
+  ]
+}

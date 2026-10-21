@@ -261,7 +261,39 @@ def build_parser() -> argparse.ArgumentParser:
         help="Also audit corpus integrity of this dataset (defaults to config).",
     )
     audit.add_argument("--skip-integrity", action="store_true")
+    audit.add_argument(
+        "--corpus-manifest",
+        default=None,
+        help="Refuse to audit unless --data-dir matches this pinned corpus manifest.",
+    )
     audit.set_defaults(handler=handle_retrieval_audit)
+
+    verify_corpus_parser = subparsers.add_parser(
+        "verify-corpus",
+        help="Check a local corpus against the pinned manifest byte for byte.",
+    )
+    verify_corpus_parser.add_argument("--data-dir", default=None)
+    verify_corpus_parser.add_argument("--manifest", default=None)
+    verify_corpus_parser.set_defaults(handler=handle_verify_corpus)
+
+    fetch_corpus_parser = subparsers.add_parser(
+        "fetch-corpus",
+        help="Download the pinned corpus revision and verify every file.",
+    )
+    fetch_corpus_parser.add_argument("--output-dir", required=True)
+    fetch_corpus_parser.add_argument("--manifest", default=None)
+    fetch_corpus_parser.add_argument(
+        "--endpoint",
+        default=None,
+        help="Hugging Face endpoint such as https://hf-mirror.com "
+        "(defaults to HF_ENDPOINT, then https://huggingface.co).",
+    )
+    fetch_corpus_parser.add_argument(
+        "--overwrite",
+        action="store_true",
+        help="Replace local files whose content differs from the manifest.",
+    )
+    fetch_corpus_parser.set_defaults(handler=handle_fetch_corpus, load_dotenv=False)
 
     citation = subparsers.add_parser(
         "generate-citation-cases",
@@ -1165,6 +1197,20 @@ def handle_retrieval_audit(args: argparse.Namespace) -> int:
         resolve_path(path)
         for path in (args.cases or ["eval_cases/legal_eval_cases_v3.jsonl"])
     ]
+    corpus = None
+    if args.corpus_manifest:
+        from .corpus_manifest import load_corpus_manifest, verify_corpus
+
+        data_dir = resolve_path(args.data_dir or config["data"]["dataset_dir"])
+        corpus = verify_corpus(
+            data_dir, load_corpus_manifest(resolve_path(args.corpus_manifest))
+        ).to_dict()
+        if not corpus["ok"]:
+            raise ValueError(
+                f"{data_dir} does not match corpus {corpus['corpus_id']}: "
+                f"{len(corpus['missing'])} missing, {len(corpus['modified'])} modified, "
+                f"{len(corpus['extra'])} extra files"
+            )
     integrity = None
     if not args.skip_integrity:
         data_dir = resolve_path(args.data_dir or config["data"]["dataset_dir"])
@@ -1205,6 +1251,10 @@ def handle_retrieval_audit(args: argparse.Namespace) -> int:
             "embedding": args.embedding or "",
             "reranker": args.reranker or "none",
         }
+        if corpus is not None:
+            metadata["corpus"] = {
+                key: corpus[key] for key in ("corpus_id", "revision", "ok", "file_count")
+            }
         if integrity is not None:
             metadata["integrity_summary"] = {
                 key: integrity[key]
@@ -1261,6 +1311,46 @@ def handle_generate_citation_cases(args: argparse.Namespace) -> int:
     print(f"Wrote {len(cases)} citation cases from {len(targets)} articles: {path}")
     print(json.dumps(dict(sorted(counts.items())), ensure_ascii=False))
     return 0
+
+
+def _corpus_manifest_path(args: argparse.Namespace, config: dict) -> Path:
+    from .corpus_manifest import DEFAULT_MANIFEST_PATH
+
+    return resolve_path(
+        args.manifest or config["data"].get("corpus_manifest") or DEFAULT_MANIFEST_PATH
+    )
+
+
+def handle_verify_corpus(args: argparse.Namespace) -> int:
+    from .corpus_manifest import load_corpus_manifest, verify_corpus
+
+    config = load_config(args.config)
+    data_dir = resolve_path(args.data_dir or config["data"]["dataset_dir"])
+    manifest = load_corpus_manifest(_corpus_manifest_path(args, config))
+    result = verify_corpus(data_dir, manifest)
+    print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
+    if result.ok:
+        print(f"{data_dir} matches {manifest.corpus_id} ({result.file_count} files).")
+        return 0
+    print(f"{data_dir} is NOT {manifest.corpus_id}.")
+    return 1
+
+
+def handle_fetch_corpus(args: argparse.Namespace) -> int:
+    from .corpus_manifest import fetch_corpus, load_corpus_manifest
+
+    config = load_config(args.config)
+    manifest = load_corpus_manifest(_corpus_manifest_path(args, config))
+    output_dir = resolve_path(args.output_dir)
+    result = fetch_corpus(
+        manifest, output_dir, endpoint=args.endpoint, overwrite=args.overwrite
+    )
+    print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
+    if result.ok:
+        print(f"Fetched and verified {manifest.corpus_id} into {output_dir}.")
+        return 0
+    print(f"{output_dir} still differs from {manifest.corpus_id}; see the lists above.")
+    return 1
 
 
 def _file_sha256(path: Path) -> str:
