@@ -1351,10 +1351,9 @@ def source_label(result: SearchResult) -> str:
 
 
 def render_retrieval_only_answer(results: list[SearchResult]) -> str:
-    snippets = []
-    for result in results:
-        chunk = result.chunk
-        snippets.append(f"[S{result.rank}] {chunk.text[:400]}")
+    # Whole articles only: a cut after N characters can stop mid-item and
+    # read as if the provision ended there.
+    snippets = [f"[S{result.rank}] {result.chunk.text}" for result in results]
     return "检索到以下可能相关的法律依据：\n\n" + "\n\n".join(snippets)
 
 
