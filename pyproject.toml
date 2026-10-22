@@ -68,3 +68,4 @@ exclude = ["configs*", "reports*", "artifacts*", "eval_cases*", "tests*"]
 
 [tool.setuptools.package-data]
 "legal_rag.storage.alembic" = ["script.py.mako"]
+"legal_rag.web" = ["static/*.html"]
