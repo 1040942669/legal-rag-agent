@@ -5,7 +5,8 @@
 ## 推荐阅读顺序
 
 1. [项目 README](../README.md)：问题、架构、量化结果、踩坑、快速开始和当前状态。
-2. [项目边界与 v1.0.0 冻结决定](PROJECT_SCOPE.md)：范围、语料、评测与流程的决定，以及什么情况才开新版本。
+2. [项目边界与版本决定](PROJECT_SCOPE.md)：范围、语料、评测与流程的决定；2026-10-22 起解除冻结，v1.2 的计划在第 8 节。
+   [核心架构说明](ARCHITECTURE_CORE.md)：一次问答请求经过的每个机制做什么、为什么、怎么验证，以及已知问题。
 3. [项目复盘](../reports/CASE_STUDY.md)、[v1.0.0 基线报告](../reports/retrieval/V1_0_BASELINE.md) 与 [v1.1.0 设计消融](../reports/retrieval/V1_1_SILICONFLOW.md)：问题如何被发现、冻结语料上 BM25、向量检索、多路召回与重排的数字。
 4. [实验结果总汇](../reports/RESULTS_SUMMARY.md)：2026-06 历史矩阵的完整指标与复现边界（旧语料，条件不同）。
 5. [评测方案](EVALUATION_PLAN.md)：case 类型、实验流程、judge 使用方式和解释原则。
