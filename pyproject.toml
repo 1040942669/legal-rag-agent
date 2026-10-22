@@ -21,6 +21,7 @@ dependencies = [
 legal-rag = "legal_rag.cli:main"
 legal-rag-api = "legal_rag.api.command:main"
 legal-rag-jobs = "legal_rag.jobs.command:main"
+legal-rag-web = "legal_rag.web.command:main"
 
 [project.optional-dependencies]
 database = [

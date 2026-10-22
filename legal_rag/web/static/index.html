@@ -1,0 +1,950 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>法律条文 RAG 演示</title>
+<link rel="icon" href="data:,">
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #f5f6f8;
+  --panel: #ffffff;
+  --text: #1d2330;
+  --muted: #5f6878;
+  --border: #dde1e8;
+  --accent: #2f6fdf;
+  --accent-soft: #e6eefc;
+  --ok: #1f8a4c;
+  --ok-soft: #e3f4ea;
+  --warn: #b26a00;
+  --warn-soft: #fff3dc;
+  --bad: #c62d38;
+  --bad-soft: #fde7e8;
+  --skip: #8a93a3;
+  --skip-soft: #eef0f3;
+  --highlight: #fff1a8;
+  --mono: ui-monospace, "Cascadia Mono", Consolas, "Courier New", monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14171d;
+    --panel: #1c2028;
+    --text: #e3e7ee;
+    --muted: #9aa3b2;
+    --border: #2e3440;
+    --accent: #6d9cf0;
+    --accent-soft: #1f2c44;
+    --ok: #4cc27f;
+    --ok-soft: #173326;
+    --warn: #f0b04a;
+    --warn-soft: #3a2c12;
+    --bad: #f0707a;
+    --bad-soft: #3d1b1f;
+    --skip: #7d8696;
+    --skip-soft: #252a33;
+    --highlight: #5a4e12;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.6 -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei",
+    "Noto Sans CJK SC", sans-serif;
+}
+header.top {
+  padding: 18px 24px 8px;
+  max-width: 1280px;
+  margin: 0 auto;
+}
+header.top h1 { margin: 0; font-size: 22px; }
+header.top p { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+main {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 8px 24px 40px;
+  display: grid;
+  gap: 16px;
+}
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px 18px;
+  min-width: 0;
+}
+.panel h2 {
+  margin: 0 0 12px;
+  font-size: 16px;
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.panel h2 .sub { font-size: 13px; font-weight: normal; color: var(--muted); }
+.two-col {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+  gap: 16px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .two-col { grid-template-columns: minmax(0, 1fr); }
+  header.top, main { padding-left: 16px; padding-right: 16px; }
+}
+textarea, select, input[type="number"] {
+  font: inherit;
+  color: inherit;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+textarea { width: 100%; resize: vertical; min-height: 76px; }
+textarea:focus, select:focus, input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+.examples { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0; }
+.examples button, .chip-btn {
+  font: inherit;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 3px 12px;
+  cursor: pointer;
+}
+.examples button:hover { border-color: var(--accent); color: var(--accent); }
+.controls { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 18px; }
+.controls label { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }
+.controls input[type="number"] { width: 64px; }
+.controls .model-note { color: var(--muted); font-size: 12px; }
+button.primary {
+  font: inherit;
+  font-weight: 600;
+  background: var(--accent);
+  color: #fff;
+  border: 0;
+  border-radius: 6px;
+  padding: 7px 22px;
+  cursor: pointer;
+  margin-left: auto;
+}
+button.primary:disabled { opacity: 0.6; cursor: progress; }
+.hint { margin: 8px 0 0; color: var(--muted); font-size: 12px; }
+.notice {
+  border-radius: 8px;
+  padding: 10px 14px;
+  font-size: 14px;
+  border: 1px solid transparent;
+}
+.notice.warn { background: var(--warn-soft); border-color: var(--warn); color: var(--text); }
+.notice.bad { background: var(--bad-soft); border-color: var(--bad); color: var(--text); }
+.notice ul { margin: 4px 0 0; padding-left: 20px; }
+.notice strong { color: inherit; }
+/* pipeline steps */
+.steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+}
+@media (max-width: 900px) { .steps { grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); } }
+.step {
+  --c: var(--skip);
+  --c-soft: var(--panel);
+  width: 100%;
+  font: inherit;
+  text-align: left;
+  color: var(--text);
+  background: var(--c-soft);
+  border: 1px solid var(--border);
+  border-top: 4px solid var(--c);
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+  display: grid;
+  gap: 2px;
+}
+.step:hover { border-color: var(--c); }
+.step.selected { box-shadow: 0 0 0 2px var(--c); }
+.step .name { font-weight: 600; font-size: 14px; }
+.step .state { font-size: 12px; color: var(--c); }
+.step .time { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.step[data-status="running"] { --c: var(--accent); --c-soft: var(--accent-soft); }
+.step[data-status="running"] .state::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse 1s ease-in-out infinite;
+}
+@keyframes pulse { 50% { opacity: 0.25; } }
+@media (prefers-reduced-motion: reduce) { .step[data-status="running"] .state::before { animation: none; } }
+.step[data-status="done"] { --c: var(--ok); --c-soft: var(--ok-soft); }
+.step[data-status="done"].warn { --c: var(--warn); --c-soft: var(--warn-soft); }
+.step[data-status="failed"] { --c: var(--bad); --c-soft: var(--bad-soft); }
+.step[data-status="skipped"] { --c: var(--skip); --c-soft: var(--skip-soft); border-top-style: dashed; }
+.step[data-status="skipped"] .name { color: var(--muted); }
+.step-detail {
+  margin-top: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: var(--bg);
+  overflow-x: auto;
+}
+.step-detail h3 { margin: 0 0 8px; font-size: 15px; }
+.kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; margin: 0; font-size: 13px; }
+.kv dt { color: var(--muted); }
+.kv dd { margin: 0; overflow-wrap: anywhere; }
+.kv .kv { margin-top: 2px; }
+.kv-error { color: var(--bad); }
+table.mini { border-collapse: collapse; font-size: 12px; margin: 2px 0; }
+table.mini th, table.mini td { border: 1px solid var(--border); padding: 3px 7px; text-align: left; vertical-align: top; }
+table.mini th { color: var(--muted); font-weight: normal; background: var(--panel); }
+.chip {
+  display: inline-block;
+  font-size: 12px;
+  border-radius: 4px;
+  padding: 0 6px;
+  margin: 1px 4px 1px 0;
+  background: var(--skip-soft);
+  border: 1px solid var(--border);
+}
+.yes { color: var(--ok); font-weight: 600; }
+.no { color: var(--bad); font-weight: 600; }
+.mono { font-family: var(--mono); font-size: 12px; }
+details > summary { cursor: pointer; color: var(--accent); }
+
+/* answer */
+.answer-text { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 15px; }
+.answer-text.empty, .empty-note { color: var(--muted); }
+a.cite {
+  color: var(--accent);
+  font-weight: 600;
+  text-decoration: none;
+  border-bottom: 1px dashed var(--accent);
+  cursor: pointer;
+}
+a.cite.missing { color: var(--bad); border-bottom-color: var(--bad); cursor: help; }
+.draft { margin-top: 12px; }
+.draft .draft-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border: 1px dashed var(--warn);
+  border-radius: 6px;
+  background: var(--warn-soft);
+}
+.badge-unverified {
+  display: inline-block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--warn);
+  border: 1px solid var(--warn);
+  border-radius: 4px;
+  padding: 0 6px;
+  margin-bottom: 6px;
+}
+
+/* sources */
+.sources { display: grid; gap: 10px; }
+.source {
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: var(--panel);
+  scroll-margin-top: 16px;
+  transition: background-color 0.4s;
+}
+.source.flash { background: var(--highlight); }
+.source header { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.source .sid { font-family: var(--mono); font-weight: 700; color: var(--accent); }
+.source .title { font-weight: 600; }
+.source .badges { margin: 4px 0; display: flex; flex-wrap: wrap; gap: 4px; }
+.source .badges .chip.pin { background: var(--ok-soft); border-color: var(--ok); color: var(--ok); }
+.source .text { margin: 6px 0 4px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; }
+.source .text.clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.source footer { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.source .toggle { font: inherit; font-size: 13px; background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; }
+
+/* models and usage */
+table.models { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.models th, table.models td { border-bottom: 1px solid var(--border); padding: 6px 4px; text-align: left; vertical-align: top; }
+table.models th { color: var(--muted); font-weight: normal; width: 128px; white-space: nowrap; }
+.unused { color: var(--muted); }
+.models-section + .models-section { margin-top: 14px; }
+.models-section h3 { font-size: 14px; margin: 0 0 6px; }
+</style>
+</head>
+<body>
+<header class="top">
+  <h1>法律条文 RAG 演示</h1>
+  <p id="subtitle">正在读取服务配置…</p>
+</header>
+<main>
+  <div id="warnings" class="notice warn" hidden></div>
+
+  <section class="panel" aria-labelledby="ask-title">
+    <h2 id="ask-title">提问</h2>
+    <form id="ask-form">
+      <label for="question" class="hint" style="display:block;margin:0 0 4px">问题（Ctrl+Enter 提交）</label>
+      <textarea id="question" maxlength="2000" placeholder="例如：劳动合同法第三十九条规定了什么？" required></textarea>
+      <div class="examples" id="examples" aria-label="示例问题"></div>
+      <div class="controls">
+        <label>检索器 <select id="retriever"></select></label>
+        <label><input type="checkbox" id="rerank"> 重排 <span class="model-note" id="rerank-note"></span></label>
+        <label><input type="checkbox" id="generate" checked> 生成回答 <span class="model-note" id="generate-note"></span></label>
+        <label>Top-K <input type="number" id="top-k" min="1" max="20" value="5"></label>
+        <button type="submit" class="primary" id="submit">提问</button>
+      </div>
+    </form>
+  </section>
+
+  <div id="errors" class="notice bad" hidden role="alert"></div>
+
+  <section class="panel" aria-labelledby="steps-title">
+    <h2 id="steps-title">链路节点 <span class="sub" id="total-time"></span></h2>
+    <ol class="steps" id="steps"></ol>
+    <div class="step-detail" id="step-detail" hidden></div>
+  </section>
+
+  <section class="panel" aria-labelledby="answer-title">
+    <h2 id="answer-title">回答 <span class="sub" id="answer-meta"></span></h2>
+    <div id="answer-notice"></div>
+    <div class="answer-text empty" id="answer">提交问题后，回答会显示在这里。</div>
+    <div id="draft"></div>
+  </section>
+
+  <div class="two-col">
+    <section class="panel" aria-labelledby="sources-title">
+      <h2 id="sources-title">检索材料 <span class="sub" id="sources-meta"></span></h2>
+      <div class="sources" id="sources"><p class="empty-note">暂无。</p></div>
+    </section>
+    <section class="panel" aria-labelledby="models-title">
+      <h2 id="models-title">模型与用量</h2>
+      <div id="models"><p class="empty-note">暂无。</p></div>
+    </section>
+  </div>
+</main>
+<script>
+"use strict";
+
+const NODES = [
+  ["analysis", "问题分析"],
+  ["retrieval", "检索"],
+  ["rerank", "重排"],
+  ["evidence", "证据检查"],
+  ["followup", "补充检索"],
+  ["generation", "生成"],
+  ["verification", "校验"],
+];
+const STATUS_TEXT = { pending: "待执行", running: "进行中", done: "完成", skipped: "跳过", failed: "失败" };
+const ERROR_KIND_LABELS = {
+  missing_key: "缺少 API key",
+  network: "网络失败",
+  provider: "模型服务失败",
+  live_calls_disabled: "模型调用被拦截",
+  internal: "内部错误",
+  http: "请求被拒绝",
+};
+const FAILURE_LABELS = {
+  schema_invalid: "结构不合规",
+  evidence_catalog_invalid: "证据目录无效",
+  citation_ids_invalid: "引用编号无效",
+  evidence_scope_invalid: "引用超出范围",
+  missing_disclaimer: "缺少免责声明",
+  response_mode_invalid: "回答模式不符",
+};
+const ANSWER_KIND_LABELS = {
+  model: "模型生成，已通过校验",
+  retrieval_only: "未调用生成模型，以下是检索结果摘要",
+  evidence_limited: "证据不足，程序化保守回答",
+  pre_retrieval_refusal: "检索前拒答",
+  generation_error: "生成模型调用失败，显示降级回答",
+};
+const KEY_LABELS = {
+  standalone_question: "独立检索问题", risk_flags: "风险标记", law_names: "法律名",
+  article_numbers: "条号", case_type_hints: "问题类型", complexity_flags: "复杂度标记",
+  confidence: "置信度", adaptive: "自适应检索", enabled: "已启用", triggered: "本次触发",
+  would_trigger: "若启用会触发", reasons: "触发原因", retriever: "检索器",
+  retriever_name: "检索器名称", label: "名称", queries: "检索词", query: "检索词",
+  requested_top_k: "请求候选数", candidate_count: "候选数", exact_pin: "精确条号置顶",
+  supported: "支持", applied: "生效", pinned: "置顶条目", note: "说明",
+  parsed_citations: "BM25 解析出的引用", law_hints: "法律名", article_hints: "条号",
+  unresolved_law_titles: "未解析的法律名", embedding_model: "向量模型",
+  top_candidates: "候选（前 10）", rank: "排名", score: "分数", bm25_rank: "BM25 排名",
+  dense_rank: "向量排名", model: "模型", provider: "提供方", calls: "调用次数",
+  documents: "候选数", returned: "返回数", promoted_from_outside_top_k: "从 Top-K 外提升",
+  ranking: "重排前后排名", base_rank: "重排前排名", base_score: "重排前分数",
+  rerank_score: "重排分数", sufficient: "证据充分", missing: "缺少",
+  missing_facts: "缺少事实", missing_law_support: "缺少法律依据", low_coverage: "覆盖不足",
+  followup_queries: "补充检索词", stop_reason: "停止原因", checked_result_count: "检查条数",
+  covered_laws: "覆盖法律", covered_articles: "覆盖条文", followup_triggered: "触发补充检索",
+  first_followup_query: "首个补充检索词", rounds_used: "已用轮数",
+  retriever_calls: "检索调用次数", evidence_after_followup: "补充后的证据检查",
+  result_count: "结果数", reason: "原因", terminal_kind: "终止类型", kind: "类型",
+  llm_calls: "模型调用次数", failed_calls: "失败次数", prompt_chars: "Prompt 字符数",
+  model_call_ms: "模型调用耗时（ms）", prompt_tokens: "Prompt token",
+  completion_tokens: "Completion token", total_tokens: "总 token",
+  tokens_reported: "返回 token 用量", answer_mode: "回答模式", schema_valid: "结构合规",
+  adapter_source: "解析来源", claim_count: "论断数", parse_errors: "解析错误",
+  passed: "通过", replaced_with_fallback: "换成保守回答", failure_reasons: "失败原因",
+  draft_checks: "草稿校验明细", final_checks: "终稿校验明细",
+  final_answer_mode: "终稿回答模式", error: "错误", message: "信息", error_code: "错误码",
+  status_code: "HTTP 状态", cause_type: "原因类型", operation: "操作", retryable: "可重试",
+  top_k: "Top-K", max_rounds: "最大轮数", merge: "合并", plans: "检索计划", used: "已使用",
+};
+const CITE_GROUP = /\[(S\d+(?:\s*[,，、]\s*S\d+)*)\]/g;
+const state = {
+  options: null,
+  nodes: {},
+  selected: null,
+  errors: [],
+  finished: false,
+  controller: null,
+  runStarted: 0,
+  timer: null,
+  sourceIds: new Set(),
+};
+const $ = (id) => document.getElementById(id);
+
+function h(tag, attrs, ...children) {
+  const node = document.createElement(tag);
+  for (const [key, value] of Object.entries(attrs || {})) {
+    if (value === null || value === undefined || value === false) continue;
+    if (key === "class") node.className = value;
+    else if (key.startsWith("on")) node.addEventListener(key.slice(2), value);
+    else node.setAttribute(key, value === true ? "" : value);
+  }
+  for (const child of children.flat()) {
+    if (child === null || child === undefined || child === false) continue;
+    node.append(child instanceof Node ? child : document.createTextNode(String(child)));
+  }
+  return node;
+}
+const chip = (text, extra) => h("span", { class: extra ? `chip ${extra}` : "chip" }, text);
+const nodeLabel = (node) => (NODES.find((item) => item[0] === node) || [node, node])[1];
+
+function fmtMs(ms) {
+  if (ms === null || ms === undefined) return "—";
+  return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(2)} s`;
+}
+function fmtNum(value) {
+  if (Number.isInteger(value)) return String(value);
+  return Math.abs(value) >= 100 ? value.toFixed(1) : value.toFixed(4);
+}
+function translateItem(key, item) {
+  if (key === "failure_reasons" && FAILURE_LABELS[item]) return `${FAILURE_LABELS[item]}（${item}）`;
+  return String(item);
+}
+
+function renderValue(value, key) {
+  if (value === null || value === undefined) return h("span", { class: "unused" }, "—");
+  if (typeof value === "boolean") return h("span", { class: value ? "yes" : "no" }, value ? "是" : "否");
+  if (typeof value === "number") return h("span", { class: "mono" }, fmtNum(value));
+  if (typeof value === "string") return document.createTextNode(value);
+  if (Array.isArray(value)) {
+    if (!value.length) return h("span", { class: "unused" }, "无");
+    if (value.every((item) => item === null || typeof item !== "object")) {
+      return h("span", null, value.map((item) => chip(translateItem(key, item))));
+    }
+    return renderTable(value);
+  }
+  const size = Object.keys(value).length;
+  if (!size) return h("span", { class: "unused" }, "无");
+  const list = renderKv(value);
+  return size > 8 ? h("details", null, h("summary", null, `展开（${size} 项）`), list) : list;
+}
+function renderKv(object) {
+  const list = h("dl", { class: "kv" });
+  for (const [key, value] of Object.entries(object)) {
+    list.append(
+      h("dt", null, KEY_LABELS[key] || key),
+      h("dd", { class: key === "error" ? "kv-error" : null }, renderValue(value, key)),
+    );
+  }
+  return list;
+}
+function renderTable(rows) {
+  const keys = [...new Set(rows.flatMap((row) => Object.keys(row || {})))];
+  return h("table", { class: "mini" },
+    h("thead", null, h("tr", null, keys.map((key) => h("th", null, KEY_LABELS[key] || key)))),
+    h("tbody", null, rows.map((row) => h("tr", null,
+      keys.map((key) => h("td", null, renderValue(row ? row[key] : null, key)))))));
+}
+// -- options ---------------------------------------------------------
+
+async function loadOptions() {
+  let options;
+  try {
+    const response = await fetch("/api/options");
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    options = await response.json();
+  } catch (error) {
+    $("subtitle").textContent = "服务未就绪";
+    addError({ kind: "network", message: `无法读取服务配置 /api/options：${error.message}` });
+    return;
+  }
+  state.options = options;
+  const corpus = options.corpus || {};
+  const generator = options.models.generator;
+  $("subtitle").textContent =
+    `冻结语料 ${corpus.chunk_count ?? "?"} 个切块（${corpus.chunk_strategy || "?"}）` +
+    ` · 生成模型 ${generator.name}（${generator.provider}）`;
+  if (options.warnings && options.warnings.length) {
+    $("warnings").replaceChildren(
+      h("strong", null, "服务提示："),
+      h("ul", null, options.warnings.map((warning) => h("li", null, warning))),
+    );
+    $("warnings").hidden = false;
+  }
+  $("examples").replaceChildren(...options.examples.map((question) => h("button", {
+    type: "button",
+    onclick: () => { $("question").value = question; $("question").focus(); },
+  }, question)));
+
+  const select = $("retriever");
+  select.replaceChildren(...options.retrievers.map((item) => h("option", {
+    value: item.key,
+    disabled: !item.available,
+    title: item.reason || null,
+  }, item.available ? item.label : `${item.label}（不可用：${item.reason}）`)));
+  select.value = options.defaults.retriever;
+
+  const reranker = options.models.reranker;
+  const rerank = $("rerank");
+  rerank.checked = Boolean(options.defaults.rerank);
+  if (!reranker || !reranker.available) {
+    rerank.checked = false;
+    rerank.disabled = true;
+    $("rerank-note").textContent = reranker ? `不可用：${reranker.reason}` : "未配置重排模型";
+  } else {
+    $("rerank-note").textContent = `${reranker.name}，候选 ${reranker.candidate_top_n}`;
+  }
+  $("generate").checked = options.defaults.generate !== false;
+  $("generate-note").textContent = generator.name;
+  const topK = $("top-k");
+  topK.min = options.limits.top_k_min;
+  topK.max = options.limits.top_k_max;
+  topK.value = options.defaults.top_k;
+}
+
+// -- pipeline steps --------------------------------------------------
+
+function isWarn(node, detail) {
+  if (!detail) return false;
+  if (node === "verification") return detail.passed === false;
+  if (node === "evidence") return detail.sufficient === false;
+  return false;
+}
+function stateText(node, info, warn) {
+  if (warn && node === "verification") {
+    return info.detail.replaced_with_fallback ? "未通过，已换成保守回答" : "未通过";
+  }
+  if (warn && node === "evidence") return "不充分";
+  return STATUS_TEXT[info.status] || info.status;
+}
+function timeText(info) {
+  if (info.status === "running") return fmtMs(performance.now() - info.receivedAt);
+  if (info.status === "done" || info.status === "failed") return fmtMs(info.elapsed_ms);
+  return info.status === "skipped" ? "—" : "";
+}
+function renderSteps() {
+  $("steps").replaceChildren(...NODES.map(([node, label]) => {
+    const info = state.nodes[node] || { status: "pending" };
+    const warn = info.status === "done" && isWarn(node, info.detail);
+    const selected = state.selected === node;
+    return h("li", null, h("button", {
+      type: "button",
+      class: `step${warn ? " warn" : ""}${selected ? " selected" : ""}`,
+      "data-status": info.status,
+      "aria-expanded": selected ? "true" : "false",
+      title: "点击查看节点详情",
+      onclick: () => selectNode(node),
+    },
+    h("span", { class: "name" }, label),
+    h("span", { class: "state" }, stateText(node, info, warn)),
+    h("span", { class: "time", "data-time": node }, timeText(info))));
+  }));
+}
+function selectNode(node) {
+  state.selected = state.selected === node ? null : node;
+  renderSteps();
+  renderDetail();
+}
+function renderDetail() {
+  const panel = $("step-detail");
+  const node = state.selected;
+  if (!node) {
+    panel.hidden = true;
+    return;
+  }
+  panel.hidden = false;
+  const info = state.nodes[node];
+  if (!info) {
+    panel.replaceChildren(h("h3", null, nodeLabel(node)), h("p", { class: "empty-note" }, "尚未执行。"));
+    return;
+  }
+  const parts = [STATUS_TEXT[info.status] || info.status];
+  if (info.status === "done" || info.status === "failed") parts.push(`耗时 ${fmtMs(info.elapsed_ms)}`);
+  parts.push(`请求发出后 ${fmtMs(info.at_ms)}`);
+  const detail = info.detail || {};
+  panel.replaceChildren(
+    h("h3", null, `${nodeLabel(node)}（${parts.join(" · ")}）`),
+    Object.keys(detail).length ? renderKv(detail) : h("p", { class: "empty-note" }, "没有更多信息。"),
+  );
+}
+function tick() {
+  for (const [node, info] of Object.entries(state.nodes)) {
+    if (info.status !== "running") continue;
+    const cell = document.querySelector(`[data-time="${node}"]`);
+    if (cell) cell.textContent = fmtMs(performance.now() - info.receivedAt);
+  }
+  $("total-time").textContent = `已用 ${fmtMs(performance.now() - state.runStarted)}`;
+}
+function stopTimer() {
+  if (state.timer !== null) clearInterval(state.timer);
+  state.timer = null;
+}
+// -- errors ----------------------------------------------------------
+
+function addError(error) {
+  state.errors.push(error);
+  const box = $("errors");
+  const fatal = state.errors.some((item) => item.fatal);
+  box.replaceChildren(
+    h("strong", null, fatal ? "运行出错，本次运行已中止：" : "运行中出现错误："),
+    h("ul", null, state.errors.map((item) => {
+      const where = item.nodes && item.nodes.length ? ` · ${item.nodes.map(nodeLabel).join("、")}` : "";
+      const code = item.error_code ? `（${item.error_code}${item.status_code ? ` ${item.status_code}` : ""}）` : "";
+      return h("li", null, `【${ERROR_KIND_LABELS[item.kind] || item.kind || "错误"}${where}】${item.message}${code}`);
+    })),
+  );
+  box.hidden = false;
+}
+async function httpError(response) {
+  let message = `HTTP ${response.status}`;
+  try {
+    const body = await response.json();
+    if (body.error && body.error.message) {
+      message = body.error.message;
+    } else if (Array.isArray(body.detail)) {
+      message = "请求参数无效：" + body.detail
+        .map((item) => `${(item.loc || []).slice(1).join(".")} ${item.msg}`).join("；");
+    }
+  } catch (_ignored) {
+    // Keep the status line when the body is not JSON.
+  }
+  return { kind: "http", message, fatal: true };
+}
+
+// -- one run ---------------------------------------------------------
+
+function resetRun() {
+  state.nodes = {};
+  state.errors = [];
+  state.finished = false;
+  state.sourceIds = new Set();
+  $("errors").hidden = true;
+  $("errors").replaceChildren();
+  $("answer").className = "answer-text empty";
+  $("answer").textContent = "等待回答…";
+  $("answer-meta").textContent = "";
+  $("answer-notice").replaceChildren();
+  $("draft").replaceChildren();
+  $("sources").replaceChildren(h("p", { class: "empty-note" }, "等待检索…"));
+  $("sources-meta").textContent = "";
+  $("models").replaceChildren(h("p", { class: "empty-note" }, "运行结束后显示。"));
+  renderSteps();
+  renderDetail();
+  state.runStarted = performance.now();
+  stopTimer();
+  state.timer = setInterval(tick, 100);
+}
+function setBusy(busy) {
+  $("submit").disabled = busy;
+  $("submit").textContent = busy ? "运行中…" : "提问";
+}
+async function submitQuestion(event) {
+  event.preventDefault();
+  const question = $("question").value.trim();
+  if (!question) {
+    $("question").focus();
+    return;
+  }
+  if (state.controller) state.controller.abort();
+  const controller = new AbortController();
+  state.controller = controller;
+  resetRun();
+  setBusy(true);
+  const payload = {
+    question,
+    retriever: $("retriever").value,
+    rerank: $("rerank").checked,
+    generate: $("generate").checked,
+    top_k: Number($("top-k").value),
+  };
+  try {
+    const response = await fetch("/api/ask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      addError(await httpError(response));
+    } else {
+      await readEvents(response, handleEvent);
+      if (!state.finished) {
+        addError({ kind: "network", message: "事件流提前结束，没有收到最终结果。", fatal: true });
+      }
+    }
+  } catch (error) {
+    if (error.name !== "AbortError") {
+      addError({ kind: "network", message: `无法连接本地服务：${error.message}`, fatal: true });
+    }
+  } finally {
+    if (state.controller === controller) {
+      state.controller = null;
+      stopTimer();
+      setBusy(false);
+    }
+  }
+}
+async function readEvents(response, onEvent) {
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder("utf-8");
+  let buffer = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
+    let end;
+    while ((end = buffer.indexOf("\n\n")) >= 0) {
+      const block = buffer.slice(0, end);
+      buffer = buffer.slice(end + 2);
+      let type = "message";
+      const data = [];
+      for (const line of block.split("\n")) {
+        if (line.startsWith("event:")) type = line.slice(6).trim();
+        else if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""));
+      }
+      if (data.length) onEvent(type, JSON.parse(data.join("\n")));
+    }
+  }
+}
+function handleEvent(type, data) {
+  if (type === "node") {
+    state.nodes[data.node] = { ...data, receivedAt: performance.now() };
+    renderSteps();
+    if (state.selected === data.node) renderDetail();
+  } else if (type === "error") {
+    addError(data);
+    if (data.fatal) {
+      state.finished = true;
+      stopTimer();
+      renderTimings(data.timings);
+      $("answer").textContent = "本次运行出错，没有回答。";
+      $("sources").replaceChildren(h("p", { class: "empty-note" }, "本次运行出错，没有材料。"));
+      $("models").replaceChildren(timingsSection(data.timings));
+    }
+  } else if (type === "final") {
+    state.finished = true;
+    stopTimer();
+    state.sourceIds = new Set(data.sources.map((source) => source.id));
+    renderSources(data.sources);
+    renderAnswer(data);
+    renderModels(data);
+    renderTimings(data.timings);
+  }
+}
+
+// -- final result ----------------------------------------------------
+
+function linkify(text) {
+  const nodes = [];
+  let last = 0;
+  for (const match of text.matchAll(CITE_GROUP)) {
+    if (match.index > last) nodes.push(document.createTextNode(text.slice(last, match.index)));
+    nodes.push(document.createTextNode("["));
+    for (const part of match[1].split(/(\s*[,，、]\s*)/)) {
+      nodes.push(/^S\d+$/.test(part) ? citeLink(part) : document.createTextNode(part));
+    }
+    nodes.push(document.createTextNode("]"));
+    last = match.index + match[0].length;
+  }
+  if (last < text.length) nodes.push(document.createTextNode(text.slice(last)));
+  return nodes;
+}
+function citeLink(id) {
+  const known = state.sourceIds.has(id);
+  return h("a", {
+    class: known ? "cite" : "cite missing",
+    href: known ? `#src-${id}` : null,
+    title: known ? `跳到材料 ${id}` : "本次检索材料中没有这个编号",
+    onclick: (event) => {
+      event.preventDefault();
+      if (known) focusSource(id);
+    },
+  }, id);
+}
+function focusSource(id) {
+  const card = $(`src-${id}`);
+  if (!card) return;
+  const smooth = !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  card.scrollIntoView({ behavior: smooth ? "smooth" : "auto", block: "center" });
+  card.classList.remove("flash");
+  void card.offsetWidth;
+  card.classList.add("flash");
+  clearTimeout(card.flashTimer);
+  card.flashTimer = setTimeout(() => card.classList.remove("flash"), 2200);
+}
+function renderAnswer(data) {
+  const answer = $("answer");
+  answer.className = "answer-text";
+  answer.replaceChildren(...linkify(data.answer.text));
+  const meta = data.replaced_by_verifier
+    ? "模型草稿未通过校验，已换成保守回答"
+    : ANSWER_KIND_LABELS[data.answer.kind] || data.answer.kind;
+  $("answer-meta").textContent = `${meta} · 模式 ${data.answer.mode}`;
+  const notice = $("answer-notice");
+  notice.replaceChildren();
+  if (data.draft) {
+    const reasons = data.draft.failure_reasons.map((item) => translateItem("failure_reasons", item));
+    notice.append(h("div", { class: "notice warn", style: "margin-bottom:10px" },
+      h("strong", null, "校验未通过："),
+      `模型的原始草稿因 ${reasons.join("、") || "未通过必要检查"} 没有通过校验，下面显示的是保守回答。`));
+  } else if (data.answer.kind === "generation_error") {
+    notice.append(h("div", { class: "notice bad", style: "margin-bottom:10px" },
+      "生成模型调用失败，下面是降级回答；失败原因见页面上方的错误提示。"));
+  }
+  const draft = $("draft");
+  draft.replaceChildren();
+  if (data.draft) {
+    draft.append(h("details", { class: "draft" },
+      h("summary", null, "查看未通过校验的原始草稿"),
+      h("div", { class: "badge-unverified" }, `${data.draft.label}：仅供排查，不能当作回答`),
+      h("div", { class: "draft-text" }, ...linkify(data.draft.text))));
+  }
+}
+function scoreLabel(source) {
+  const name = source.retriever || "";
+  if (name.includes("+rerank")) return "重排分数";
+  if (name.startsWith("rrf")) return "融合分数";
+  if (name.startsWith("dense")) return "向量相似度";
+  return "BM25 分数";
+}
+function sourceCard(source) {
+  const badges = [chip(`${scoreLabel(source)} ${fmtNum(source.score)}`)];
+  if (source.base_rank !== undefined) badges.push(chip(`重排前 #${source.base_rank}`));
+  if (source.bm25_rank !== undefined) badges.push(chip(`BM25 #${source.bm25_rank}`));
+  if (source.dense_rank !== undefined) badges.push(chip(`向量 #${source.dense_rank}`));
+  if (source.exact_pin) badges.push(chip("精确条号置顶", "pin"));
+  const long = source.text.length > 150;
+  const text = h("p", { class: long ? "text clamp" : "text" }, source.text);
+  const toggle = long ? h("button", { type: "button", class: "toggle", "aria-expanded": "false" }, "展开全文") : null;
+  if (toggle) {
+    toggle.addEventListener("click", () => {
+      const expanded = !text.classList.toggle("clamp");
+      toggle.textContent = expanded ? "收起" : "展开全文";
+      toggle.setAttribute("aria-expanded", String(expanded));
+    });
+  }
+  const where = [
+    source.source_files.join("、"),
+    source.line_nos.length ? `行 ${source.line_nos.join("、")}` : null,
+    source.chunk_id,
+  ].filter(Boolean).join(" · ");
+  return h("article", { class: "source", id: `src-${source.id}` },
+    h("header", null,
+      h("span", { class: "sid" }, source.id),
+      h("span", { class: "title" }, source.label)),
+    h("div", { class: "badges" }, badges),
+    text,
+    toggle,
+    h("footer", null, where));
+}
+function renderSources(sources) {
+  $("sources-meta").textContent = sources.length ? `${sources.length} 条，按最终排名` : "";
+  $("sources").replaceChildren(...(sources.length
+    ? sources.map(sourceCard)
+    : [h("p", { class: "empty-note" }, "本次没有检索材料。")]));
+}
+function modelRow(label, model, text) {
+  const used = Boolean(model && model.used);
+  return h("tr", null, h("th", null, label), h("td", null, text, " ",
+    chip(used ? "本次使用" : "本次未使用", used ? null : "unused")));
+}
+function renderModels(data) {
+  const models = data.models;
+  const llm = (data.usage && data.usage.llm) || {};
+  const rerank = data.usage && data.usage.rerank;
+  const describe = (model) => (model ? `${model.name} · ${model.provider}` : "未配置");
+  const usageRows = [["生成调用", `${llm.calls || 0} 次${llm.failed_calls ? `（失败 ${llm.failed_calls} 次）` : ""}`]];
+  if (llm.calls && llm.token_usage_calls) {
+    usageRows.push(["Prompt token", llm.input_tokens], ["Completion token", llm.output_tokens],
+      ["总 token", llm.total_tokens]);
+  } else if (llm.calls) {
+    usageRows.push(["token", "provider 未返回 token 用量"]);
+  }
+  if (llm.calls) usageRows.push(["模型耗时", fmtMs(llm.latency_ms)]);
+  if (rerank) {
+    usageRows.push(["重排调用", `${rerank.rerank_calls} 次，${rerank.rerank_documents} 条候选，${fmtMs(rerank.rerank_total_ms)}`]);
+  }
+  $("models").replaceChildren(
+    h("div", { class: "models-section" }, h("h3", null, "模型清单"), h("table", { class: "models" }, h("tbody", null,
+      modelRow("检索器", models.retriever, `${models.retriever.label}（${models.retriever.name}）`),
+      modelRow("向量模型", models.embedding, describe(models.embedding)),
+      modelRow("重排模型", models.reranker, describe(models.reranker)),
+      modelRow("生成模型", models.generator, describe(models.generator))))),
+    h("div", { class: "models-section" }, h("h3", null, "用量"), h("table", { class: "models" }, h("tbody", null,
+      usageRows.map(([label, value]) => h("tr", null, h("th", null, label), h("td", { class: "mono" }, String(value))))))),
+    timingsSection(data.timings),
+  );
+}
+function timingsSection(timings) {
+  const nodes = (timings && timings.nodes) || {};
+  const rows = NODES.map(([node, label]) => {
+    const status = (state.nodes[node] || {}).status || "pending";
+    const value = node in nodes ? fmtMs(nodes[node]) : STATUS_TEXT[status];
+    return h("tr", null, h("th", null, label), h("td", { class: "mono" }, value));
+  });
+  if (timings) {
+    rows.push(h("tr", null, h("th", null, "首批检索结果"), h("td", { class: "mono" }, fmtMs(timings.first_results_ms))));
+    rows.push(h("tr", null, h("th", null, "总耗时"), h("td", { class: "mono" }, fmtMs(timings.total_ms))));
+  }
+  return h("div", { class: "models-section" }, h("h3", null, "节点耗时（服务端）"),
+    h("table", { class: "models" }, h("tbody", null, rows)));
+}
+function renderTimings(timings) {
+  if (!timings) return;
+  $("total-time").textContent =
+    `总耗时 ${fmtMs(timings.total_ms)} · 首批检索结果 ${fmtMs(timings.first_results_ms)}（服务端计时）`;
+}
+
+// -- start -----------------------------------------------------------
+
+$("ask-form").addEventListener("submit", submitQuestion);
+$("question").addEventListener("keydown", (event) => {
+  if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) $("ask-form").requestSubmit();
+});
+renderSteps();
+loadOptions();
+</script>
+</body>
+</html>
