@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from legal_rag.chat import DEFAULT_ANSWER_MAX_TOKENS, DEFAULT_ENABLE_THINKING
 from legal_rag.chunking import load_chunks
 from legal_rag.cli import (
     adaptive_options_from_args,
@@ -146,6 +147,28 @@ def generator_info(model: str) -> ModelInfo:
     return ModelInfo(key=model, name=model, provider="ollama")
 
 
+def answer_client_factory(
+    model: str, chat_options: dict[str, Any]
+) -> Callable[[], Any]:
+    """Build answer clients with the generation options the assistant uses.
+
+    The page injects its own client so it can count tokens per request; the
+    client must still answer with thinking off and a capped output, or every
+    answer pays for a hidden reasoning chain.
+    """
+
+    def factory() -> Any:
+        return build_completion_client(
+            model,
+            ollama_base_url=chat_options["ollama_base_url"],
+            request_timeout=chat_options["request_timeout"],
+            enable_thinking=DEFAULT_ENABLE_THINKING,
+            max_tokens=DEFAULT_ANSWER_MAX_TOKENS,
+        )
+
+    return factory
+
+
 def build_runtime(config_path: str | Path = "configs/default.yaml") -> WebRuntime:
     path = resolve_path(config_path)
     if not path.is_file():
@@ -273,12 +296,7 @@ def build_runtime(config_path: str | Path = "configs/default.yaml") -> WebRuntim
     if not live_model_calls_allowed():
         warnings.append("ALLOW_LIVE_MODEL_CALLS 未开启：向量检索、重排和生成都会被拦截")
 
-    def completion_client_factory() -> Any:
-        return build_completion_client(
-            model,
-            ollama_base_url=chat_options["ollama_base_url"],
-            request_timeout=chat_options["request_timeout"],
-        )
+    completion_client_factory = answer_client_factory(model, chat_options)
 
     configured_retriever = str(config["retrieval"].get("default", "bm25"))
     configured_retriever = {"hybrid": "rrf"}.get(
