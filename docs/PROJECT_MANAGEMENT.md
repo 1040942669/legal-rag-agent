@@ -73,6 +73,8 @@ uv sync --frozen --all-groups --extra service
 git switch -c fix/evaluation-swallowed-errors
 ```
 
+用 Orca 新建 worktree 时，分支会被自动命名为 `1040942669/<名字>`。这时把类型写在名字开头，例如 `1040942669/fix-evaluation-errors`、`1040942669/feat-web-ui`。
+
 ### 4.4 测试先行
 
 - P0 和 P1：先写一个能复现问题的回归测试，确认它在修复前失败。
