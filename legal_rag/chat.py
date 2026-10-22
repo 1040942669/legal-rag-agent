@@ -65,6 +65,14 @@ PRE_RETRIEVAL_REFUSAL_FLAGS = {
     "medical_financial_advice",
     "non_legal",
 }
+# Hybrid reasoning models on SiliconFlow think unless told otherwise.  On the
+# 2026-10-23 fixed-question benchmark thinking added about 1k reasoning tokens
+# and a 27 s median per answer; the answer only restates quoted evidence.
+DEFAULT_ENABLE_THINKING = False
+# Caps runaway output only: structured answers on the same benchmark used at
+# most 586 completion tokens, and a cut-off JSON object fails verification
+# instead of reaching the user.
+DEFAULT_ANSWER_MAX_TOKENS = 1024
 
 
 @dataclass(frozen=True)
@@ -362,6 +370,8 @@ class LegalChatAssistant:
         condense_with_llm: bool = False,
         verification_context: VerificationContext | None = None,
         completion_client: Any | None = None,
+        enable_thinking: bool | None = DEFAULT_ENABLE_THINKING,
+        max_tokens: int | None = DEFAULT_ANSWER_MAX_TOKENS,
     ) -> None:
         self.retriever = retriever
         self.model = model
@@ -393,6 +403,8 @@ class LegalChatAssistant:
                 model,
                 ollama_base_url=ollama_base_url,
                 request_timeout=request_timeout,
+                enable_thinking=enable_thinking,
+                max_tokens=max_tokens,
             )
         )
 
