@@ -21,6 +21,7 @@ artifacts/profile/
 artifacts/test_tmp/
 artifacts/experiments/
 artifacts/retrieval_audit/
+artifacts/web/
 artifacts/*.env
 reports/*
 !reports/RESULTS_SUMMARY.md
