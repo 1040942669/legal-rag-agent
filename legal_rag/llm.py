@@ -220,7 +220,12 @@ class OllamaClient:
 
 @dataclass
 class SiliconFlowClient:
-    """OpenAI-compatible chat completion client for SiliconFlow API models."""
+    """OpenAI-compatible chat completion client for SiliconFlow API models.
+
+    ``enable_thinking`` and ``max_tokens`` are sent only when set, so callers
+    such as the judge keep the provider defaults.  SiliconFlow's
+    ``max_tokens`` excludes chain-of-thought tokens.
+    """
 
     propagate_provider_errors: ClassVar[bool] = False
     hidden_retries_disabled: ClassVar[bool] = True
@@ -231,6 +236,8 @@ class SiliconFlowClient:
     request_timeout: float = 120
     temperature: float = 0.1
     _client: Any = field(default=None, repr=False, compare=False)
+    enable_thinking: bool | None = None
+    max_tokens: int | None = None
     usage: CompletionUsage = field(
         default_factory=CompletionUsage, init=False, repr=False, compare=False
     )
@@ -241,6 +248,26 @@ class SiliconFlowClient:
             provider="siliconflow",
             operation="completion",
         )
+        if self.enable_thinking is not None and not isinstance(
+            self.enable_thinking, bool
+        ):
+            raise ValueError("enable_thinking must be a boolean or None")
+        if self.max_tokens is not None and (
+            isinstance(self.max_tokens, bool)
+            or not isinstance(self.max_tokens, int)
+            or self.max_tokens < 1
+        ):
+            raise ValueError("max_tokens must be a positive integer or None")
+
+    def request_options(self) -> dict[str, Any]:
+        """Optional generation controls, omitted when left at provider defaults."""
+
+        options: dict[str, Any] = {}
+        if self.max_tokens is not None:
+            options["max_tokens"] = self.max_tokens
+        if self.enable_thinking is not None:
+            options["extra_body"] = {"enable_thinking": self.enable_thinking}
+        return options
 
     def complete(self, prompt: str) -> str:
         require_live_model_calls_allowed("SiliconFlow completion")
@@ -279,6 +306,7 @@ class SiliconFlowClient:
                 model=self.model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=self.temperature,
+                **self.request_options(),
             ),
             decode=decode,
         )
@@ -400,16 +428,21 @@ def build_completion_client(
     *,
     ollama_base_url: str = "http://localhost:11434",
     request_timeout: float = 180,
+    enable_thinking: bool | None = None,
+    max_tokens: int | None = None,
 ):
     """Build the right completion client for a model name.
 
     Model names prefixed with `siliconflow:` route to the SiliconFlow API,
-    everything else goes to the local Ollama server.
+    everything else goes to the local Ollama server.  `enable_thinking` and
+    `max_tokens` apply to SiliconFlow only; the local Ollama path ignores them.
     """
     if model.startswith(SILICONFLOW_MODEL_PREFIX):
         return SiliconFlowClient(
             model=model.removeprefix(SILICONFLOW_MODEL_PREFIX),
             request_timeout=request_timeout,
+            enable_thinking=enable_thinking,
+            max_tokens=max_tokens,
         )
     return OllamaClient(
         model=model, base_url=ollama_base_url, request_timeout=request_timeout

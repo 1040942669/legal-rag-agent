@@ -28,6 +28,8 @@ from .models import (
 
 CITATION_RE = re.compile(r"\[S([1-9]\d*)\]")
 SOURCE_ID_RE = re.compile(r"S([1-9]\d*)$")
+SENTENCE_DELIMITER_RE = re.compile(r"[。．｡！？!?…]+|(?<!\d)\.(?!\d)|\n+")
+CLAUSE_DELIMITER_RE = re.compile(r"[；;]+")
 MAX_STRUCTURED_ANSWER_CHARS = 65_536
 STANDARD_DISCLAIMER = "仅供课程学习和法律文本检索参考，不构成法律意见。"
 LEGAL_CLAIM_WORDS = ["应当", "不得", "可以", "必须", "承担", "规定", "禁止", "权利", "义务"]
@@ -921,22 +923,22 @@ def _claims_align_with_visible_text(
     *,
     disclaimer: str = "",
 ) -> bool:
-    """Check claim presence and citation locality, not semantic entailment."""
+    """Check claim presence and citation locality, not semantic entailment.
+
+    A claim must lie inside one sentence, and each of its sources must be
+    cited in a clause the claim itself covers.  Semicolons separate the items
+    of one enumerated provision, so a claim quoting several items may carry a
+    single citation after its last item; a citation in a clause the claim does
+    not reach never counts as local support.
+    """
 
     if not answer.claims:
         return True
     body = _without_exact_trailing_disclaimer(answer.answer_text, disclaimer)
-    segments = [
-        segment.strip()
-        for segment in re.split(r"[。．｡！？!?；;…]+|(?<!\d)\.(?!\d)|\n+", body)
-        if segment.strip()
-    ]
-    normalized_segments = [
-        (
-            _normalize_claim_text(segment, disclaimer=disclaimer),
-            {f"S{rank}" for rank in CITATION_RE.findall(segment)},
-        )
-        for segment in segments
+    sentences = [
+        _normalized_clauses(sentence, disclaimer=disclaimer)
+        for sentence in SENTENCE_DELIMITER_RE.split(body)
+        if sentence.strip()
     ]
     for claim in answer.claims:
         normalized_claim = _normalize_claim_text(claim.text, disclaimer=disclaimer)
@@ -944,12 +946,52 @@ def _claims_align_with_visible_text(
             return False
         required_sources = set(claim.source_ids)
         if not any(
-            normalized_claim in normalized_segment
-            and required_sources.issubset(local_sources)
-            for normalized_segment, local_sources in normalized_segments
+            _claim_cited_within_span(normalized_claim, required_sources, text, clauses)
+            for text, clauses in sentences
         ):
             return False
     return True
+
+
+def _normalized_clauses(
+    sentence: str,
+    *,
+    disclaimer: str = "",
+) -> tuple[str, list[tuple[int, int, set[str]]]]:
+    """Return the normalized sentence and each clause's span and citations."""
+
+    text = ""
+    clauses: list[tuple[int, int, set[str]]] = []
+    for clause in CLAUSE_DELIMITER_RE.split(sentence):
+        normalized = _normalize_claim_text(clause, disclaimer=disclaimer)
+        clauses.append(
+            (
+                len(text),
+                len(text) + len(normalized),
+                {f"S{rank}" for rank in CITATION_RE.findall(clause)},
+            )
+        )
+        text += normalized
+    return text, clauses
+
+
+def _claim_cited_within_span(
+    normalized_claim: str,
+    required_sources: set[str],
+    text: str,
+    clauses: list[tuple[int, int, set[str]]],
+) -> bool:
+    start = text.find(normalized_claim)
+    while start != -1:
+        end = start + len(normalized_claim)
+        local_sources: set[str] = set()
+        for clause_start, clause_end, sources in clauses:
+            if clause_start < end and clause_end > start:
+                local_sources |= sources
+        if required_sources.issubset(local_sources):
+            return True
+        start = text.find(normalized_claim, start + 1)
+    return False
 
 
 def _normalize_claim_text(text: str, *, disclaimer: str = "") -> str:

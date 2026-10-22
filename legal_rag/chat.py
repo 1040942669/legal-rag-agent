@@ -65,6 +65,14 @@ PRE_RETRIEVAL_REFUSAL_FLAGS = {
     "medical_financial_advice",
     "non_legal",
 }
+# Hybrid reasoning models on SiliconFlow think unless told otherwise.  On the
+# 2026-10-23 fixed-question benchmark thinking added about 1k reasoning tokens
+# and a 27 s median per answer; the answer only restates quoted evidence.
+DEFAULT_ENABLE_THINKING = False
+# Caps runaway output only: structured answers on the same benchmark used at
+# most 586 completion tokens, and a cut-off JSON object fails verification
+# instead of reaching the user.
+DEFAULT_ANSWER_MAX_TOKENS = 1024
 
 
 @dataclass(frozen=True)
@@ -362,6 +370,8 @@ class LegalChatAssistant:
         condense_with_llm: bool = False,
         verification_context: VerificationContext | None = None,
         completion_client: Any | None = None,
+        enable_thinking: bool | None = DEFAULT_ENABLE_THINKING,
+        max_tokens: int | None = DEFAULT_ANSWER_MAX_TOKENS,
     ) -> None:
         self.retriever = retriever
         self.model = model
@@ -393,6 +403,8 @@ class LegalChatAssistant:
                 model,
                 ollama_base_url=ollama_base_url,
                 request_timeout=request_timeout,
+                enable_thinking=enable_thinking,
+                max_tokens=max_tokens,
             )
         )
 
@@ -1225,31 +1237,28 @@ def build_qa_prompt(
     memory: str,
     results: list[SearchResult],
 ) -> str:
-    context_lines = []
-    for result in results:
-        chunk = result.chunk
-        law = "、".join(chunk.law_names) or "未知法律"
-        article = "、".join(chunk.article_numbers) or "未知条文"
-        context_lines.append(
-            f"[S{result.rank}] 来源: {law} {article}; 文件: {chunk.source_files[0] if chunk.source_files else ''}\n{chunk.text}"
-        )
-    context = "\n\n".join(context_lines)
+    # Each article goes in whole: the model must see the same evidence the
+    # verifier checks and the reader is shown.  There is no length budget.
+    context = "\n\n".join(
+        f"[S{result.rank}] 来源: {source_label(result)}\n{result.chunk.text}"
+        for result in results
+    )
     return f"""你是一个中国现行法律文本学习助手。
 你只能根据给定的检索资料回答。资料不足时必须拒答，不能编造法律依据。
 回答要求:
-1. 用中文回答。
-2. 先给结论，再列出依据。
-3. 必须引用资料编号，例如 [S1]。
-4. 具体案件策略、胜诉判断、个性化法律意见必须拒答。
-5. 末尾保留免责声明: {LEGAL_DISCLAIMER}
-6. 只输出一个 JSON 对象，不要输出 Markdown 代码围栏或额外说明。
-7. JSON 必须且只能包含以下字段:
-   - answer_text: 面向用户的完整字符串
+1. 用中文回答，先给结论，再列出依据；answer_text 简明扼要，一般不超过 400 字。
+2. 必须引用资料编号，例如 [S1]；只能使用下面检索资料里的编号，禁止生成不存在的编号。
+3. 具体案件策略、胜诉判断、个性化法律意见必须拒答。
+4. 不要自己写免责声明，系统会在回答末尾统一加上: {LEGAL_DISCLAIMER}
+5. 只输出一个 JSON 对象，不要输出 Markdown 代码围栏或额外说明。
+6. JSON 必须且只能包含以下字段，并按这个顺序输出:
    - answer_mode: evidence_answer / insufficient_evidence / needs_clarification / out_of_scope 之一
-   - claims: 数组；每项只能包含 claim_id、text、source_ids
-   - limitations: 字符串数组
+   - claims: 数组；每项只能包含 claim_id、text、source_ids；text 是一句有资料支撑的陈述，不带 [S1] 这类编号，中间不含句号或换行
+   - answer_text: 面向用户的完整字符串：先用一句话给出结论，再把每条 claim 的 text 一字不差地抄进来，每条后面紧跟它的 source_ids 编号再接句号
+   - limitations: 字符串数组，没有就写 []
    - clarification_question: 字符串或 null
-8. 每条需要证据支撑的 claim 都要绑定本次资料中的 source_ids，禁止生成不存在的编号。
+7. 程序会逐条核对：每条 claim 的 text 必须原样出现在 answer_text 中，并且后面紧跟它的全部编号，例如 claim 为“劳动者有下列情形之一的，用人单位可以解除劳动合同”时，answer_text 中写“劳动者有下列情形之一的，用人单位可以解除劳动合同 [S1]。”。任何一条不满足，整个回答都会被拒绝。
+8. 资料不足以回答时，answer_mode 填 insufficient_evidence，claims 填 []，answer_text 用一句话说明缺少什么。
 9. 不要在 JSON 中填写 snapshot、用户、权限或其他系统字段。
 
 最近对话:
@@ -1346,11 +1355,17 @@ def expected_limited_answer_mode(check: EvidenceCheck) -> str:
     return "needs_clarification" if check.missing_facts else "insufficient_evidence"
 
 
+def source_label(result: SearchResult) -> str:
+    chunk = result.chunk
+    law = "、".join(chunk.law_names) or "未知法律"
+    article = "、".join(chunk.article_numbers) or "未知条文"
+    return f"{law} {article}"
+
+
 def render_retrieval_only_answer(results: list[SearchResult]) -> str:
-    snippets = []
-    for result in results:
-        chunk = result.chunk
-        snippets.append(f"[S{result.rank}] {chunk.text[:400]}")
+    # Whole articles only: a cut after N characters can stop mid-item and
+    # read as if the provision ended there.
+    snippets = [f"[S{result.rank}] {result.chunk.text}" for result in results]
     return "检索到以下可能相关的法律依据：\n\n" + "\n\n".join(snippets)
 
 
