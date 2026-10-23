@@ -203,6 +203,18 @@ uv run python -m legal_rag.cli evaluate `
 uv run python -m legal_rag.cli chat --chunk-strategy article --retriever bm25 --no-generate
 ```
 
+### 本地网页演示
+
+需要 `service` 可选依赖、上节准备好的语料与索引；要生成回答，还需要 `.env` 里的 `SILICONFLOW_API_KEY`。在仓库根目录启动：
+
+```powershell
+uv sync --frozen --extra service
+uv run legal-rag-web
+# 浏览器打开 http://127.0.0.1:8765/
+```
+
+页面逐节点显示问题分析、检索、重排、证据检查、补充检索、生成、校验的状态与耗时，列出检索到的条文全文、分数和重排前后的排名，以及本次用到的检索器、向量模型、重排模型、生成模型和 token 用量。服务只在自己的进程内打开 `ALLOW_LIVE_MODEL_CALLS`，每次运行记录到被 Git 忽略的 `artifacts/web/runs.jsonl`。设计与验收目标见[演示线优化方案](docs/WEB_DEMO_PLAN.md)。
+
 ### Dense、重排与生成（SiliconFlow）
 
 这些命令都会调用 SiliconFlow API。复制环境变量模板并填写 `SILICONFLOW_API_KEY`；模型调用默认关闭，只在当前终端临时打开：
